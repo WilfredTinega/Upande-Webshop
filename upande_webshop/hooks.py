@@ -245,7 +245,6 @@ app_license = "mit"
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
-# In hooks.py of your app
 fixtures = [
     {"dt": "Web Page"},
     {"dt": "Web Form"},
