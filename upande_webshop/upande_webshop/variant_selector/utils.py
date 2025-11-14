@@ -20,7 +20,7 @@ def get_item_codes_by_attributes(attribute_filters, template_item_code=None):
             continue
 
         wheres = ["( attribute = %s and attribute_value = %s )" for _ in attribute_values]
-        query_values = [val for pair in zip([attribute]*len(attribute_values), attribute_values) for val in pair]
+        query_values = [val for pair in zip([attribute]*len(attribute_values), attribute_values, strict=True) for val in pair]
 
         attribute_query = " or ".join(wheres)
 

@@ -1,6 +1,4 @@
 import json
-from typing import Union
-
 import frappe
 
 from upande_webshop.upande_webshop.doctype.website_item.website_item import make_website_item
@@ -47,10 +45,10 @@ def generate_fields_to_edit() -> list:
     return fields
 
 
-def make_new_website_item(item: str) -> Union[str, None]:
+def make_new_website_item(item: str) -> str | None:
     try:
         doc = frappe.get_doc("Item", item)
-        web_item = make_website_item(doc)  # returns [website_item.name, item_name]
+        web_item = make_website_item(doc)
         return web_item[0]
     except Exception:
         doc.log_error("Website Item creation failed")

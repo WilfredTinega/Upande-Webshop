@@ -87,7 +87,7 @@ class ItemVariantsCacheManager:
 			item_attribute_value_map.setdefault(item_code, {})[attribute] = attribute_value
 
 		optional_attributes = set()
-		for item_code, attr_dict in item_attribute_value_map.items():
+		for _item_code, attr_dict in item_attribute_value_map.items():
 			for attribute in attributes:
 				if attribute not in attr_dict:
 					optional_attributes.add(attribute)
