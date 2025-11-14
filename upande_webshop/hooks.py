@@ -1,14 +1,17 @@
+from . import __version__ as _version
+
 app_name = "upande_webshop"
 app_title = "Upande Webshop"
 app_publisher = "Upande LTD"
 app_description = "Upande Webshop"
 app_email = "info@upande.com"
 app_license = "mit"
+app_version = _version
 
 # Apps
 # ------------------
 
-# required_apps = []
+# required_apps = ["payments", "erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -30,7 +33,9 @@ app_license = "mit"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/upande_webshop/css/upande_webshop.css"
+web_include_css = "webshop-web.bundle.css"
 # web_include_js = "/assets/upande_webshop/js/upande_webshop.js"
+web_include_js = "web.bundle.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "upande_webshop/public/scss/website"
@@ -44,6 +49,11 @@ app_license = "mit"
 
 # include js in doctype views
 # doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+    "Item": "public/js/override/item.js",
+    "Homepage": "public/js/override/homepage.js",
+}
+
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
@@ -68,7 +78,8 @@ app_license = "mit"
 # ----------
 
 # automatically create page for each record of this doctype
-# website_generators = ["Web Page"]
+website_generators = ["Website Item", "Item Group"]
+
 
 # automatically load and sync documents of this doctype from downstream apps
 # importable_doctypes = [doctype_1]
@@ -87,6 +98,24 @@ app_license = "mit"
 
 # before_install = "upande_webshop.install.before_install"
 # after_install = "upande_webshop.install.after_install"
+after_install = "upande_webshop.setup.install.after_install"
+on_logout = "upande_webshop.upande_webshop.shopping_cart.utils.clear_cart_count"
+
+on_session_creation = [
+    "upande_webshop.upande_webshop.utils.portal.update_debtors_account",
+    "upande_webshop.upande_webshop.shopping_cart.utils.set_cart_count",
+]
+
+update_website_context = [
+    "upande_webshop.upande_webshop.shopping_cart.utils.update_website_context",
+]
+
+override_doctype_class = {
+    "Payment Request": "upande_webshop.upande_webshop.doctype.override_doctype.payment_request.PaymentRequest",
+    "Item Group": "upande_webshop.upande_webshop.doctype.override_doctype.item_group.WebshopItemGroup",
+    "Item": "upande_webshop.upande_webshop.doctype.override_doctype.item.WebshopItem",
+}
+
 
 # Uninstallation
 # ------------
@@ -139,6 +168,46 @@ app_license = "mit"
 # 		"on_trash": "method"
 # 	}
 # }
+
+doc_events = {
+    "Item": {
+        "on_update": [
+            "upande_webshop.upande_webshop.crud_events.item.update_website_item.execute",
+            "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
+        ],
+        "before_rename": [
+            "upande_webshop.upande_webshop.crud_events.item.validate_duplicate_website_item.execute",
+        ],
+        "after_rename": [
+            "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
+        ],
+    },
+    "Sales Taxes and Charges Template": {
+        "on_update": [
+            "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.validate_cart_settings",
+        ],
+    },
+    "Quotation": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.quotation.validate_shopping_cart_items.execute",
+        ],
+    },
+    "Price List": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.price_list.check_impact_on_cart.execute"
+        ],
+    },
+    "Tax Rule": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.tax_rule.validate_use_for_cart.execute",
+        ],
+    },
+}
+
+has_website_permission = {
+    "Website Item": "upande_webshop.upande_webshop.doctype.website_item.website_item.has_website_permission_for_website_item",
+    "Item Group": "upande_webshop.upande_webshop.doctype.website_item.website_item.has_website_permission_for_item_group"
+}
 
 # Scheduled Tasks
 # ---------------
@@ -244,6 +313,11 @@ app_license = "mit"
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
+
+# Translation
+# ------------
+# List of apps whose translatable strings should be excluded from this app's translations.
+# ignore_translatable_strings_from = []
 
 fixtures = [
 	{
