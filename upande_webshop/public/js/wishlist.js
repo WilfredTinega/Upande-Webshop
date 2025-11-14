@@ -1,3 +1,5 @@
+/* global webshop, __ */
+
 frappe.provide("upande_webshop.upande_webshop.wishlist");
 var wishlist = webshop.webshop.wishlist;
 

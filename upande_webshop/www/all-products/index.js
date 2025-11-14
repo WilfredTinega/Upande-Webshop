@@ -1,3 +1,5 @@
+/* global webshop, __ */
+
 $(() => {
 	class ProductListing {
 		constructor() {

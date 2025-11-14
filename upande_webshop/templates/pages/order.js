@@ -1,5 +1,4 @@
-// Copyright (c) 2018, Frappe Technologies Pvt. Ltd. and contributors
-// For license information, please see license.txt
+/* global webshop, __ */
 
 frappe.ready(() => {
 	var loyalty_points_input = document.getElementById("loyalty-point-to-redeem");

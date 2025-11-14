@@ -1,3 +1,4 @@
+/* global webshop, __ */
 webshop.ProductView =  class {
 	/* Options:
 		- View Type

@@ -1,3 +1,4 @@
+/* global webshop, __ */
 webshop.ProductList = class {
 	/* Options:
 		- items: Items

@@ -1,3 +1,4 @@
+/* global webshop, __ */
 webshop.ProductSearch = class {
 	constructor(opts) {
 		/* Options: search_box_id (for custom search box) */

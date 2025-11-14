@@ -1,3 +1,4 @@
+/* global webshop, __ */
 class ItemConfigure {
 	constructor(item_code, item_name) {
 		this.item_code = item_code;

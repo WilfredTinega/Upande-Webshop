@@ -1,3 +1,4 @@
+/* global webshop, __ */
 webshop.ProductGrid = class {
 	/* Options:
 		- items: Items

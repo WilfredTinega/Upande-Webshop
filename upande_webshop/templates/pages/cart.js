@@ -1,7 +1,5 @@
-// Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-// License: GNU General Public License v3. See license.txt
+/* global webshop, __ */
 
-// JS exclusive to /cart page
 frappe.provide("upande_webshop.upande_webshop.shopping_cart");
 var shopping_cart = webshop.webshop.shopping_cart;
 
