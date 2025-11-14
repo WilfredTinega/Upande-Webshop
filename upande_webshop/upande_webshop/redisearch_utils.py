@@ -67,40 +67,39 @@ def make_key(key):
 
 @if_redisearch_enabled
 def create_website_items_index():
-	"Creates Index Definition."
+    "Creates Index Definition."
 
-	redis = frappe.cache()
-	index = redis.ft(WEBSITE_ITEM_INDEX)
+    redis = frappe.cache()
+    index = redis.ft(WEBSITE_ITEM_INDEX)
 
-	try:
-		index.dropindex()  # drop if already exists
-	except ResponseError:
-		# will most likely raise a ResponseError if index does not exist
-		# ignore and create index
-		pass
-	except Exception:
-		raise_redisearch_error()
+    try:
+        index.dropindex()  # drop if already exists
+    except ResponseError:
+        # will most likely raise a ResponseError if index does not exist
+        # ignore and create index
+        pass
+    except Exception:
+        raise_redisearch_error()
 
-	idx_def = IndexDefinition([make_key(WEBSITE_ITEM_KEY_PREFIX)])
+    idx_def = IndexDefinition([make_key(WEBSITE_ITEM_KEY_PREFIX)])
 
-	# Index fields mentioned in webshop settings
-	idx_fields = frappe.db.get_single_value("Webshop Settings", "search_index_fields")
-	idx_fields = idx_fields.split(",") if idx_fields else []
+    # Index fields mentioned in webshop settings
+    idx_fields = frappe.db.get_single_value("Webshop Settings", "search_index_fields")
+    idx_fields = idx_fields.split(",") if idx_fields else []
 
-	if "web_item_name" in idx_fields:
-		idx_fields.remove("web_item_name")
+    if "web_item_name" in idx_fields:
+        idx_fields.remove("web_item_name")
 
-	idx_fields = [to_search_field(f) for f in idx_fields]
+    idx_fields = [to_search_field(f) for f in idx_fields]
 
-	# TODO: sortable?
-	index.create_index(
-		[TextField("web_item_name", sortable=True)] + idx_fields,
-		definition=idx_def,
-	)
+    # Use iterable unpacking instead of concatenation
+    index.create_index(
+        [*([TextField("web_item_name", sortable=True)]), *idx_fields],
+        definition=idx_def,
+    )
 
-	reindex_all_web_items()
-	define_autocomplete_dictionary()
-
+    reindex_all_web_items()
+    define_autocomplete_dictionary()
 
 def to_search_field(field):
 	if field == "tags":

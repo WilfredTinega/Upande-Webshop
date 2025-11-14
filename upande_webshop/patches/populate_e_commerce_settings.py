@@ -69,3 +69,4 @@ def execute():
 			{"parenttype": settings_doctype, "parent": settings_doctype},
 			update_modified=False,
 		)
+		

@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-# Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and contributors
-# For license information, please see license.txt
-
 import json
 from typing import TYPE_CHECKING
 
@@ -217,7 +213,7 @@ class WebsiteItem(WebsiteGenerator):
 						}
 					).save()
 
-				except IOError:
+				except OSError:
 					self.website_image = None
 
 			if file_doc:

@@ -150,7 +150,8 @@ class WebshopSettings(Document):
 		tax_master = self.get_name_from_territory(
 			billing_territory, "sales_taxes_and_charges_masters", "sales_taxes_and_charges_master"
 		)
-		return tax_master and tax_master[0] or None
+		# Use Pythonic if-else instead of and/or chaining
+		return tax_master[0] if tax_master else None
 
 	def get_shipping_rules(self, shipping_territory):
 		return self.get_name_from_territory(shipping_territory, "shipping_rules", "shipping_rule")

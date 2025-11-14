@@ -86,3 +86,4 @@ def execute():
 			frappe.db.commit()
 
 		frappe.utils.update_progress_bar("Creating Website Items", count, total_count)
+

@@ -15,3 +15,4 @@ def execute():
 
 	homepage.flags.ignore_mandatory = True
 	homepage.save()
+	
