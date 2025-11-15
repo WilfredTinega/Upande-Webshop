@@ -14,6 +14,7 @@ app_version = _version
 # required_apps = ["payments", "erpnext"]
 
 # Each item in the list will be shown as an app in the apps page
+<<<<<<< Updated upstream
 # add_to_apps_screen = [
 # 	{
 # 		"name": "upande_webshop",
@@ -23,6 +24,17 @@ app_version = _version
 # 		"has_permission": "upande_webshop.api.permission.has_app_permission"
 # 	}
 # ]
+=======
+add_to_apps_screen = [
+	{
+		"name": "upande_webshop",
+		"logo": "/assets/upande_webshop/images/UpandeLogo.png",
+		"title": "Upande Webshop",
+		"route": "/webshop",
+		# "has_permission": "upande_webshop.api.permission.has_app_permission"
+	}
+]
+>>>>>>> Stashed changes
 
 # Includes in <head>
 # ------------------
