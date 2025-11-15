@@ -11,15 +11,15 @@ app_license = "mit"
 required_apps = ["webshop"]
 
 # Each item in the list will be shown as an app in the apps page
-# add_to_apps_screen = [
-# 	{
-# 		"name": "upande_webshop",
-# 		"logo": "/assets/upande_webshop/logo.png",
-# 		"title": "Upande Webshop",
-# 		"route": "/upande_webshop",
-# 		# "has_permission": "upande_webshop.api.permission.has_app_permission"
-# 	}
-# ]
+add_to_apps_screen = [
+	{
+		"name": "upande_webshop",
+		"logo": "/assets/upande_webshop/images/UpandeLogo.png",
+		"title": "Upande Webshop",
+		"route": "/upande_webshop",
+		# "has_permission": "upande_webshop.api.permission.has_app_permission"
+	}
+]
 
 # Includes in <head>
 # ------------------
