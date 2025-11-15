@@ -87,9 +87,19 @@ jobs:
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL character_set_server = 'utf8mb4'"
           mariadb --host 127.0.0.1 --port 3306 -u root -proot -e "SET GLOBAL collation_server = 'utf8mb4_unicode_ci'"
 
+      - name: Get webshop app
+        working-directory: /home/runner/frappe-bench
+        run: |
+          # Get the actual webshop app from Frappe repository
+          bench get-app webshop https://github.com/frappe/webshop.git
+
       - name: Install
         working-directory: /home/runner/frappe-bench
         run: |
+          # Install webshop first
+          bench --site test_site install-app webshop
+          
+          # Install upande_webshop from current directory
           bench get-app upande_webshop $GITHUB_WORKSPACE
           bench setup requirements --dev
           bench new-site --db-root-password root --admin-password admin test_site
@@ -105,3 +115,4 @@ jobs:
           bench --site test_site run-tests --app upande_webshop
         env:
           TYPE: server
+          
