@@ -1,0 +1,28 @@
+[
+ {
+  "background_color": "",
+  "button_gradients": 1,
+  "button_rounded_corners": 1,
+  "button_shadows": 1,
+  "custom": 0,
+  "custom_overrides": "",
+  "custom_scss": null,
+  "dark_color": "",
+  "docstatus": 0,
+  "doctype": "Website Theme",
+  "font_properties": "wght:400;500;600;700;800",
+  "font_size": null,
+  "google_font": null,
+  "ignored_apps": [],
+  "js": null,
+  "light_color": "",
+  "modified": "2025-11-15 12:41:56.486796",
+  "module": "Website",
+  "name": "Standard",
+  "primary_color": "",
+  "text_color": "",
+  "theme": "Standard",
+  "theme_scss": "$enable-shadows: true;\n$enable-gradients: true;\n$enable-rounded: true;\n\n// Bootstrap Variable Overrides\n\n\n// Import themes from installed apps\n@import \"frappe/public/scss/website.bundle\";\n@import \"erpnext/public/scss/website\";\n\n\n\n// Custom Theme\n\n\n:root {\n\t}\n",
+  "theme_url": "/files/website_theme/standard_style.css"
+ }
+]

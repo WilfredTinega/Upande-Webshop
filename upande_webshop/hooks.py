@@ -8,7 +8,7 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = []
+required_apps = ["webshop"]
 
 # Each item in the list will be shown as an app in the apps page
 # add_to_apps_screen = [
@@ -17,7 +17,7 @@ app_license = "mit"
 # 		"logo": "/assets/upande_webshop/logo.png",
 # 		"title": "Upande Webshop",
 # 		"route": "/upande_webshop",
-# 		"has_permission": "upande_webshop.api.permission.has_app_permission"
+# 		# "has_permission": "upande_webshop.api.permission.has_app_permission"
 # 	}
 # ]
 
@@ -249,4 +249,67 @@ app_license = "mit"
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
+
+
+
+fixtures = [
+    # Doctype definitions
+    {
+        "dt": "DocType",
+        "filters": [
+            [
+                "name",
+                "in",
+                [
+                    "Web Page",
+                    "Web Form",
+                    "Website Sidebar", 
+                    "Website Slideshow",
+                    "Website Route Meta",
+                    "Website Settings",
+                    "Website Theme",
+                    "Website Script",
+                    "Portal Settings",
+                ],
+            ]
+        ],
+    },
+    # Doctype records/data
+    {
+        "dt": "Web Page",
+        "filters": []  # Empty filter means all records
+    },
+    {
+        "dt": "Web Form", 
+        "filters": []
+    },
+    {
+        "dt": "Website Sidebar",
+        "filters": []
+    },
+    {
+        "dt": "Website Slideshow", 
+        "filters": []
+    },
+    {
+        "dt": "Website Route Meta",
+        "filters": []
+    },
+    {
+        "dt": "Website Settings", 
+        "filters": []
+    },
+    {
+        "dt": "Website Theme",
+        "filters": []
+    },
+    {
+        "dt": "Website Script",
+        "filters": []
+    },
+    {
+        "dt": "Portal Settings",
+        "filters": []
+    }
+]
 

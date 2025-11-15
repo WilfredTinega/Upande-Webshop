@@ -1,0 +1,60 @@
+[
+ {
+  "docstatus": 0,
+  "doctype": "Website Slideshow",
+  "header": null,
+  "modified": "2025-11-15 16:22:50.131346",
+  "name": "Webshop Slides",
+  "slideshow_items": [
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-yelloween-768x674.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-white-ohara.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-superstition.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-dpray-roses-julietta-honey.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-madam-cres.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-dpray-roses-julieta-cres.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-proud.png",
+    "url": null
+   },
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/kikwetu-flowers-confidential-768x674.png",
+    "url": null
+   }
+  ],
+  "slideshow_name": "Webshop Slides"
+ }
+]
