@@ -274,10 +274,9 @@ fixtures = [
             ]
         ],
     },
-    # Doctype records/data
     {
         "dt": "Web Page",
-        "filters": []  # Empty filter means all records
+        "filters": []
     },
     {
         "dt": "Web Form", 
