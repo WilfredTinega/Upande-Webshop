@@ -8,7 +8,7 @@ app_license = "mit"
 # Apps
 # ------------------
 
-# required_apps = ["erpnext","payments","webshop"]
+required_apps = ["erpnext","payments","webshop"]
 
 # Each item in the list will be shown as an app in the apps page
 add_to_apps_screen = [
