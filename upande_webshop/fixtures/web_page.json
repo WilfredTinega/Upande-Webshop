@@ -20,7 +20,7 @@
   "meta_description": null,
   "meta_image": null,
   "meta_title": null,
-  "modified": "2025-11-15 15:56:11.576382",
+  "modified": "2025-11-16 10:04:08.224424",
   "module": "Upande Webshop",
   "name": "webshop",
   "page_blocks": [
@@ -37,7 +37,7 @@
     "hide_block": 0,
     "section_id": null,
     "web_template": "Hero Slider",
-    "web_template_values": "{\"slider_name\":\"Hero Slider\",\"show_indicators\":1,\"show_controls\":0,\"slide_1_image\":\"/files/athena.png\",\"slide_1_primary_action_label\":\"Shop Now\",\"slide_1_primary_action\":\"all-products\",\"slide_1_content_align\":\"Left\",\"slide_1_theme\":\"Dark\",\"slide_2_image\":\"/files/deep-purple.png\",\"slide_2_primary_action_label\":\"Explore More\",\"slide_2_primary_action\":\"shop-by-category\",\"slide_2_content_align\":\"Left\",\"slide_2_theme\":\"Light\",\"slide_3_image\":\"/files/ever-red.png\",\"slide_3_primary_action_label\":\"More\",\"slide_3_primary_action\":\"standard-roses/athena\"}"
+    "web_template_values": "{\"slider_name\":\"Hero Slider\",\"show_indicators\":1,\"show_controls\":0,\"slide_1_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-athena.webp\",\"slide_1_primary_action_label\":\"Shop Now\",\"slide_1_primary_action\":\"all-products\",\"slide_1_content_align\":\"Left\",\"slide_1_theme\":\"Dark\",\"slide_2_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-goldfinch.webp\",\"slide_2_primary_action_label\":\"Explore More\",\"slide_2_primary_action\":\"shop-by-category\",\"slide_2_content_align\":\"Left\",\"slide_2_theme\":\"Light\",\"slide_3_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-royal-magicc-1.webp\",\"slide_3_primary_action_label\":\"More\",\"slide_3_primary_action\":\"standard-roses/athena\",\"slide_4_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-julieta-cres.webp\",\"slide_5_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-appricott.webp\"}"
    },
    {
     "add_background_image": 0,
@@ -66,4 +66,3 @@
   "website_sidebar": null
  }
 ]
-
