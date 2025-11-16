@@ -261,7 +261,6 @@ fixtures = [
 				"in",
 				[
 					"Web Page",
-					"Web Form",
 					"Website Sidebar",
 					"Website Slideshow",
 					"Website Route Meta",
