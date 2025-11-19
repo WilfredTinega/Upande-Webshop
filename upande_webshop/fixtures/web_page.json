@@ -20,7 +20,7 @@
   "meta_description": null,
   "meta_image": null,
   "meta_title": null,
-  "modified": "2025-11-16 10:04:08.224424",
+  "modified": "2025-11-19 11:56:23.371467",
   "module": "Upande Webshop",
   "name": "webshop",
   "page_blocks": [
@@ -37,7 +37,7 @@
     "hide_block": 0,
     "section_id": null,
     "web_template": "Hero Slider",
-    "web_template_values": "{\"slider_name\":\"Hero Slider\",\"show_indicators\":1,\"show_controls\":0,\"slide_1_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-athena.webp\",\"slide_1_primary_action_label\":\"Shop Now\",\"slide_1_primary_action\":\"all-products\",\"slide_1_content_align\":\"Left\",\"slide_1_theme\":\"Dark\",\"slide_2_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-goldfinch.webp\",\"slide_2_primary_action_label\":\"Explore More\",\"slide_2_primary_action\":\"shop-by-category\",\"slide_2_content_align\":\"Left\",\"slide_2_theme\":\"Light\",\"slide_3_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-royal-magicc-1.webp\",\"slide_3_primary_action_label\":\"More\",\"slide_3_primary_action\":\"standard-roses/athena\",\"slide_4_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-julieta-cres.webp\",\"slide_5_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-appricott.webp\"}"
+    "web_template_values": "{\"slider_name\":\"Hero Slider\",\"show_indicators\":1,\"show_controls\":0,\"slide_1_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-athena.webp\",\"slide_1_title\":\"Fresh Kenyan Roses\",\"slide_1_subtitle\":\"Premium quality roses grown sustainably.\",\"slide_1_primary_action_label\":\"Shop Now\",\"slide_1_primary_action\":\"all-products\",\"slide_1_content_align\":\"Centre\",\"slide_1_theme\":\"Dark\",\"slide_2_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-goldfinch.webp\",\"slide_2_title\":\"Standard Roses\",\"slide_2_subtitle\":\"Elegant white roses with premium Kenyan quality.\",\"slide_2_primary_action_label\":\"Explore Variety\",\"slide_2_primary_action\":\"shop-by-category\",\"slide_2_content_align\":\"Left\",\"slide_2_theme\":\"Dark\",\"slide_3_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-royal-magicc-1.webp\",\"slide_3_title\":\"Spray Roses\",\"slide_3_subtitle\":\"Deep red roses, perfect for luxury bouquets.\",\"slide_3_primary_action_label\":\"View Details\",\"slide_3_primary_action\":\"standard-roses/snowstorm-xkpup\",\"slide_3_theme\":\"Dark\",\"slide_4_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-julieta-cres.webp\",\"slide_4_subtitle\":\"Standard Roses: Tall, single-stem roses with a rounded bloom head, ideal for elegant and structured arrangements.\",\"slide_4_theme\":\"Dark\",\"slide_5_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-appricott.webp\",\"slide_5_subtitle\":\"Splay Roses: Wide-spreading roses with outward-arching stems, perfect for full, natural, and voluminous bouquets.\",\"slide_5_theme\":\"Dark\"}"
    },
    {
     "add_background_image": 0,
