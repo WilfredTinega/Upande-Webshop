@@ -1,0 +1,158 @@
+{
+ "app": "upande_webshop",
+ "charts": [],
+ "content": "[{\"id\":\"hQxbR1RYqz\",\"type\":\"card\",\"data\":{\"card_name\":\"Shortcuts\",\"col\":5}},{\"id\":\"QezGmPdrPg\",\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":5}},{\"id\":\"0ynahrwc1Y\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"4msh4qyvP1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2-Z0G3AqQL\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Published Items\",\"col\":12}},{\"id\":\"8Z-deooKfk\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2kOIHfGTOH\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"vJ4Xtm0Ojy\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop\",\"col\":3}},{\"id\":\"lLr4v7rg-R\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Products\",\"col\":3}},{\"id\":\"tYl2IM-K_e\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop Cart\",\"col\":3}},{\"id\":\"Mnsd1o6t7b\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Quotations\",\"col\":3}},{\"id\":\"a38S7G1sXR\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"9YC5xiD1dO\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+ "creation": "2025-11-20 20:43:34.240751",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "up",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Upande Webshop",
+ "link_type": "DocType",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Shortcuts",
+   "link_count": 3,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Item",
+   "link_count": 0,
+   "link_to": "Item",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Website Items",
+   "link_count": 0,
+   "link_to": "Website Item",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Webshop Settings",
+   "link_count": 0,
+   "link_to": "Webshop Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Quick Links",
+   "link_count": 4,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Price List",
+   "link_count": 0,
+   "link_to": "Price List",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Currency Exchange",
+   "link_count": 0,
+   "link_to": "Currency Exchange",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Stock Entry",
+   "link_count": 0,
+   "link_to": "Stock Entry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Warehouse",
+   "link_count": 0,
+   "link_to": "Warehouse",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2025-11-20 21:37:56.365417",
+ "modified_by": "Administrator",
+ "module": "Upande Webshop",
+ "name": "Upande Webshop",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "Upande Webshop",
+ "public": 1,
+ "quick_lists": [
+  {
+   "document_type": "Website Item",
+   "label": "Published Items",
+   "quick_list_filter": "[]"
+  }
+ ],
+ "roles": [
+  {}
+ ],
+ "sequence_id": 28.0,
+ "shortcuts": [
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Webshop",
+   "type": "URL",
+   "url": "/webshop"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Products",
+   "type": "URL",
+   "url": "/all-products"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Webshop Cart",
+   "type": "URL",
+   "url": "/cart"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "List",
+   "label": "Quotations",
+   "type": "URL",
+   "url": "/quotations"
+  }
+ ],
+ "title": "Upande Webshop",
+ "type": "Workspace"
+}

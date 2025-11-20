@@ -25,13 +25,6 @@
     "url": "all-products"
    },
    {
-    "label": "Category",
-    "open_in_new_tab": 0,
-    "parent_label": null,
-    "right": 0,
-    "url": "shop-by-category"
-   },
-   {
     "label": "Order",
     "open_in_new_tab": 0,
     "parent_label": null,
@@ -43,7 +36,7 @@
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 0,
-    "url": "quotation"
+    "url": "quotations"
    },
    {
     "label": "Cart",
@@ -65,7 +58,7 @@
   "home_page": "/webshop",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2025-11-16 10:47:05.462634",
+  "modified": "2025-11-20 20:35:53.001194",
   "name": "Website Settings",
   "navbar_search": 0,
   "navbar_template": "Standard Navbar",
@@ -87,11 +80,18 @@
     "url": "all-products"
    },
    {
-    "label": "Category",
+    "label": "Cart",
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 1,
-    "url": "shop-by-category"
+    "url": "cart"
+   },
+   {
+    "label": "Contact",
+    "open_in_new_tab": 0,
+    "parent_label": null,
+    "right": 1,
+    "url": "contact"
    }
   ],
   "website_theme": "Standard",
