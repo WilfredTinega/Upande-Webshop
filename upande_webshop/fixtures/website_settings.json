@@ -37,7 +37,7 @@
   "home_page": "",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2026-02-02 02:43:24.733191",
+  "modified": "2026-02-02 02:50:08.132569",
   "name": "Website Settings",
   "navbar_search": 0,
   "navbar_template": "Primary Navbar",
@@ -73,11 +73,11 @@
     "url": "cart"
    },
    {
-    "label": "Contact",
+    "label": "More",
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 1,
-    "url": "contact"
+    "url": "quotations"
    }
   ],
   "website_theme": "",
