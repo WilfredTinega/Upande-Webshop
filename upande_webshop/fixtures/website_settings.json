@@ -2,7 +2,7 @@
  {
   "address": null,
   "app_logo": "https://rosslyn.upande.com/assets/erpnext/images/erpnext-logo.svg",
-  "app_name": "webshop",
+  "app_name": "Upande Webshop",
   "auto_account_deletion": 72,
   "banner_html": null,
   "banner_image": "https://erp.upande.com/files/UpandeLogo.jpg",
@@ -18,32 +18,11 @@
   "favicon": null,
   "footer_items": [
    {
-    "label": "Products",
+    "label": "Contact Us",
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 0,
-    "url": "all-products"
-   },
-   {
-    "label": "Order",
-    "open_in_new_tab": 0,
-    "parent_label": null,
-    "right": 0,
-    "url": "orders"
-   },
-   {
-    "label": "Quotation",
-    "open_in_new_tab": 0,
-    "parent_label": null,
-    "right": 0,
-    "url": "quotations"
-   },
-   {
-    "label": "Cart",
-    "open_in_new_tab": 0,
-    "parent_label": null,
-    "right": 0,
-    "url": "cart"
+    "url": "contact"
    }
   ],
   "footer_logo": "https://erp.upande.com/files/UpandeLogo.jpg",
@@ -52,16 +31,16 @@
   "footer_template_values": null,
   "google_analytics_anonymize_ip": 1,
   "google_analytics_id": null,
-  "head_html": null,
+  "head_html": "",
   "hide_footer_signup": 1,
   "hide_login": 0,
-  "home_page": "login",
+  "home_page": "",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2026-02-02 01:23:51.513239",
+  "modified": "2026-02-02 02:43:24.733191",
   "name": "Website Settings",
   "navbar_search": 0,
-  "navbar_template": "Standard Navbar",
+  "navbar_template": "Primary Navbar",
   "navbar_template_values": null,
   "robots_txt": null,
   "route_redirects": [
@@ -101,7 +80,7 @@
     "url": "contact"
    }
   ],
-  "website_theme": "Standard",
+  "website_theme": "",
   "website_theme_image_link": null
  }
 ]
