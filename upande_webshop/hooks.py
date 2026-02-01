@@ -252,33 +252,8 @@ add_to_apps_screen = [
 
 
 fixtures = [
-	# Doctype definitions
-	{
-		"dt": "DocType",
-		"filters": [
-			[
-				"name",
-				"in",
-				[
-					"Web Page",
-					"Website Sidebar",
-					"Website Slideshow",
-					"Website Route Meta",
-					"Website Settings",
-					"Website Theme",
-					"Website Script",
-					"Portal Settings",
-				],
-			]
-		],
-	},
 	{"dt": "Web Page", "filters": []},
-	{"dt": "Web Form", "filters": []},
 	{"dt": "Website Sidebar", "filters": []},
 	{"dt": "Website Slideshow", "filters": []},
-	{"dt": "Website Route Meta", "filters": []},
 	{"dt": "Website Settings", "filters": []},
-	{"dt": "Website Theme", "filters": []},
-	{"dt": "Website Script", "filters": []},
-	{"dt": "Portal Settings", "filters": []},
 ]
