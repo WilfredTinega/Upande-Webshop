@@ -104,7 +104,7 @@
    "type": "Link"
   }
  ],
- "modified": "2025-11-20 21:37:56.365417",
+ "modified": "2026-02-02 03:14:15.209846",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",
@@ -120,7 +120,9 @@
   }
  ],
  "roles": [
-  {}
+  {
+   "role": "Sales Manager"
+  }
  ],
  "sequence_id": 28.0,
  "shortcuts": [

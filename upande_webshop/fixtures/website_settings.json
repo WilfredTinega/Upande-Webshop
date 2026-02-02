@@ -37,7 +37,7 @@
   "home_page": "",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2026-02-02 02:50:08.132569",
+  "modified": "2026-02-02 02:59:55.537650",
   "name": "Website Settings",
   "navbar_search": 0,
   "navbar_template": "Primary Navbar",
@@ -59,16 +59,23 @@
   "title_prefix": null,
   "top_bar_items": [
    {
-    "label": "Products",
+    "label": "Webshop",
     "open_in_new_tab": 0,
     "parent_label": null,
+    "right": 1,
+    "url": null
+   },
+   {
+    "label": "Products",
+    "open_in_new_tab": 0,
+    "parent_label": "Webshop",
     "right": 1,
     "url": "all-products"
    },
    {
     "label": "Cart",
     "open_in_new_tab": 0,
-    "parent_label": null,
+    "parent_label": "Webshop",
     "right": 1,
     "url": "cart"
    },
@@ -77,7 +84,49 @@
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 1,
+    "url": ""
+   },
+   {
+    "label": "Quotations",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
     "url": "quotations"
+   },
+   {
+    "label": "Orders",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "orders"
+   },
+   {
+    "label": "Invoices",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "invoices"
+   },
+   {
+    "label": "Shipment",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "shipments"
+   },
+   {
+    "label": "Issues",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "issues"
+   },
+   {
+    "label": "Contact",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "contact"
    }
   ],
   "website_theme": "",

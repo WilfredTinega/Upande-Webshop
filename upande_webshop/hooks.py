@@ -256,4 +256,7 @@ fixtures = [
 	{"dt": "Website Sidebar", "filters": []},
 	{"dt": "Website Slideshow", "filters": []},
 	{"dt": "Website Settings", "filters": []},
+	{"dt": "Portal Settings", "filters": []},
+	{"dt": "Website Script", "filters": []},
+	
 ]
