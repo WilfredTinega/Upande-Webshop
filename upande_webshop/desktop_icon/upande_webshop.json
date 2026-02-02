@@ -12,11 +12,11 @@
  "link_to": "Upande Webshop",
  "link_type": "Workspace Sidebar",
  "logo_url": "",
- "modified": "2026-02-02 03:28:19.118725",
+ "modified": "2026-02-02 03:41:23.057121",
  "modified_by": "Administrator",
  "name": "Upande Webshop",
  "owner": "Administrator",
- "parent_icon": "Upande Webshop",
+ "parent_icon": "",
  "restrict_removal": 1,
  "roles": [
   {

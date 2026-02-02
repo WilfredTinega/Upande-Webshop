@@ -5,9 +5,35 @@
  "doctype": "Workspace Sidebar",
  "header_icon": "airplay",
  "idx": 0,
- "items": [],
- "modified": "2026-02-02 03:27:13.827691",
+ "items": [
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "airplay",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Upande Webshop",
+   "link_to": "Upande Webshop",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  },
+  {
+   "child": 0,
+   "collapsible": 1,
+   "icon": "list",
+   "indent": 0,
+   "keep_closed": 0,
+   "label": "Webshop",
+   "link_to": "Upande Webshop",
+   "link_type": "Workspace",
+   "show_arrow": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-02-02 03:51:02.158028",
  "modified_by": "Administrator",
+ "module": "Upande Webshop",
  "name": "Upande Webshop",
  "owner": "Administrator",
  "standard": 1,
