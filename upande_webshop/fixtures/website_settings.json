@@ -2,7 +2,7 @@
  {
   "address": null,
   "app_logo": "https://rosslyn.upande.com/assets/erpnext/images/erpnext-logo.svg",
-  "app_name": "Upande Webshop",
+  "app_name": "Upande ERPNEXT",
   "auto_account_deletion": 72,
   "banner_html": null,
   "banner_image": "https://erp.upande.com/files/UpandeLogo.jpg",
@@ -37,7 +37,7 @@
   "home_page": "",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2026-02-02 02:59:55.537650",
+  "modified": "2026-02-15 13:55:24.964006",
   "name": "Website Settings",
   "navbar_search": 0,
   "navbar_template": "Primary Navbar",
