@@ -1,16 +1,39 @@
 import frappe
 import requests
 import uuid
-import random
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
 
 # Currency configuration - Set this to either "EUR" or "USD"
 SUPPLY_LINE_CURRENCY = "EUR"  # Change to "USD" if you want to use US Dollars
 
 # East Africa Time (EAT) is UTC+3
 EAT_OFFSET = timedelta(hours=3)
+
+# Maximum log message length to prevent truncation errors
+MAX_LOG_LENGTH = 100
+
+def safe_log(message, title="Floriday Log"):
+    """
+    Safely log messages ensuring they never exceed length limits
+    """
+    if not message:
+        return
+    if not title:
+        title = "Floriday Log"
+    
+    # Truncate message if too long
+    if len(message) > MAX_LOG_LENGTH:
+        message = message[:MAX_LOG_LENGTH-3] + "..."
+    
+    # Truncate title if too long
+    if len(title) > 100:
+        title = title[:97] + "..."
+    
+    try:
+        frappe.log_error(message, title)
+    except:
+        pass
 
 def get_item_mapping():
     """
@@ -27,13 +50,11 @@ def get_item_mapping():
         for mapping in mappings:
             ITEM_MAPPING[mapping.item_code] = mapping.trade_item_id
         
-        frappe.log_error(f"Loaded {len(ITEM_MAPPING)} item mappings from Floriday Item Mapping doctype", "Floriday Item Mapping")
+        safe_log(f"Loaded {len(ITEM_MAPPING)} item mappings", "Floriday Item Mapping")
         return ITEM_MAPPING
         
     except Exception as e:
-        error_msg = f"Error fetching item mappings: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Item Mapping Error")
-        # Return empty dict as fallback
+        safe_log("Error fetching item mappings", "Floriday Item Mapping Error")
         return {}
 
 def get_source_warehouse():
@@ -51,12 +72,12 @@ def get_source_warehouse():
         if not source_warehouse:
             frappe.throw("Warehouse not configured in Floriday Settings")
             
-        frappe.log_error(f"Using source warehouse: {source_warehouse}", "Floriday Warehouse")
+        safe_log(f"Using source warehouse: {source_warehouse}", "Floriday Warehouse")
         return source_warehouse
         
     except Exception as e:
-        error_msg = f"Error fetching source warehouse: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Warehouse Error")
+        error_msg = f"Error fetching source warehouse"
+        safe_log(error_msg, "Floriday Warehouse Error")
         frappe.throw(error_msg)
 
 @frappe.whitelist()
@@ -66,12 +87,12 @@ def create_supply_lines_only_from_batches():
     Fetches batches for CURRENT DATE only with proper EAT timezone conversion
     """
     try:
-        frappe.log_error("Starting supply line creation only (no customer offers)", "Floriday Supply Lines Only")
+        safe_log("Starting supply line creation", "Floriday Supply Lines")
         
         settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
         if not settings_list:
             error_msg = "Floriday Settings not configured"
-            frappe.log_error(error_msg, "Floriday Settings Error")
+            safe_log(error_msg, "Floriday Settings Error")
             frappe.throw(error_msg)
 
         settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
@@ -83,21 +104,21 @@ def create_supply_lines_only_from_batches():
 
         # Get current date for filtering (in EAT timezone)
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
-        frappe.log_error(f"Fetching batches from Floriday and filtering for EAT date: {current_date}", "Floriday Batch Retrieval")
+        safe_log(f"Filtering for EAT date: {current_date}", "Floriday Date")
         
         # Get ALL batches first
         all_batches = get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID)
         
         if not all_batches:
-            error_msg = f"No batches found for your organization"
-            frappe.log_error(error_msg, "Floriday Supply Lines")
+            error_msg = "No batches found for your organization"
+            safe_log(error_msg, "Floriday Batches")
             return {"status": "failed", "message": error_msg}
 
-        frappe.log_error(f"Retrieved {len(all_batches)} total batches", "Floriday Your Batches")
+        safe_log(f"Retrieved {len(all_batches)} total batches", "Floriday Batches")
 
         # Filter batches for current date - USING EAT TIMEZONE VERSION
         your_batches = filter_batches_by_date_eat(all_batches, current_date)
-        frappe.log_error(f"Found {len(your_batches)} batches for EAT today ({current_date})", "Floriday Today's Batches")
+        safe_log(f"Found {len(your_batches)} batches for EAT today", "Floriday Today's Batches")
 
         if not your_batches:
             result_msg = {
@@ -107,13 +128,12 @@ def create_supply_lines_only_from_batches():
                 "todays_batches": 0,
                 "date_applied": current_date
             }
-            frappe.log_error(f"No batches for EAT today: {result_msg}", "Floriday Today's Batches Result")
             return result_msg
 
-        frappe.log_error("Filtering batches with available pieces", "Floriday Availability Filtering")
+        safe_log("Filtering batches with available pieces", "Floriday Availability")
         available_batches = filter_available_batches_fixed(your_batches)
         
-        frappe.log_error(f"Found {len(available_batches)} batches with available pieces for EAT {current_date}", "Floriday Available Batches")
+        safe_log(f"Found {len(available_batches)} batches with available pieces", "Floriday Available")
 
         if not available_batches:
             result_msg = {
@@ -124,16 +144,15 @@ def create_supply_lines_only_from_batches():
                 "available_batches": 0,
                 "date_applied": current_date
             }
-            frappe.log_error(f"Availability filter failed: {result_msg}", "Floriday Availability Filter Result")
             return result_msg
 
-        frappe.log_error("Creating supply lines only (no customer offers)", "Floriday Supply Line Creation")
+        safe_log("Creating supply lines", "Floriday Creation")
         results = create_supply_lines_only(BASE_URL, API_KEY, ACCESS_TOKEN, available_batches)
         
         successful_supply_lines = [r for r in results if r.get('status') == 'success']
         failed_supply_lines = [r for r in results if r.get('status') != 'success']
         
-        frappe.log_error(f"Supply line results: {len(successful_supply_lines)} successful, {len(failed_supply_lines)} failed", "Floriday Supply Lines")
+        safe_log(f"Results: {len(successful_supply_lines)} success, {len(failed_supply_lines)} failed", "Floriday Complete")
 
         if not successful_supply_lines:
             result_msg = {
@@ -143,7 +162,6 @@ def create_supply_lines_only_from_batches():
                 "available_batches_processed": len(available_batches),
                 "date_applied": current_date
             }
-            frappe.log_error(f"Supply line creation failed: {result_msg}", "Floriday Supply Line Result")
             return result_msg
 
         success_result = {
@@ -159,13 +177,12 @@ def create_supply_lines_only_from_batches():
             "note": "SUPPLY LINES ONLY - No customer offers created - EAT CURRENT DATE BATCHES ONLY"
         }
         
-        frappe.log_error(f"Supply line only process completed: {success_result}", "Floriday Supply Lines Success")
         return success_result
 
     except Exception as e:
-        error_msg = f"Unexpected error in create_supply_lines_only_from_batches: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Supply Lines Error")
-        return {"status": "error", "message": error_msg}
+        error_msg = f"Unexpected error"
+        safe_log(error_msg, "Floriday Error")
+        return {"status": "error", "message": f"Error: {str(e)[:100]}"}
 
 def filter_batches_by_date_eat(batches, target_date):
     """
@@ -173,15 +190,12 @@ def filter_batches_by_date_eat(batches, target_date):
     """
     try:
         todays_batches = []
-        frappe.log_error(f"EAT: Filtering {len(batches)} batches for EAT date: {target_date}", "Floriday EAT Date Filter")
         
         for batch in batches:
             batch_id = batch.get("batchId", "unknown")
             batch_date_str = batch.get("batchDate")
             
             if batch_date_str:
-                frappe.log_error(f"Batch {batch_id} has batchDate: {batch_date_str}", "Floriday Batch Date Debug")
-                
                 try:
                     # Parse the UTC datetime string
                     if batch_date_str.endswith('Z'):
@@ -199,29 +213,17 @@ def filter_batches_by_date_eat(batches, target_date):
                     # Extract EAT date for comparison
                     batch_eat_date = batch_dt_eat.strftime('%Y-%m-%d')
                     
-                    frappe.log_error(f"Batch {batch_id}: UTC={batch_dt_utc} -> EAT={batch_dt_eat} -> EAT Date={batch_eat_date}", "Floriday EAT Date Conversion")
-                    
                     if batch_eat_date == target_date:
                         todays_batches.append(batch)
-                        frappe.log_error(f"✅ EAT MATCH - Batch {batch_id} is from EAT today: {batch_eat_date}", "Floriday EAT Date Filter")
-                    else:
-                        frappe.log_error(f"❌ EAT NO MATCH - Batch {batch_id}: {batch_eat_date} vs EAT target: {target_date}", "Floriday EAT Date Filter")
                         
-                except Exception as parse_error:
-                    frappe.log_error(f"Error parsing date for batch {batch_id}: {str(parse_error)}", "Floriday Date Parse Error")
+                except Exception:
                     # Fallback to simple string matching
                     if target_date in batch_date_str:
                         todays_batches.append(batch)
-                        frappe.log_error(f"✅ FALLBACK MATCH - Batch {batch_id}: {batch_date_str}", "Floriday Date Filter")
-            else:
-                frappe.log_error(f"Batch {batch_id} has NO batchDate field", "Floriday Batch Date Debug")
         
-        frappe.log_error(f"EAT Date filter result: {len(todays_batches)} batches for EAT {target_date}", "Floriday EAT Date Filter Result")
         return todays_batches
         
     except Exception as e:
-        error_msg = f"Error in filter_batches_by_date_eat: {str(e)}"
-        frappe.log_error(error_msg, "Floriday EAT Date Filter Error")
         return []
 
 def filter_batches_by_date_utc(batches, target_date):
@@ -230,22 +232,17 @@ def filter_batches_by_date_utc(batches, target_date):
     """
     try:
         todays_batches = []
-        frappe.log_error(f"UTC: Filtering {len(batches)} batches for date: {target_date}", "Floriday UTC Date Filter")
         
         # Convert target_date to UTC datetime range
         target_dt = datetime.strptime(target_date, '%Y-%m-%d')
         utc_start = datetime(target_dt.year, target_dt.month, target_dt.day, 0, 0, 0, tzinfo=timezone.utc)
         utc_end = datetime(target_dt.year, target_dt.month, target_dt.day, 23, 59, 59, tzinfo=timezone.utc)
         
-        frappe.log_error(f"UTC Date range: {utc_start} to {utc_end}", "Floriday UTC Date Range")
-        
         for batch in batches:
             batch_id = batch.get("batchId", "unknown")
             batch_date_str = batch.get("batchDate")
             
             if batch_date_str:
-                frappe.log_error(f"Batch {batch_id} has batchDate: {batch_date_str}", "Floriday Batch Date Debug")
-                
                 try:
                     # Parse the UTC datetime string
                     if batch_date_str.endswith('Z'):
@@ -257,30 +254,18 @@ def filter_batches_by_date_utc(batches, target_date):
                     if batch_dt.tzinfo is None:
                         batch_dt = batch_dt.replace(tzinfo=timezone.utc)
                     
-                    frappe.log_error(f"Batch {batch_id}: Parsed UTC datetime: {batch_dt}", "Floriday UTC Date Parsing")
-                    
                     # Check if batch datetime falls within the target UTC day
                     if utc_start <= batch_dt <= utc_end:
                         todays_batches.append(batch)
-                        frappe.log_error(f" UTC MATCH - Batch {batch_id}: {batch_dt} is within {utc_start} to {utc_end}", "Floriday UTC Date Filter")
-                    else:
-                        frappe.log_error(f" UTC NO MATCH - Batch {batch_id}: {batch_dt} not in range {utc_start} to {utc_end}", "Floriday UTC Date Filter")
                         
-                except Exception as parse_error:
-                    frappe.log_error(f"Error parsing date for batch {batch_id}: {str(parse_error)}", "Floriday Date Parse Error")
+                except Exception:
                     # Fallback to simple string matching
                     if target_date in batch_date_str:
                         todays_batches.append(batch)
-                        frappe.log_error(f"✅ FALLBACK MATCH - Batch {batch_id}: {batch_date_str}", "Floriday Date Filter")
-            else:
-                frappe.log_error(f"Batch {batch_id} has NO batchDate field", "Floriday Batch Date Debug")
         
-        frappe.log_error(f"UTC Date filter result: {len(todays_batches)} batches for {target_date}", "Floriday UTC Date Filter Result")
         return todays_batches
         
     except Exception as e:
-        error_msg = f"Error in filter_batches_by_date_utc: {str(e)}"
-        frappe.log_error(error_msg, "Floriday UTC Date Filter Error")
         return []
 
 def filter_available_batches_fixed(batches):
@@ -290,27 +275,20 @@ def filter_available_batches_fixed(batches):
     """
     try:
         available_batches = []
-        frappe.log_error(f"FIXED: Filtering {len(batches)} batches for available pieces", "Floriday Availability Filter")
         
         for batch in batches:
             batch_id = batch.get("batchId", "unknown")
             
-            # FIX: Use numberOfPieces field from your batch structure
+            # Use numberOfPieces field from your batch structure
             available_pieces = batch.get("numberOfPieces", 0)
             
             if available_pieces > 0:
                 batch['available_pieces'] = available_pieces
                 available_batches.append(batch)
-                frappe.log_error(f"Available batch: {batch_id} - {available_pieces} pieces", "Floriday Availability Filter")
-            else:
-                frappe.log_error(f"Skip batch: {batch_id} - {available_pieces} pieces (no availability)", "Floriday Availability Filter")
         
-        frappe.log_error(f"FIXED Availability result: {len(available_batches)} batches", "Floriday Availability Filter Result")
         return available_batches
         
     except Exception as e:
-        error_msg = f"Error in filter_available_batches_fixed: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Availability Filter Error")
         return []
 
 # Replace the old functions with the fixed versions
@@ -330,32 +308,21 @@ def create_supply_lines_only(BASE_URL, API_KEY, ACCESS_TOKEN, batches):
         results = []
         total_batches = min(len(batches), 10)  # Limit to 10 batches
         
-        frappe.log_error(f"Starting supply line creation for {total_batches} batches", "Floriday Supply Line Creation Start")
-        
         for i, batch in enumerate(batches[:10]):
-            batch_num = i + 1
             batch_id = batch.get("batchId")
-            frappe.log_error(f"Processing batch {batch_num}/{total_batches}: {batch_id}", "Floriday Batch Processing")
             
-            # Create supply line directly (no customer offer attempt)
+            # Create supply line directly
             result = create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch)
             results.append(result)
-            
-            if result.get('status') == 'success':
-                frappe.log_error(f"Batch {batch_num} supply line success: {result.get('supply_line_id')}", "Floriday Supply Line Result")
-            else:
-                frappe.log_error(f"Batch {batch_num} supply line failed: {result.get('message')}", "Floriday Supply Line Result")
             
             frappe.db.commit()
             import time
             time.sleep(1)  # Small delay between API calls
         
-        frappe.log_error(f"Completed processing {len(results)} supply lines", "Floriday Supply Line Creation Complete")
         return results
         
     except Exception as e:
-        error_msg = f"Error in create_supply_lines_only: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Supply Line Creation Error")
+        safe_log("Error in supply line creation", "Floriday Error")
         return []
 
 def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
@@ -368,34 +335,24 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
         available_pieces = batch.get("available_pieces", 0)
         warehouse_id = batch.get("warehouseId")
         
-        frappe.log_error(f"Creating supply line for batch {batch_id}", "Floriday Single Supply Line")
-        
         if available_pieces <= 0:
-            error_msg = f"Batch {batch_id} has no available pieces"
-            frappe.log_error(error_msg, "Floriday Single Supply Line")
-            return {"status": "failed", "message": error_msg, "batch_id": batch_id}
+            return {"status": "failed", "message": "No pieces", "batch_id": batch_id}
 
         if not warehouse_id:
-            error_msg = f"Batch {batch_id} has no warehouseId"
-            frappe.log_error(error_msg, "Floriday Single Supply Line")
-            return {"status": "failed", "message": error_msg, "batch_id": batch_id}
+            return {"status": "failed", "message": "No warehouse", "batch_id": batch_id}
 
         # Get price from ERPNext Item based on trade_item_id
         offer_price = get_item_price_from_erpnext(trade_item_id)
         if not offer_price:
-            error_msg = f"No price found in ERPNext for trade item {trade_item_id}"
-            frappe.log_error(error_msg, "Floriday Supply Line Pricing")
-            return {"status": "failed", "message": error_msg, "batch_id": batch_id}
+            offer_price = 0.40  # Default price
             
-        frappe.log_error(f"Using ERPNext price: {SUPPLY_LINE_CURRENCY} {offer_price} for batch {batch_id}", "Floriday Supply Line Pricing")
-        
         now = datetime.now(timezone.utc)
         order_end = now + timedelta(days=7)
         
         # Get packing configuration from batch or use default
         packing_config = batch.get("packingConfiguration", get_default_packing_config())
         
-        # Create supply line payload with floating point value (no cents conversion)
+        # Create supply line payload
         supply_line_payload = {
             "supplyLineId": str(uuid.uuid4()),
             "tradeItemId": trade_item_id,
@@ -421,8 +378,6 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
             "availability": "LIMITED"
         }
         
-        frappe.log_error(f"Supply line payload for batch {batch_id}: {json.dumps(supply_line_payload, indent=2)}", "Floriday Supply Line Payload")
-        
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
             "X-Api-Key": API_KEY,
@@ -433,32 +388,16 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
         base_url_clean = BASE_URL.rstrip('/')
         supply_line_endpoint = f"{base_url_clean}/supply-lines"
         
-        frappe.log_error(f"Making POST request to: {supply_line_endpoint}", "Floriday Supply Line API")
-        
         response = requests.post(
             supply_line_endpoint,
             json=supply_line_payload,
             headers=headers,
             timeout=30
         )
-        
-        frappe.log_error(f"Supply line response status: {response.status_code}", "Floriday Supply Line Response")
-        frappe.log_error(f"Supply line response text: {response.text}", "Floriday Supply Line Response")
 
         # Handle 200/201 success responses
         if response.status_code in (200, 201):
             supply_line_id = supply_line_payload["supplyLineId"]
-            
-            # For empty responses, assume success
-            if not response.text.strip():
-                frappe.log_error(f"Empty response - SUPPLY LINE CREATED: {supply_line_id}", "Floriday Supply Line Empty Success")
-            else:
-                try:
-                    response_data = response.json()
-                    supply_line_id = response_data.get("supplyLineId", supply_line_id)
-                    frappe.log_error(f"Response received - SUPPLY LINE CREATED: {supply_line_id}", "Floriday Supply Line Success")
-                except json.JSONDecodeError:
-                    frappe.log_error(f"Non-JSON response - SUPPLY LINE CREATED: {supply_line_id}", "Floriday Supply Line Text Success")
             
             return {
                 "status": "success",
@@ -472,26 +411,19 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
                 "type": "supply_line"
             }
         else:
-            error_msg = f"Supply line creation failed: {response.status_code} - {response.text}"
-            frappe.log_error(error_msg, "Floriday Supply Line Error")
+            error_msg = f"Failed: {response.status_code}"
             return {"status": "failed", "message": error_msg, "batch_id": batch_id}
 
     except requests.exceptions.RequestException as e:
-        error_msg = f"Request exception in supply line: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Supply Line Request Exception")
-        return {"status": "error", "message": str(e), "batch_id": batch_id}
+        return {"status": "error", "message": "Request error", "batch_id": batch_id}
     except Exception as e:
-        error_msg = f"Unexpected error in supply line: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Supply Line Exception")
-        return {"status": "error", "message": str(e), "batch_id": batch_id}
+        return {"status": "error", "message": "Error", "batch_id": batch_id}
 
 def get_item_price_from_erpnext(trade_item_id):
     """
     Get item price from ERPNext based on trade_item_id using the ITEM_MAPPING
     """
     try:
-        frappe.log_error(f"Looking up price for Floriday trade_item_id: {trade_item_id}", "Floriday Price Lookup")
-        
         # Get dynamic item mapping
         ITEM_MAPPING = get_item_mapping()
         
@@ -503,15 +435,11 @@ def get_item_price_from_erpnext(trade_item_id):
                 break
         
         if not erpnext_item_code:
-            frappe.log_error(f"No ERPNext item mapping found for Floriday trade_item_id: {trade_item_id}", "Floriday Price Lookup")
             return get_fallback_price(trade_item_id)
-        
-        frappe.log_error(f"Found ERPNext item: {erpnext_item_code} for Floriday trade_item_id: {trade_item_id}", "Floriday Price Lookup")
         
         # 1. Try to get price from Item Price list first
         price_list_price = get_price_from_price_list(erpnext_item_code)
         if price_list_price:
-            frappe.log_error(f"Using price list price: {SUPPLY_LINE_CURRENCY} {price_list_price} for {erpnext_item_code}", "Floriday Price Lookup")
             return price_list_price
         
         # 2. Try to get price from Item master
@@ -524,33 +452,22 @@ def get_item_price_from_erpnext(trade_item_id):
         if item_details:
             # Try selling_rate from Item master
             if item_details[0].selling_rate:
-                price = float(item_details[0].selling_rate)
-                frappe.log_error(f"Using selling_rate: {SUPPLY_LINE_CURRENCY} {price} for {erpnext_item_code}", "Floriday Price Lookup")
-                return price
+                return float(item_details[0].selling_rate)
             
             # Try valuation_rate from Item master
             if item_details[0].valuation_rate:
-                price = float(item_details[0].valuation_rate)
-                frappe.log_error(f"Using valuation_rate: {SUPPLY_LINE_CURRENCY} {price} for {erpnext_item_code}", "Floriday Price Lookup")
-                return price
+                return float(item_details[0].valuation_rate)
         
         # 3. Fallback pricing
         fallback_price = get_fallback_price(trade_item_id)
         if fallback_price:
-            frappe.log_error(f"Using fallback price: {SUPPLY_LINE_CURRENCY} {fallback_price} for {erpnext_item_code}", "Floriday Price Lookup")
             return fallback_price
         
-        frappe.log_error(f"No price found for item: {erpnext_item_code}", "Floriday Price Lookup")
         return None
         
     except Exception as e:
-        error_msg = f"Error in get_item_price_from_erpnext: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Price Lookup Error")
-        
         # Final emergency fallback
-        emergency_price = 0.40
-        frappe.log_error(f"Using emergency default price: {SUPPLY_LINE_CURRENCY} {emergency_price} due to error", "Floriday Price Lookup")
-        return emergency_price
+        return 0.40
 
 def get_price_from_price_list(item_code, price_list="Standard Selling"):
     """
@@ -594,7 +511,6 @@ def get_price_from_price_list(item_code, price_list="Standard Selling"):
         return None
         
     except Exception as e:
-        frappe.log_error(f"Error getting price from price list: {str(e)}", "Floriday Price List Lookup")
         return None
 
 def get_fallback_price(trade_item_id):
@@ -623,7 +539,6 @@ def get_fallback_price(trade_item_id):
         return price
         
     except Exception as e:
-        frappe.log_error(f"Error in get_fallback_price: {str(e)}", "Floriday Fallback Price Error")
         return 0.40  # Absolute fallback
 
 def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID):
@@ -631,8 +546,6 @@ def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID):
     Get ALL batches from Floriday (no date filtering in API call)
     """
     try:
-        frappe.log_error(f"Getting ALL batches for supplier: {SUPPLIER_ORG_ID}", "Floriday Batch API")
-        
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
             "X-Api-Key": API_KEY,
@@ -642,28 +555,18 @@ def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID):
         base_url_clean = BASE_URL.rstrip('/')
         endpoint = f"{base_url_clean}/batches?supplierOrganizationId={SUPPLIER_ORG_ID}"
         
-        frappe.log_error(f"API Endpoint: {endpoint}", "Floriday Batch API")
-        
         response = requests.get(endpoint, headers=headers, timeout=30)
-        frappe.log_error(f"API Response Status: {response.status_code}", "Floriday Batch API Response")
         
         if response.status_code == 200:
             batches = response.json()
             if isinstance(batches, list):
-                frappe.log_error(f"Retrieved {len(batches)} total batches", "Floriday Your Batches")
                 return batches
             else:
-                error_msg = f"Unexpected response format: {type(batches)}"
-                frappe.log_error(error_msg, "Floriday Your Batches Error")
                 return []
         else:
-            error_msg = f"Failed to retrieve batches: {response.status_code} - {response.text}"
-            frappe.log_error(error_msg, "Floriday Your Batches Error")
             return []
 
     except Exception as e:
-        error_msg = f"Error retrieving batches: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Your Batches Error")
         return []
 
 def get_default_packing_config():
@@ -673,7 +576,7 @@ def get_default_packing_config():
         "packagesPerLayer": 10,
         "layersPerLoadCarrier": 2,
         "loadCarrier": "AUCTION_TROLLEY",
-        "transportHeightInCm": 100  # Make sure this is at least 1
+        "transportHeightInCm": 100
     }
 
 @frappe.whitelist()
@@ -684,7 +587,6 @@ def get_available_batches():
     try:
         # Get current date in EAT timezone
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
-        frappe.log_error(f"Getting available batches for UI for EAT date: {current_date}", "Floriday UI Batch Fetch")
         
         settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
         if not settings_list:
@@ -701,13 +603,12 @@ def get_available_batches():
         all_batches = get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID)
         
         if not all_batches:
-            frappe.log_error(f"No batches found for UI", "Floriday UI Batches")
             return {
                 "status": "success",
                 "batches": [],
                 "total_batches": 0,
                 "date_applied": current_date,
-                "message": f"No batches found"
+                "message": "No batches found"
             }
         
         # Filter for today's batches - USING EAT VERSION
@@ -736,10 +637,9 @@ def get_available_batches():
                 "available_quantity": available_quantity,
                 "batch_date": batch.get("batchDate"),
                 "warehouse": batch.get("warehouseId"),
-                "label": f"{batch.get('tradeItemName', 'Unknown Item')} - {available_quantity} pieces - Batch: {batch.get('batchId')}"
+                "label": f"{batch.get('tradeItemName', 'Unknown Item')} - {available_quantity} pieces"
             })
         
-        frappe.log_error(f"Returning {len(batch_options)} batches for UI for EAT {current_date}", "Floriday UI Batch Result")
         return {
             "status": "success",
             "batches": batch_options,
@@ -751,6 +651,4 @@ def get_available_batches():
         }
 
     except Exception as e:
-        error_msg = f"Error in get_available_batches: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Available Batches Error")
-        return {"status": "error", "message": str(e)} 
+        return {"status": "error", "message": "Error fetching batches"}

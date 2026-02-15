@@ -4,42 +4,64 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
-def setup_custom_fields():
+def log_short(msg, title="Floriday", is_error=True):
+    """Log errors and successful sales order creations"""
+    # Always log successful SO creations (title contains "Success")
+    if not is_error and ("Success" in title or "Created" in title or "Found" in title or "Updated" in title):
+        if len(msg) > 135:
+            msg = msg[:132] + "..."
+        frappe.log_error(msg, title)
+    # Log errors
+    elif is_error or "Error" in title or "Fail" in msg or "missing" in msg.lower():
+        if len(msg) > 135:
+            msg = msg[:132] + "..."
+        frappe.log_error(msg, title)
+
+def generate_custom_order_name(customer_name):
     """
-    Creates minimal required custom fields for Floriday integration
+    Generates a custom order name in format: CustomerName-XXX
+    where XXX is a sequential number for that customer
     """
-    # Only create custom field for Item to map Floriday items
-    item_fields = [
-        {
-            "fieldname": "floriday_trade_item_id",
-            "label": "Floriday Trade Item ID",
-            "fieldtype": "Data",
-            "insert_after": "item_code",
-            "unique": 1,
-            "allow_in_quick_entry": 1,
-            "translatable": 0
-        }
-    ]
-            
-    # Create custom fields for Item
-    for field in item_fields:
-        if not frappe.db.exists("Custom Field", {"dt": "Item", "fieldname": field["fieldname"]}):
-            custom_field = frappe.get_doc({
-                "doctype": "Custom Field",
-                "dt": "Item",
-                **field
-            })
-            custom_field.insert()
+    try:
+        # Clean customer name
+        clean_name = ''.join(c for c in customer_name if c.isalnum() or c == ' ').strip()
+        clean_name = clean_name.replace(' ', '-')[:20]
+        
+        # Find the latest order for this customer
+        latest_order = frappe.db.sql("""
+            SELECT custom_order_name 
+            FROM `tabSales Order` 
+            WHERE customer = %s 
+            AND custom_order_name LIKE %s
+            AND docstatus < 2
+            ORDER BY creation DESC 
+            LIMIT 1
+        """, (customer_name, f"{clean_name}-%"), as_dict=True)
+        
+        if latest_order and latest_order[0].custom_order_name:
+            try:
+                last_number = int(latest_order[0].custom_order_name.split('-')[-1])
+                new_number = last_number + 1
+            except (ValueError, IndexError):
+                new_number = 1
+        else:
+            new_number = 1
+        
+        return f"{clean_name}-{new_number:03d}"
+        
+    except Exception as e:
+        log_short(f"Order name error: {str(e)[:30]}", "Floriday Order Name Error", True)
+        from frappe.utils import now_datetime
+        timestamp = now_datetime().strftime("%Y%m%d%H%M%S")
+        return f"ORD-{timestamp}"
 
 @frappe.whitelist()
 def create_sales_orders_from_floriday():
     """
     Fetches orders from Floriday API and creates corresponding Sales Orders in ERPNext.
-    Only processes orders from the last 24 hours based on orderDateTime.
+    Only processes orders from the last 2 hours.
     """
     try:
-        setup_custom_fields()
-        
         settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
         if not settings_list:
             frappe.throw("Floriday Settings not configured")
@@ -50,16 +72,18 @@ def create_sales_orders_from_floriday():
         BASE_URL = settings.base_url.rstrip('/')
         ACCESS_TOKEN = settings.access_token
         SUPPLIER_ORG_ID = settings.organization_supplier_id
+        WAREHOUSE = settings.warehouse
         
         # Validate required settings
         if not all([API_KEY, BASE_URL, ACCESS_TOKEN, SUPPLIER_ORG_ID]):
-            frappe.throw("Floriday Settings are incomplete. Please check API Key, Base URL, Access Token, and Supplier Organization ID.")
+            frappe.throw("Floriday Settings incomplete")
+        
+        if not WAREHOUSE:
+            frappe.throw("Warehouse not configured in Floriday Settings")
 
-        # Set date range for last 24 hours (UTC-aware)
+        # Set date range for last 2 hours
         end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(hours=24)
-
-        frappe.log_error(f"Fetching Floriday orders from {start_date} to {end_date} for supplier: {SUPPLIER_ORG_ID}", "Floriday Order Sync")
+        start_date = end_date - timedelta(hours=2)
 
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
@@ -68,20 +92,15 @@ def create_sales_orders_from_floriday():
             "Accept": "application/json"
         }
 
-        # Build API endpoint with supplier organization filter AND date filtering
         endpoint = f"{BASE_URL}/sales-orders"
         
-        # UPDATED: Use startDateTime and endDateTime parameters as per API documentation
         params = {
             "supplierOrganizationId": SUPPLIER_ORG_ID,
             "pageSize": 100,
-            "startDateTime": start_date.isoformat(),  # ISO 8601 format
+            "startDateTime": start_date.isoformat(),
             "endDateTime": end_date.isoformat(),
-            "limitResult": 1000  # Added limitResult as per API docs
+            "limitResult": 1000
         }
-
-        frappe.log_error(f"Making API request to: {endpoint}", "Floriday API Request")
-        frappe.log_error(f"Request params: {json.dumps(params, indent=2)}", "Floriday API Params")
 
         response = requests.get(
             endpoint,
@@ -90,28 +109,17 @@ def create_sales_orders_from_floriday():
             timeout=30
         )
 
-        frappe.log_error(f"Floriday API Response Status: {response.status_code}", "Floriday Order API")
-
         if response.status_code != 200:
-            error_msg = f"Failed to fetch Floriday orders: {response.status_code} - {response.text}"
-            frappe.log_error(error_msg, "Floriday Order Fetch Error")
+            error_msg = f"API failed: {response.status_code}"
+            log_short(error_msg, "Floriday Fetch Error", True)
             return {"status": "error", "message": error_msg}
-
-        # LOG THE RAW RESPONSE PAYLOAD
-        raw_response = response.text
-        frappe.log_error(f"RAW FLORIDAY API RESPONSE:\n{raw_response}", "Floriday Raw Response")
 
         orders = response.json()
         
-        # LOG THE PARSED ORDERS PAYLOAD
-        frappe.log_error(f"PARSED FLORIDAY ORDERS PAYLOAD:\n{json.dumps(orders, indent=2)}", "Floriday Orders Payload")
-
         if not isinstance(orders, list):
-            error_msg = f"Unexpected API response format. Expected list, got {type(orders)}"
-            frappe.log_error(error_msg, "Floriday Order Format Error")
+            error_msg = "Invalid response format"
+            log_short(error_msg, "Floriday Format Error", True)
             frappe.throw(error_msg)
-
-        frappe.log_error(f"Retrieved {len(orders)} total orders from Floriday API", "Floriday Order Count")
 
         results = []
         processed_count = 0
@@ -121,37 +129,32 @@ def create_sales_orders_from_floriday():
 
         for order in orders:
             order_dt_str = order.get("orderDateTime")
+            order_id = order.get('salesOrderId', 'Unknown')[-8:]
+            
             if not order_dt_str:
-                frappe.log_error(f"Order missing orderDateTime: {order.get('salesOrderId', 'Unknown')}", "Floriday Order Date Missing")
                 skipped_count += 1
                 continue
 
-            # Parse Floriday orderDateTime to UTC-aware datetime
             try:
                 order_dt = parse_order_date(order_dt_str)
-            except ValueError as e:
-                frappe.log_error(f"Error parsing date {order_dt_str}: {str(e)}", "Floriday Date Parse Error")
+            except ValueError:
                 skipped_count += 1
                 continue
             
-            # STRICT DATE FILTERING - Skip orders outside last 24 hours
             if not (start_date <= order_dt <= end_date):
                 date_filtered_count += 1
-                frappe.log_error(f"❌ DATE FILTERED - Order {order.get('salesOrderId')} from {order_dt} is outside range {start_date} to {end_date}", "Floriday Order Date Range")
                 continue
 
-            # Only process COMMITTED orders
             if order.get("status") != "COMMITTED":
-                frappe.log_error(f"Skipping non-COMMITTED order: {order.get('salesOrderId')} - Status: {order.get('status')}", "Floriday Order Status")
                 skipped_count += 1
                 continue
 
             try:
-                # LOG INDIVIDUAL ORDER PAYLOAD BEFORE PROCESSING
-                frappe.log_error(f"✅ PROCESSING FLORIDAY ORDER (Within Date Range):\n{json.dumps(order, indent=2)}", f"Floriday Order {order.get('salesOrderId')}")
-                
-                sales_order = create_sales_order_from_floriday(order)
+                sales_order = create_sales_order_from_floriday(order, WAREHOUSE)
                 processed_count += 1
+                
+                # Log successful sales order creation
+                log_short(f"SO {sales_order.name} created for Floriday order {order_id}", "Floriday Success", False)
                 
                 results.append({
                     "floriday_order_id": order.get("salesOrderId"),
@@ -160,36 +163,22 @@ def create_sales_orders_from_floriday():
                     "status": "success"
                 })
 
-                frappe.log_error(f"✅ Successfully created Sales Order {sales_order.name} from Floriday order {order.get('salesOrderId')}", "Floriday Order Success")
-
             except Exception as e:
                 error_count += 1
-                error_msg = f"Error creating sales order from Floriday order {order.get('salesOrderId', 'Unknown')}: {str(e)}"
-                frappe.log_error(error_msg, "Floriday Order Creation Error")
+                error_short = str(e)[:50] + "..." if len(str(e)) > 50 else str(e)
+                log_short(f"Order {order_id}: {error_short}", "Floriday Order Error", True)
                 results.append({
                     "floriday_order_id": order.get("salesOrderId"),
                     "status": "error",
                     "error": str(e)
                 })
 
-        # Log comprehensive summary
-        summary_msg = f"""
-Floriday Order Sync Summary:
-- Total orders from API: {len(orders)}
-- Processed successfully: {processed_count}
-- Filtered by date (outside 24h): {date_filtered_count}
-- Skipped (non-COMMITTED/missing data): {skipped_count}
-- Errors: {error_count}
-- Date range: {start_date} to {end_date}
-- Supplier Organization: {SUPPLIER_ORG_ID}"""
-        
-        frappe.log_error(summary_msg, "Floriday Order Sync Summary")
-
-        if processed_count == 0 and date_filtered_count > 0:
-            frappe.log_error(
-                f"No orders found in the last 24 hours. {date_filtered_count} orders were filtered out due to date range.",
-                "Floriday Order Sync Info"
-            )
+        # Log summary only if there are errors or no orders
+        if error_count > 0 or processed_count == 0:
+            log_short(f"Sync: P={processed_count}, F={date_filtered_count}, S={skipped_count}, E={error_count}", "Floriday Summary", True)
+        else:
+            # Log success summary when orders were created
+            log_short(f"Success: {processed_count} orders created", "Floriday Success", False)
 
         return {
             "status": "success", 
@@ -200,48 +189,37 @@ Floriday Order Sync Summary:
                 "date_filtered": date_filtered_count,
                 "skipped": skipped_count,
                 "errors": error_count,
-                "date_range": {
-                    "start": start_date.isoformat(),
-                    "end": end_date.isoformat()
-                },
-                "supplier_organization": SUPPLIER_ORG_ID
+                "supplier_organization": SUPPLIER_ORG_ID,
+                "warehouse": WAREHOUSE
             }
         }
 
     except Exception as e:
-        error_msg = f"Error in Floriday order sync: {str(e)}"
-        frappe.log_error(error_msg, "Floriday Order Sync Error")
+        error_short = str(e)[:100] + "..." if len(str(e)) > 100 else str(e)
+        log_short(f"Sync failed: {error_short}", "Floriday Sync Error", True)
         return {"status": "error", "message": str(e)}
 
 
-def create_sales_order_from_floriday(floriday_order):
+def create_sales_order_from_floriday(floriday_order, warehouse):
     """
     Creates a Sales Order in ERPNext from a Floriday order.
-    Args:
-        floriday_order: Dictionary containing the Floriday order data
-    Returns:
-        The created Sales Order document
     """
     floriday_order_id = floriday_order.get("salesOrderId")
     if not floriday_order_id:
         frappe.throw("Floriday order missing salesOrderId")
 
-    # First check if order already exists
     if frappe.db.exists("Sales Order", {"floriday_order_id": floriday_order_id}):
-        frappe.throw(f"Sales Order already exists for Floriday order {floriday_order_id}")
+        frappe.throw(f"Sales Order already exists")
 
-    # Create a default customer if customerOrganizationId exists
+    # Get or create customer using Floriday ID mapping
     customer = get_or_create_customer(floriday_order)
 
-    # Parse dates
     delivery_datetime = parse_delivery_date(floriday_order.get("delivery", {}).get("latestDeliveryDateTime"))
     order_datetime = parse_order_date(floriday_order.get("orderDateTime"))
 
-    # Get Floriday Settings for fallback
     settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
     settings = frappe.get_doc("Floriday Settings", settings_list[0].name) if settings_list else None
 
-    # Create Sales Order
     sales_order = frappe.new_doc("Sales Order")
     sales_order.customer = customer
     sales_order.transaction_date = order_datetime.date()
@@ -251,47 +229,23 @@ def create_sales_order_from_floriday(floriday_order):
     sales_order.po_date = order_datetime.date()
     sales_order.floriday_order_id = floriday_order_id
     
-    # SET THE REQUIRED CUSTOM FIELDS - FIX FOR THE ERRORS
     sales_order.custom_sales_order_type = "Roses"
+    sales_order.custom_order_name = generate_custom_order_name(customer)
     
-    # Add Floriday details to notes
-    floriday_details = f"""Floriday Order Details:
-- Sales Order ID: {floriday_order.get("salesOrderId")}
-- Channel Order ID: {floriday_order.get("salesChannelOrderId")}
-- Sales Channel: {floriday_order.get("salesChannel")}
-- Trade Instrument: {floriday_order.get("tradeInstrument")}
-- Supplier Organization: {floriday_order.get("supplierOrganizationId")}
-- Sequence Number: {floriday_order.get("sequenceNumber")}"""
-
-    sales_order.notes = floriday_details
-    
-    # Set currency from pricePerPiece
+    # Set currency
     price_info = floriday_order.get("pricePerPiece", {})
     transaction_currency = price_info.get("currency", "EUR")
     sales_order.currency = transaction_currency
 
-    # Add delivery info
+    # Add delivery info to notes
     delivery = floriday_order.get("delivery", {})
-    if delivery.get("regionGln"):
-        sales_order.delivery_region_gln = delivery.get("regionGln")
-    if delivery.get("deliveryRemarks"):
-        sales_order.delivery_notes = delivery.get("deliveryRemarks")
-        
-    # Add packing info to notes
     packing = floriday_order.get("packingConfiguration", {})
-    if packing:
-        packing_info = f"""
-Packing Configuration:
-- Pieces per Package: {packing.get('piecesPerPackage')}
-- Load Carrier: {packing.get('loadCarrier')}
-- VBN Package Code: {packing.get('package', {}).get('vbnPackageCode')}"""
-        sales_order.notes += packing_info
+    
+    sales_order.notes = f"""Floriday Order: {floriday_order.get("salesOrderId")}
+Channel: {floriday_order.get("salesChannel")}
+Supplier: {floriday_order.get("supplierOrganizationId")}"""
 
-    # CALCULATE TOTAL ORDERED STEMS FIRST - before item processing
-    total_ordered_stems = floriday_order.get("numberOfPieces", 0)
-    frappe.log_error(f"Total ordered stems from Floriday order: {total_ordered_stems}", "Floriday Ordered Stems Calculation")
-
-    # Add items and get ALL data from Stock Entry
+    # Add items
     trade_item_id = floriday_order.get("tradeItemId")
     
     if trade_item_id:
@@ -300,147 +254,105 @@ Packing Configuration:
             number_of_pieces = floriday_order.get("numberOfPieces", 0)
             price_per_piece = price_info.get("value", 0)
             
-            # Get calculated total if available
             calculated = floriday_order.get("calculatedFields", {})
             total_price_per_piece = calculated.get("totalPricePerPiece", {}).get("value", price_per_piece)
             
-            # Get ALL data from Stock Entry - custom_farm, custom_business_unit, warehouse, AND company
-            farm, business_unit, warehouse, company_from_stock_entry = get_farm_business_unit_warehouse_company_from_stock_entry(trade_item_id, item_code)
+            farm, business_unit, company_from_stock_entry = get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code)
             
-            # Set company from Stock Entry (same source as other fields)
+            # Set company
             if company_from_stock_entry:
                 sales_order.company = company_from_stock_entry
-                frappe.log_error(f"Set company from Stock Entry: {company_from_stock_entry}", "Floriday Company From Stock Entry")
             elif settings and settings.company:
                 sales_order.company = settings.company
-                frappe.log_error(f"Set company from Floriday Settings: {settings.company}", "Floriday Company From Settings")
             else:
-                # Final fallback - get first company
                 companies = frappe.get_all("Company", limit_page_length=1)
                 if companies:
                     sales_order.company = companies[0].name
-                    frappe.log_error(f"Set company from fallback: {sales_order.company}", "Floriday Company Fallback")
             
-            # Create item entry with warehouse from Stock Entry - INCLUDING CUSTOM FIELDS
-            item = {
-                "item_code": item_code,
-                "qty": number_of_pieces,
-                "rate": total_price_per_piece,
-                "delivery_date": delivery_datetime.date(),
-                "warehouse": warehouse,
-                # SET THE ORDERED STEMS FIELD IN THE ITEM TABLE
-                "custom_ordered_quantity": number_of_pieces,  # This is the correct field name
-                "description": f"""Floriday Details:
-- Trade Item ID: {trade_item_id}
-- Pieces per Package: {packing.get("piecesPerPackage", "N/A")}
-- Farm: {farm or "Not specified"}
-- Business Unit: {business_unit or "Not specified"}"""
-            }
+            # Use warehouse from Floriday Settings
+            item_warehouse = warehouse
             
-            sales_order.append("items", item)
+            if not item_warehouse:
+                item_defaults = frappe.get_all(
+                    "Item Default",
+                    fields=["default_warehouse"],
+                    filters={"parent": item_code, "company": sales_order.company}
+                )
+                if item_defaults and item_defaults[0].default_warehouse:
+                    item_warehouse = item_defaults[0].default_warehouse
+                else:
+                    warehouses = frappe.get_all(
+                        "Warehouse",
+                        filters={"company": sales_order.company, "is_group": 0},
+                        fields=["name"],
+                        limit_page_length=1
+                    )
+                    if warehouses:
+                        item_warehouse = warehouses[0].name
+                    else:
+                        frappe.throw(f"No warehouse found for item {item_code}")
             
-            # Set farm and business unit in Sales Order from Stock Entry
+            # Create item
+            item = sales_order.append("items", {})
+            item.item_code = item_code
+            item.qty = number_of_pieces
+            item.rate = total_price_per_piece
+            item.delivery_date = delivery_datetime.date()
+            item.warehouse = item_warehouse
+            item.custom_ordered_quantity = number_of_pieces
+            item.custom_source_warehouse = item_warehouse
+            
+            # Set farm and business unit
             if farm:
                 sales_order.custom_farm = farm
-                frappe.log_error(f"Set custom_farm on Sales Order: {farm}", "Floriday Farm Set")
-            else:
-                frappe.log_error("No farm found to set on Sales Order", "Floriday Farm Missing")
-                
             if business_unit:
                 sales_order.custom_business_unit = business_unit
-                frappe.log_error(f"Set custom_business_unit on Sales Order: {business_unit}", "Floriday Business Unit Set")
-            else:
-                frappe.log_error("No business_unit found to set on Sales Order", "Floriday Business Unit Missing")
-        else:
-            frappe.log_error(f"Could not find item code for trade item ID: {trade_item_id}", "Floriday Item Mapping Error")
-    else:
-        frappe.log_error("No tradeItemId found in Floriday order", "Floriday Trade Item Missing")
 
     if not sales_order.items:
-        frappe.throw(f"No valid items found in Floriday order {floriday_order_id}")
+        frappe.throw(f"No valid items found")
 
-    # SET THE ORDERED STEMS CUSTOM FIELD - FIX FOR THE SECOND ERROR
-    # Ensure it's never zero by using the calculated value
+    # Set ordered stems
+    total_ordered_stems = floriday_order.get("numberOfPieces", 0)
     if total_ordered_stems == 0:
-        # If somehow still zero, try to get from items
         for item in sales_order.items:
             total_ordered_stems += item.qty
-        frappe.log_error(f"Recalculated ordered stems from items: {total_ordered_stems}", "Floriday Ordered Stems Recalculation")
     
-    # Set the main sales order custom field for ordered stems (if it exists)
     if hasattr(sales_order, 'custom_ordered_stems'):
         sales_order.custom_ordered_stems = total_ordered_stems
-        frappe.log_error(f"Set custom_ordered_stems to: {total_ordered_stems}", "Floriday Ordered Stems Set")
 
-    # Set conversion rate if company is set
+    # Set conversion rate
     if sales_order.company:
         company_currency = frappe.get_cached_value('Company', sales_order.company, 'default_currency')
         
         if transaction_currency != company_currency:
-            # Get exchange rate from ERPNext
             exchange_rate = get_exchange_rate(transaction_currency, company_currency, order_datetime)
-            if exchange_rate:
-                sales_order.conversion_rate = exchange_rate
-            else:
-                frappe.log_error(f"No exchange rate found for {transaction_currency} to {company_currency}", "Floriday Exchange Rate")
-                # Set default conversion rate
-                sales_order.conversion_rate = 1.0
+            sales_order.conversion_rate = exchange_rate or 1.0
 
-    # LOG THE SALES ORDER PAYLOAD BEFORE CREATION
-    sales_order_payload = {
-        "customer": sales_order.customer,
-        "transaction_date": str(sales_order.transaction_date),
-        "delivery_date": str(sales_order.delivery_date),
-        "currency": sales_order.currency,
-        "conversion_rate": getattr(sales_order, 'conversion_rate', 1.0),
-        "company": sales_order.company,
-        "custom_farm": getattr(sales_order, 'custom_farm', 'Not set'),
-        "custom_business_unit": getattr(sales_order, 'custom_business_unit', 'Not set'),
-        "custom_sales_order_type": getattr(sales_order, 'custom_sales_order_type', 'Not set'),
-        "custom_ordered_stems": getattr(sales_order, 'custom_ordered_stems', 'Not set'),
-        "items": [
-            {
-                "item_code": item.item_code,
-                "qty": item.qty,
-                "rate": item.rate,
-                "warehouse": item.warehouse,
-                "custom_ordered_quantity": getattr(item, 'custom_ordered_quantity', 'Not set')
-            } for item in sales_order.items
-        ]
-    }
-    frappe.log_error(f"SALES ORDER PAYLOAD TO BE CREATED:\n{json.dumps(sales_order_payload, indent=2)}", f"Sales Order Payload {floriday_order_id}")
-    
-    # Validate and calculate totals
+    # Validate and submit
     sales_order.run_method('validate')
     sales_order.run_method('calculate_taxes_and_totals')
     
-    # Insert and submit
     sales_order.insert(ignore_permissions=True)
     sales_order.submit()
     
-    frappe.log_error(f"Created and submitted Sales Order: {sales_order.name}", "Floriday Sales Order Created")
     return sales_order
 
 
-def get_farm_business_unit_warehouse_company_from_stock_entry(trade_item_id, item_code):
+def get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code):
     """
-    Get farm, business unit, warehouse, and company from the latest Stock Entry for this item
+    Get farm, business unit, and company from the latest Stock Entry
     """
     try:
         farm = None
         business_unit = None
-        warehouse = None
         company = None
         
-        frappe.log_error(f"Looking for Stock Entry with item: {item_code} (trade_item_id: {trade_item_id})", "Floriday Stock Entry Search")
-        
-        # Look for the latest Stock Entry that contains this item
         stock_entry_details = frappe.get_all(
             "Stock Entry Detail",
-            fields=["parent", "t_warehouse"],
+            fields=["parent"],
             filters={
                 "item_code": item_code,
-                "docstatus": 1  # Only submitted stock entries
+                "docstatus": 1
             },
             order_by="creation DESC",
             limit_page_length=1
@@ -448,51 +360,26 @@ def get_farm_business_unit_warehouse_company_from_stock_entry(trade_item_id, ite
         
         if stock_entry_details:
             stock_entry_name = stock_entry_details[0].parent
-            frappe.log_error(f"Found Stock Entry: {stock_entry_name} for item {item_code}", "Floriday Stock Entry Found")
-            
-            # Get the full Stock Entry document
             stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
             
-            # Get ALL fields from the Stock Entry
-            farm = stock_entry.get('custom_farm')  # Use correct field name
-            business_unit = stock_entry.get('custom_business_unit')  # Use correct field name
-            warehouse = stock_entry.to_warehouse or stock_entry_details[0].t_warehouse
-            company = stock_entry.company  # Company is a standard field in Stock Entry
-            
-            frappe.log_error(f"From Stock Entry {stock_entry_name}: custom_farm='{farm}', custom_business_unit='{business_unit}', warehouse='{warehouse}', company='{company}'", "Floriday Stock Entry Data")
-            
-        else:
-            frappe.log_error(f"No Stock Entries found for item {item_code}", "Floriday Stock Entry Not Found")
+            farm = stock_entry.get('custom_farm')
+            business_unit = stock_entry.get('custom_business_unit')
+            company = stock_entry.company
         
-        # If no Stock Entry found, use fallbacks
         if not company:
             companies = frappe.get_all("Company", limit_page_length=1)
             if companies:
                 company = companies[0].name
-                frappe.log_error(f"Using fallback company: {company}", "Floriday Company Fallback")
         
-        if not warehouse and company:
-            item_defaults = frappe.get_all(
-                "Item Default",
-                fields=["default_warehouse"],
-                filters={"parent": item_code, "company": company}
-            )
-            if item_defaults:
-                warehouse = item_defaults[0].default_warehouse
-                frappe.log_error(f"Using fallback warehouse: {warehouse}", "Floriday Warehouse Fallback")
+        return farm, business_unit, company
         
-        frappe.log_error(f"Final result - custom_farm: '{farm}', custom_business_unit: '{business_unit}', warehouse: '{warehouse}', company: '{company}'", "Floriday Final Result")
-        
-        return farm, business_unit, warehouse, company
-        
-    except Exception as e:
-        frappe.log_error(f"Error getting data from stock entry for trade item {trade_item_id}: {str(e)}", "Floriday Stock Entry Error")
-        return None, None, None, None
+    except Exception:
+        return None, None, None
 
 
 def get_exchange_rate(from_currency, to_currency, date):
     """
-    Get exchange rate between currencies for a specific date
+    Get exchange rate between currencies
     """
     try:
         exchange_rate = frappe.db.sql("""
@@ -503,79 +390,133 @@ def get_exchange_rate(from_currency, to_currency, date):
             LIMIT 1
         """, (from_currency, to_currency, date), as_dict=True)
 
-        if exchange_rate:
-            return exchange_rate[0].exchange_rate
-        
-        # Fallback: try to get from Currency Exchange Rate Settings
-        try:
-            from frappe.utils import getdate
-            exchange_rate = frappe.db.get_value("Currency Exchange", {
-                "from_currency": from_currency,
-                "to_currency": to_currency,
-                "date": getdate(date)
-            }, "exchange_rate")
-            
-            if exchange_rate:
-                return exchange_rate
-        except:
-            pass
-            
-        return None
-    except Exception as e:
-        frappe.log_error(f"Error getting exchange rate: {str(e)}", "Floriday Exchange Rate Error")
+        return exchange_rate[0].exchange_rate if exchange_rate else None
+    except Exception:
         return None
 
 
 def get_or_create_customer(floriday_order):
     """
     Gets or creates a customer based on Floriday order data.
+    Matches using custom_floriday_id field on Customer doctype.
     """
     if not floriday_order:
         frappe.throw("No order data provided")
     
-    # Get customer organization ID
+    # Get the Floriday customer/organization ID (UUID format)
     customer_org_id = floriday_order.get('customerOrganizationId')
     if not customer_org_id:
-        # Use a default customer for orders without organization ID
-        customer_name = "Floriday-Default-Customer"
-    else:
-        # Use a standardized naming convention for Floriday customers
-        customer_name = f"Floriday-{customer_org_id}"
+        log_short("No customerOrganizationId in Floriday order", "Floriday Customer Warning", True)
+        # Fallback to default customer
+        return get_default_customer()
     
-    # Check if customer exists
-    if frappe.db.exists("Customer", customer_name):
+    log_short(f"Looking for customer with Floriday ID: {customer_org_id[:8]}...", "Floriday Customer Lookup", False)
+    
+    # STEP 1: Try to find customer by custom_floriday_id field
+    customer_name = frappe.db.get_value(
+        "Customer", 
+        {"custom_floriday_id": customer_org_id}, 
+        "name"
+    )
+    
+    if customer_name:
+        # Found existing customer with matching Floriday ID
+        log_short(f"Found customer {customer_name} with Floriday ID", "Floriday Customer Match", False)
         return customer_name
     
-    # Create new customer
+    # STEP 2: If not found by ID, try to find by customer name (if available in Floriday)
+    # Some Floriday orders might include the customer name
+    floriday_customer_name = floriday_order.get('customerName') or floriday_order.get('consigneeName')
+    
+    if floriday_customer_name:
+        # Check if customer exists with this exact name
+        if frappe.db.exists("Customer", floriday_customer_name):
+            customer_name = floriday_customer_name
+            # Update this customer with the Floriday ID for future lookups
+            frappe.db.set_value("Customer", customer_name, "custom_floriday_id", customer_org_id)
+            log_short(f"Updated customer {customer_name} with Floriday ID", "Floriday Customer Updated", False)
+            return customer_name
+        
+        # Try to find by partial name match (case insensitive)
+        customers = frappe.get_all(
+            "Customer",
+            filters={"customer_name": ["like", f"%{floriday_customer_name}%"]},
+            limit=1
+        )
+        if customers:
+            customer_name = customers[0].name
+            # Update with Floriday ID
+            frappe.db.set_value("Customer", customer_name, "custom_floriday_id", customer_org_id)
+            log_short(f"Updated customer {customer_name} with Floriday ID (partial match)", "Floriday Customer Updated", False)
+            return customer_name
+    
+    # STEP 3: Create new customer
+    return create_new_customer(floriday_order, customer_org_id)
+
+
+def create_new_customer(floriday_order, customer_org_id):
+    """
+    Creates a new customer with Floriday ID
+    """
+    # Get customer name from Floriday if available
+    floriday_customer_name = floriday_order.get('customerName') or floriday_order.get('consigneeName')
+    
+    if not floriday_customer_name:
+        # If no name provided, create a placeholder name
+        floriday_customer_name = f"Consignee {customer_org_id[:8]}"
+    
     try:
         customer = frappe.get_doc({
             "doctype": "Customer",
-            "customer_name": customer_name,
+            "customer_name": floriday_customer_name,
+            "custom_floriday_id": customer_org_id,  # Store the UUID
             "customer_type": "Company",
-            "customer_group": "Commercial",
-            "territory": "Netherlands",
-            "floriday_customer": 1,
-            "floriday_organization_id": customer_org_id,
+            "customer_group": "Commercial",  # Default, can be configured
+            "territory": "Netherlands",  # Default, can be configured
         })
         customer.insert(ignore_permissions=True)
         
-        frappe.log_error(f"Created new Floriday customer: {customer_name}", "Floriday Customer Created")
-        return customer_name
+        log_short(f"Created new customer: {floriday_customer_name} with Floriday ID", "Floriday Customer Created", False)
+        return customer.name
+        
     except Exception as e:
-        frappe.log_error(f"Failed to create customer '{customer_name}': {str(e)}", "Floriday Customer Creation Error")
-        # Return default customer if creation fails
-        return "Floriday-Default-Customer"
+        log_short(f"Customer creation error: {str(e)[:50]}", "Floriday Customer Error", True)
+        # Return default customer as last resort
+        return get_default_customer()
+
+
+def get_default_customer():
+    """
+    Returns a default customer for orders without valid customer mapping
+    """
+    default_customer = "Floriday-Default-Customer"
+    
+    # Create default customer if it doesn't exist
+    if not frappe.db.exists("Customer", default_customer):
+        try:
+            customer = frappe.get_doc({
+                "doctype": "Customer",
+                "customer_name": default_customer,
+                "customer_type": "Company",
+                "customer_group": "Commercial",
+                "territory": "Netherlands",
+            })
+            customer.insert(ignore_permissions=True)
+            log_short("Created default Floriday customer", "Floriday Customer Created", False)
+        except Exception as e:
+            log_short(f"Default customer creation error: {str(e)[:30]}", "Floriday Customer Error", True)
+    
+    return default_customer
 
 
 def get_erpnext_item_code(floriday_trade_item_id):
     """
-    Get ERPNext item code from Floriday trade item ID using dynamic mapping
+    Get ERPNext item code from Floriday trade item ID
     """
     try:
-        # First try to get from Floriday Item Mapping doctype
         mappings = frappe.get_all(
             "Floriday Item Mapping",
-            fields=["item_code", "trade_item_id"],
+            fields=["item_code"],
             filters={"trade_item_id": floriday_trade_item_id}
         )
         
@@ -584,21 +525,18 @@ def get_erpnext_item_code(floriday_trade_item_id):
             if frappe.db.exists("Item", item_code):
                 return item_code
 
-        # Fallback to custom field
         item = frappe.db.get_value("Item", {"floriday_trade_item_id": floriday_trade_item_id}, "name")
         if item:
             return item
 
-        frappe.throw(f"No item mapping found for Floriday trade item ID: {floriday_trade_item_id}")
+        frappe.throw(f"No item mapping for {floriday_trade_item_id}")
     except Exception as e:
-        frappe.log_error(f"Error getting item code for {floriday_trade_item_id}: {str(e)}", "Floriday Item Mapping Error")
+        log_short(f"Item error: {str(e)[:30]}", "Floriday Item Error", True)
         raise
 
 
 def parse_delivery_date(delivery_date_str):
-    """
-    Parses the delivery date string from Floriday.
-    """
+    """Parse delivery date"""
     if not delivery_date_str:
         return datetime.now(timezone.utc) + timedelta(days=1)
     
@@ -608,17 +546,13 @@ def parse_delivery_date(delivery_date_str):
         elif 'T' in delivery_date_str and 'Z' in delivery_date_str:
             return datetime.strptime(delivery_date_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         else:
-            # Try other possible formats
             return datetime.fromisoformat(delivery_date_str.replace('Z', '+00:00'))
-    except Exception as e:
-        frappe.log_error(f"Error parsing delivery date {delivery_date_str}: {str(e)}", "Floriday Date Parse Error")
+    except Exception:
         return datetime.now(timezone.utc) + timedelta(days=1)
 
 
 def parse_order_date(order_date_str):
-    """
-    Parses the order date string from Floriday.
-    """
+    """Parse order date"""
     if not order_date_str:
         return datetime.now(timezone.utc)
     
@@ -628,10 +562,8 @@ def parse_order_date(order_date_str):
         elif 'T' in order_date_str and 'Z' in order_date_str:
             return datetime.strptime(order_date_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
         else:
-            # Try other possible formats
             return datetime.fromisoformat(order_date_str.replace('Z', '+00:00'))
-    except Exception as e:
-        frappe.log_error(f"Error parsing order date {order_date_str}: {str(e)}", "Floriday Date Parse Error")
+    except Exception:
         return datetime.now(timezone.utc)
 
 
@@ -641,7 +573,6 @@ def get_sync_status():
     Returns the status of the last Floriday sync operation
     """
     try:
-        # Get the latest error log for Floriday
         latest_log = frappe.get_all("Error Log", 
             filters={"method": ["like", "%Floriday%"]},
             fields=["name", "creation", "method", "error"],
@@ -655,3 +586,28 @@ def get_sync_status():
         }
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+# Optional: One-time migration script to update existing customers
+@frappe.whitelist()
+def migrate_existing_customers():
+    """
+    One-time script to list existing Floriday customers that need mapping
+    """
+    customers = frappe.get_all(
+        "Customer", 
+        filters={
+            "name": ["like", "Floriday-%"],
+        },
+        fields=["name", "custom_floriday_id"]
+    )
+    
+    migrated = 0
+    for cust in customers:
+        log_short(f"Customer to migrate: {cust.name} with ID: {cust.custom_floriday_id[:8] if cust.custom_floriday_id else 'None'}", 
+                 "Floriday Migration", False)
+        migrated += 1
+    
+    return f"Found {migrated} customers to potentially migrate"
+
+
