@@ -3,6 +3,22 @@
   "docstatus": 0,
   "doctype": "Website Slideshow",
   "header": null,
+  "modified": "2026-02-05 11:25:11.799041",
+  "name": "athena",
+  "slideshow_items": [
+   {
+    "description": null,
+    "heading": null,
+    "image": "/files/athena.jpeg",
+    "url": null
+   }
+  ],
+  "slideshow_name": "athena"
+ },
+ {
+  "docstatus": 0,
+  "doctype": "Website Slideshow",
+  "header": null,
   "modified": "2025-11-19 12:00:37.640066",
   "name": "Mandala",
   "slideshow_items": [

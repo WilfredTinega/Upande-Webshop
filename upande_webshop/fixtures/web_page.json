@@ -300,24 +300,24 @@
   "meta_description": null,
   "meta_image": null,
   "meta_title": null,
-  "modified": "2026-02-02 02:02:29.392426",
+  "modified": "2026-02-16 12:32:30.452997",
   "module": "Upande Webshop",
   "name": "webshop",
   "page_blocks": [
    {
     "add_background_image": 0,
-    "add_border_at_bottom": 1,
-    "add_border_at_top": 1,
-    "add_bottom_padding": 0,
-    "add_container": 0,
+    "add_border_at_bottom": 0,
+    "add_border_at_top": 0,
+    "add_bottom_padding": 1,
+    "add_container": 1,
     "add_shade": 0,
-    "add_top_padding": 0,
+    "add_top_padding": 1,
     "background_image": null,
-    "css_class": "",
+    "css_class": null,
     "hide_block": 0,
     "section_id": null,
-    "web_template": "Hero Slider",
-    "web_template_values": "{\"slider_name\":\"Hero Slider\",\"show_indicators\":1,\"show_controls\":0,\"slide_1_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-athena.webp\",\"slide_1_title\":\"Fresh Kenyan Roses\",\"slide_1_subtitle\":\"Premium quality roses grown sustainably.\",\"slide_1_primary_action_label\":\"Shop Now\",\"slide_1_primary_action\":\"all-products\",\"slide_1_content_align\":\"Centre\",\"slide_1_theme\":\"Dark\",\"slide_2_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-goldfinch.webp\",\"slide_2_title\":\"Standard Roses\",\"slide_2_subtitle\":\"Elegant white roses with premium Kenyan quality.\",\"slide_2_primary_action_label\":\"Explore Variety\",\"slide_2_primary_action\":\"shop-by-category\",\"slide_2_content_align\":\"Left\",\"slide_2_theme\":\"Dark\",\"slide_3_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-royal-magicc-1.webp\",\"slide_3_title\":\"Spray Roses\",\"slide_3_subtitle\":\"Deep red roses, perfect for luxury bouquets.\",\"slide_3_primary_action_label\":\"View Details\",\"slide_3_primary_action\":\"standard-roses/snowstorm-xkpup\",\"slide_3_theme\":\"Dark\",\"slide_4_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-julieta-cres.webp\",\"slide_4_subtitle\":\"Standard Roses: Tall, single-stem roses with a rounded bloom head, ideal for elegant and structured arrangements.\",\"slide_4_theme\":\"Dark\",\"slide_5_image\":\"https://www.kikwetuflowers.com/wp-content/uploads/2025/08/kikwetu-flowers-dpray-roses-appricott.webp\",\"slide_5_subtitle\":\"Splay Roses: Wide-spreading roses with outward-arching stems, perfect for full, natural, and voluminous bouquets.\",\"slide_5_theme\":\"Dark\"}"
+    "web_template": "Hero Carousel",
+    "web_template_values": "{\"autoplay_enabled\":1,\"autoplay_delay\":10000,\"slide_1_image\":\"/files/flower farm 4.jpg\",\"slide_1_image_alt\":\"flowers\",\"slide_1_show_caption\":1,\"slide_1_title\":\"Mona Flowers\",\"slide_1_subtitle\":\"Elegance in Every Stem\",\"slide_1_button_1_text\":\"SHOP NOW\",\"slide_1_button_1_link\":\"/all-products\",\"slide_1_button_2_text\":\"MAKE INQUIRY\",\"slide_1_button_2_link\":\"/contact\",\"slide_2_image\":\"/files/ariel farm.png\",\"slide_2_image_alt\":\"ariel farm photo\",\"slide_2_show_caption\":1,\"slide_2_title\":\"From Our Family to Yours\",\"slide_2_subtitle\":\"Fresh Flowers, Thoughtfully Grown\",\"slide_2_button_1_text\":\"SHOP NOW\",\"slide_2_button_1_link\":\"/all-products\",\"slide_3_image\":\"/files/farm.png\",\"slide_3_show_caption\":1,\"slide_3_title\":\"Slow-Grown & Sustainably Farmed\",\"slide_3_subtitle\":\"Farm-Fresh Bouquets, Direct from Our Field\",\"slide_3_button_1_text\":\"SHOP NOW\",\"slide_3_button_1_link\":\"/all-products\"}"
    },
    {
     "add_background_image": 0,
@@ -331,8 +331,23 @@
     "css_class": null,
     "hide_block": 0,
     "section_id": null,
-    "web_template": "Section with Features",
-    "web_template_values": "{\"title\":\"Why Choose Our Kenyan Roses?\",\"subtitle\":\"Premium quality, hand-picked blooms grown at high-altitude farms.\",\"columns\":\"3\",\"features\":[{\"idx\":1,\"__islocal\":true,\"title\":\"Freshly Harvested\",\"content\":\" Cut at peak bloom for maximum vase life.\",\"name\":\"7mtgbf8p\"},{\"idx\":2,\"__islocal\":true,\"title\":\"Grown at High Altitude\",\"content\":\"Ideal climate conditions that produce vibrant colors and strong stems.\",\"name\":\"gf5v8g37\"},{\"idx\":3,\"__islocal\":true,\"title\":\"Fast Global Shipping\",\"content\":\"Export-ready bouquets delivered efficiently worldwide.\",\"name\":\"crpbs3qp\"}]}"
+    "web_template": "Description Section",
+    "web_template_values": null
+   },
+   {
+    "add_background_image": 0,
+    "add_border_at_bottom": 0,
+    "add_border_at_top": 0,
+    "add_bottom_padding": 1,
+    "add_container": 1,
+    "add_shade": 0,
+    "add_top_padding": 1,
+    "background_image": null,
+    "css_class": null,
+    "hide_block": 0,
+    "section_id": null,
+    "web_template": "Testimonial Section",
+    "web_template_values": null
    }
   ],
   "published": 1,

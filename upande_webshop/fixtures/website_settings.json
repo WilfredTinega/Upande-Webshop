@@ -5,28 +5,20 @@
   "app_name": "Upande ERPNEXT",
   "auto_account_deletion": 72,
   "banner_html": null,
-  "banner_image": "https://erp.upande.com/files/UpandeLogo.jpg",
+  "banner_image": "/private/files/Mona-Flowers-Main-Logo.png",
   "brand_html": null,
   "call_to_action": null,
   "call_to_action_url": null,
-  "copyright": "Upande Webshop",
+  "copyright": "2026 Mona Flowers Kenya Limited",
   "disable_signup": 1,
   "docstatus": 0,
   "doctype": "Website Settings",
   "enable_google_indexing": 0,
   "enable_view_tracking": 0,
   "favicon": null,
-  "footer_items": [
-   {
-    "label": "Contact Us",
-    "open_in_new_tab": 0,
-    "parent_label": null,
-    "right": 0,
-    "url": "contact"
-   }
-  ],
-  "footer_logo": "https://erp.upande.com/files/UpandeLogo.jpg",
-  "footer_powered": "Upande ERP",
+  "footer_items": [],
+  "footer_logo": "/private/files/Mona-Flowers-Main-Logo.png",
+  "footer_powered": "Powered by Upande",
   "footer_template": null,
   "footer_template_values": null,
   "google_analytics_anonymize_ip": 1,
@@ -37,10 +29,10 @@
   "home_page": "",
   "indexing_authorization_code": null,
   "indexing_refresh_token": null,
-  "modified": "2026-02-15 13:55:24.964006",
+  "modified": "2026-02-16 14:32:21.332139",
   "name": "Website Settings",
   "navbar_search": 0,
-  "navbar_template": "Primary Navbar",
+  "navbar_template": "Standard Navbar",
   "navbar_template_values": null,
   "robots_txt": null,
   "route_redirects": [
@@ -59,23 +51,30 @@
   "title_prefix": null,
   "top_bar_items": [
    {
-    "label": "Webshop",
+    "label": "Home",
     "open_in_new_tab": 0,
     "parent_label": null,
     "right": 1,
-    "url": null
+    "url": "webshop"
    },
    {
     "label": "Products",
     "open_in_new_tab": 0,
-    "parent_label": "Webshop",
+    "parent_label": "",
     "right": 1,
     "url": "all-products"
    },
    {
+    "label": "Contact",
+    "open_in_new_tab": 0,
+    "parent_label": "More",
+    "right": 1,
+    "url": "contact"
+   },
+   {
     "label": "Cart",
     "open_in_new_tab": 0,
-    "parent_label": "Webshop",
+    "parent_label": "More",
     "right": 1,
     "url": "cart"
    },
@@ -120,13 +119,6 @@
     "parent_label": "More",
     "right": 1,
     "url": "issues"
-   },
-   {
-    "label": "Contact",
-    "open_in_new_tab": 0,
-    "parent_label": "More",
-    "right": 1,
-    "url": "contact"
    }
   ],
   "website_theme": "",
