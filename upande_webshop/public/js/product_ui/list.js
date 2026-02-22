@@ -24,10 +24,10 @@ webshop.ProductList = class {
 			let title = item.web_item_name || item.item_name || item.item_code || "";
 			title =  title.length > 200 ? title.substr(0, 200) + "..." : title;
 
-			html += `<div class='row list-row w-100 mb-4'>`;
+			html += `<a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class='row list-row w-100 mb-4'>`;
 			html += me.get_image_html(item, title, me.settings);
 			html += me.get_row_body_html(item, title, me.settings);
-			html += `</div>`;
+			html += `</div></a>`;
 		});
 
 		let $product_wrapper = this.products_section;
@@ -42,22 +42,17 @@ webshop.ProductList = class {
 		if (image) {
 			image_html += `
 				<div class="col-2 border text-center rounded list-image">
-					<a class="product-link product-list-link" href="/${ item.route || '#' }">
-						<img itemprop="image" class="website-image h-100 w-100" alt="${ title }"
-							src="${ image }">
-					</a>
+					<img itemprop="image" class="website-image h-100 w-100" alt="${ title }"
+						src="${ image }">
 					${ wishlist_enabled ? this.get_wishlist_icon(item): '' }
 				</div>
 			`;
 		} else {
 			image_html += `
 				<div class="col-2 border text-center rounded list-image">
-					<a class="product-link product-list-link" href="/${ item.route || '#' }"
-						style="text-decoration: none">
-						<div class="card-img-top no-image-list">
-							${ frappe.get_abbr(title) }
-						</div>
-					</a>
+					<div class="card-img-top no-image-list">
+						${ frappe.get_abbr(title) }
+					</div>
 					${ wishlist_enabled ? this.get_wishlist_icon(item): '' }
 				</div>
 			`;
@@ -68,28 +63,19 @@ webshop.ProductList = class {
 
 	get_row_body_html(item, title, settings) {
 		let body_html = `<div class='col-10 text-left'>`;
-		body_html += this.get_title_html(item, title, settings);
+		body_html += this.get_title_html(title);
 		body_html += this.get_item_details(item, settings);
 		body_html += `</div>`;
 		return body_html;
 	}
 
-	get_title_html(item, title, settings) {
+	get_title_html(title) {
 		let title_html = `<div style="display: flex; margin-left: -15px;">`;
 		title_html += `
-			<div class="col-8" style="margin-right: -15px;">
-				<a class="" href="/${ item.route || '#' }"
-					style="color: var(--gray-800); font-weight: 500;">
-					${ title }
-				</a>
+			<div class="col-12" style="margin-right: -15px; font-weight: 500;">
+				${ title }
 			</div>
 		`;
-
-		if (settings.enabled) {
-			title_html += `<div class="col-4 cart-action-container ${item.in_cart ? 'd-flex' : ''}">`;
-			title_html += this.get_primary_button(item, settings);
-			title_html += `</div>`;
-		}
 		title_html += `</div>`;
 
 		return title_html;
@@ -162,49 +148,5 @@ webshop.ProductList = class {
 		`;
 	}
 
-	get_primary_button(item, settings) {
-		if (item.has_variants) {
-			return `
-				<a href="/${ item.route || '#' }">
-					<div class="btn btn-sm btn-explore-variants btn mb-0 mt-0">
-						${ __("Explore") }
-					</div>
-				</a>
-			`;
-		} else if (settings.enabled && (settings.allow_items_not_in_stock || item.in_stock)) {
-			return `
-				<div id="${ item.name }" class="btn
-					btn-sm btn-primary btn-add-to-cart-list mb-0
-					${ item.in_cart ? 'hidden' : '' }"
-					data-item-code="${ item.item_code }"
-					style="margin-top: 0px !important; max-height: 30px; float: right;
-						padding: 0.25rem 1rem; min-width: 135px;">
-					<span class="mr-2">
-						<svg class="icon icon-md">
-							<use href="#icon-assets"></use>
-						</svg>
-					</span>
-					${ settings.enable_checkout ? __("Add to Cart") :  __("Add to Quote") }
-				</div>
-
-				<div class="cart-indicator list-indicator ${item.in_cart ? '' : 'hidden'}">
-					1
-				</div>
-
-				<a href="/cart">
-					<div id="${ item.name }" class="btn
-						btn-sm btn-primary btn-add-to-cart-list
-						ml-4 go-to-cart mb-0 mt-0
-						${ item.in_cart ? '' : 'hidden' }"
-						data-item-code="${ item.item_code }"
-						style="padding: 0.25rem 1rem; min-width: 135px;">
-						${ settings.enable_checkout ? __("Go to Cart") :  __("Go to Quote") }
-					</div>
-				</a>
-			`;
-		} else {
-			return ``;
-		}
-	}
-
 };
+

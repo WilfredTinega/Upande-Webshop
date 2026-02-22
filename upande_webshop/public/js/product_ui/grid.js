@@ -24,10 +24,10 @@ webshop.ProductGrid = class {
 			let title = item.web_item_name || item.item_name || item.item_code || "";
 			title =  title.length > 90 ? title.substr(0, 90) + "..." : title;
 
-			html += `<div class="col-sm-4 item-card"><div class="card text-left">`;
+			html += `<div class="col-sm-4 item-card"><a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class="card text-left">`;
 			html += me.get_image_html(item, title);
 			html += me.get_card_body_html(item, title, me.settings);
-			html += `</div></div>`;
+			html += `</div></a></div>`;
 		});
 
 		let $product_wrapper = this.products_section;
@@ -40,19 +40,15 @@ webshop.ProductGrid = class {
 		if (image) {
 			return `
 				<div class="card-img-container">
-					<a href="/${ item.route || '#' }" style="text-decoration: none;">
-						<img itemprop="image" class="card-img" src="${ image }" alt="${ title }">
-					</a>
+					<img itemprop="image" class="card-img" src="${ image }" alt="${ title }">
 				</div>
 			`;
 		} else {
 			return `
 				<div class="card-img-container">
-					<a href="/${ item.route || '#' }" style="text-decoration: none;">
-						<div class="card-img-top no-image">
-							${ frappe.get_abbr(title) }
-						</div>
-					</a>
+					<div class="card-img-top no-image">
+						${ frappe.get_abbr(title) }
+					</div>
 				</div>
 			`;
 		}
@@ -63,7 +59,7 @@ webshop.ProductGrid = class {
 			<div class="card-body text-left card-body-flex" style="width:100%">
 				<div style="margin-top: 1rem; display: flex;">
 		`;
-		body_html += this.get_title(item, title);
+		body_html += this.get_title(title);
 
 		// get floating elements
 		if (!item.has_variants) {
@@ -84,19 +80,16 @@ webshop.ProductGrid = class {
 		}
 
 		body_html += this.get_stock_availability(item, settings);
-		body_html += this.get_primary_button(item, settings);
 		body_html += `</div>`; // close div on line 49
 
 		return body_html;
 	}
 
-	get_title(item, title) {
+	get_title(title) {
 		let title_html = `
-			<a href="/${ item.route || '#' }">
-				<div class="product-title" itemprop="name">
-					${ title || '' }
-				</div>
-			</a>
+			<div class="product-title" itemprop="name">
+				${ title || '' }
+			</div>
 		`;
 		return title_html;
 	}
@@ -161,41 +154,4 @@ webshop.ProductGrid = class {
 		return ``;
 	}
 
-	get_primary_button(item, settings) {
-		if (item.has_variants) {
-			return `
-				<a href="/${ item.route || '#' }">
-					<div class="btn btn-sm btn-explore-variants w-100 mt-4">
-						${ __("Explore") }
-					</div>
-				</a>
-			`;
-		} else if (settings.enabled && (settings.allow_items_not_in_stock || item.in_stock)) {
-			return `
-				<div id="${ item.name }" class="btn
-					btn-sm btn-primary btn-add-to-cart-list
-					w-100 mt-2 ${ item.in_cart ? 'hidden' : '' }"
-					data-item-code="${ item.item_code }">
-					<span class="mr-2">
-						<svg class="icon icon-md">
-							<use href="#icon-assets"></use>
-						</svg>
-					</span>
-					${ settings.enable_checkout ? __("Add to Cart") :  __("Add to Quote") }
-				</div>
-
-				<a href="/cart">
-					<div id="${ item.name }" class="btn
-						btn-sm btn-primary btn-add-to-cart-list
-						w-100 mt-4 go-to-cart-grid
-						${ item.in_cart ? '' : 'hidden' }"
-						data-item-code="${ item.item_code }">
-						${ settings.enable_checkout ? __("Go to Cart") :  __("Go to Quote") }
-					</div>
-				</a>
-			`;
-		} else {
-			return ``;
-		}
-	}
 };

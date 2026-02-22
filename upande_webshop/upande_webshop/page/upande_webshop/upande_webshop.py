@@ -1,5 +1,5 @@
 import frappe
-from webshop.webshop.product_data_engine.filters import ProductFiltersBuilder
+from upande_webshop.upande_webshop.product_data_engine.filters import ProductFiltersBuilder
 
 
 @frappe.whitelist()
