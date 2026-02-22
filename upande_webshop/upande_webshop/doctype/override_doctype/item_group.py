@@ -102,7 +102,7 @@ def get_parent_item_groups(item_group_name, from_item=False):
 	if settings.enable_field_filters:
 		base_nav_page = {"name": _("Shop by Category"), "route": "/shop-by-category"}
 	else:
-		base_nav_page = {"name": _("All Products"), "route": "/all-products"}
+		base_nav_page = {"name": _("All Products"), "route": "/upande-webshop"}
 
 	if from_item and frappe.request.environ.get("HTTP_REFERER"):
 		# base page after 'Home' will vary on Item page
