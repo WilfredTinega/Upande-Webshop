@@ -153,11 +153,14 @@ def request_for_quotation():
 
 
 @frappe.whitelist()
-def update_cart(item_code, qty, additional_notes=None, with_items=False):
+def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, with_items=False):
 	quotation = _get_cart_quotation()
 
 	empty_card = False
 	qty = flt(qty)
+	if not uom:
+		uom = frappe.db.get_value("Item", item_code, "stock_uom")
+
 	if qty == 0:
 		quotation_items = quotation.get("items", {"item_code": ["!=", item_code]})
 		if quotation_items:
@@ -178,12 +181,16 @@ def update_cart(item_code, qty, additional_notes=None, with_items=False):
 					"doctype": "Quotation Item",
 					"item_code": item_code,
 					"qty": qty,
+					"uom": uom,
+					"custom_length": custom_length,
 					"additional_notes": additional_notes,
 					"warehouse": warehouse,
 				},
 			)
 		else:
 			quotation_items[0].qty = qty
+			quotation_items[0].uom = uom
+			quotation_items[0].custom_length = custom_length
 			quotation_items[0].warehouse = warehouse
 			quotation_items[0].additional_notes = additional_notes
 
@@ -818,3 +825,11 @@ def remove_coupon_code():
 	quotation.save()
 
 	return quotation
+
+@frappe.whitelist()
+def update_cart_delivery_date(delivery_date):
+	quotation = _get_cart_quotation()
+	quotation.delivery_date = delivery_date
+	quotation.flags.ignore_permissions = True
+	quotation.save()
+	return {"name": quotation.name}

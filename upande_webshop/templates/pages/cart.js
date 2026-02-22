@@ -129,7 +129,7 @@ $.extend(shopping_cart, {
 		return frappe.call({
 			btn: btn,
 			type: "POST",
-			method: "webshop.webshop.shopping_cart.cart.apply_shipping_rule",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.apply_shipping_rule",
 			args: { shipping_rule: rule },
 			callback: function(r) {
 				if(!r.exc) {
@@ -144,7 +144,7 @@ $.extend(shopping_cart, {
 
 		return frappe.call({
 			type: "POST",
-			method: "webshop.webshop.shopping_cart.cart.place_order",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.place_order",
 			btn: btn,
 			callback: function(r) {
 				if(r.exc) {
@@ -171,7 +171,7 @@ $.extend(shopping_cart, {
 
 		return frappe.call({
 			type: "POST",
-			method: "webshop.webshop.shopping_cart.cart.request_for_quotation",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.request_for_quotation",
 			btn: btn,
 			callback: function(r) {
 				if(r.exc) {
@@ -202,7 +202,7 @@ $.extend(shopping_cart, {
 	apply_coupon_code: function(btn) {
 		return frappe.call({
 			type: "POST",
-			method: "webshop.webshop.shopping_cart.cart.apply_coupon_code",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.apply_coupon_code",
 			btn: btn,
 			args : {
 				applied_code : $('.txtcoupon').val(),
@@ -224,7 +224,7 @@ $.extend(shopping_cart, {
 	remove_coupon_code: function(btn) {
 		return frappe.call({
 			type: "POST",
-			method: "webshop.webshop.shopping_cart.cart.remove_coupon_code",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.remove_coupon_code",
 			btn: btn,
 			callback: function(r) {
 				if (r && r.message){

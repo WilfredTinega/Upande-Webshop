@@ -273,11 +273,11 @@ update_website_context = [
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
-fixtures = [
-	{"dt": "Web Page", "filters": []},
-	{"dt": "Website Sidebar", "filters": []},
-	{"dt": "Website Slideshow", "filters": []},
-	{"dt": "Website Settings", "filters": []},
-	{"dt": "Portal Settings", "filters": []},
-	{"dt": "Website Script", "filters": []},
-]
+# fixtures = [
+# 	{"dt": "Web Page", "filters": []},
+# 	{"dt": "Website Sidebar", "filters": []},
+# 	{"dt": "Website Slideshow", "filters": []},
+# 	{"dt": "Website Settings", "filters": []},
+# 	{"dt": "Portal Settings", "filters": []},
+# 	{"dt": "Website Script", "filters": []},
+# ]

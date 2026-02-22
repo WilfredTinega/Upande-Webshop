@@ -208,7 +208,7 @@ class UpandeWebshopPage {
 		$('#ws-no-products').addClass('hidden');
 
 		frappe.call({
-			method: 'webshop.webshop.api.get_product_filter_data',
+			method: 'upande_webshop.upande_webshop.api.get_product_filter_data',
 			args: {
 				query_args: {
 					search: me.search_term || null,
@@ -394,7 +394,7 @@ class UpandeWebshopPage {
 			$add_btn.prop('disabled', true).text(__('Adding...'));
 
 			frappe.call({
-				method: 'webshop.webshop.shopping_cart.cart.update_cart',
+				method: 'upande_webshop.upande_webshop.shopping_cart.cart.update_cart',
 				args: { item_code: item_code, qty: 1 },
 				callback: function (r) {
 					if (!r.exc) {
