@@ -16,7 +16,6 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_request_quotation();
 		shopping_cart.bind_change_qty();
 		shopping_cart.bind_remove_cart_item();
-		shopping_cart.bind_change_notes();
 		shopping_cart.bind_coupon_code();
 		shopping_cart.bind_remove_coupon_code();
 	},
@@ -29,53 +28,54 @@ $.extend(shopping_cart, {
 
 	bind_request_quotation: function() {
 		$('.btn-request-for-quotation').on('click', function() {
+			// Clear any dirty-form flags so Frappe doesn't block navigation
+			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
+			window.onbeforeunload = null;
 			shopping_cart.request_quotation(this);
 		});
 	},
 
 	bind_change_qty: function() {
-		// bind update button
+		// Qty input is in bunches; multiply by stems-per-bunch before sending.
+		// Also pass uom and custom_length so cart.py does not wipe them on update.
 		$(".cart-items").on("change", ".cart-qty", function() {
-			var item_code = $(this).attr("data-item-code");
-			var newVal = $(this).val();
-			shopping_cart.shopping_cart_update({item_code, qty: newVal});
+			var input = $(this);
+			var item_code = input.attr("data-item-code");
+			var stemsPerBunch = parseInt(input.attr("data-stems-per-bunch")) || 1;
+			var bunches = parseInt(input.val()) || 1;
+			var row = input.closest("tr");
+			var uom = row.attr("data-uom") || undefined;
+			var custom_length = row.attr("data-custom-length") || undefined;
+			shopping_cart.shopping_cart_update({item_code, qty: bunches * stemsPerBunch, uom, custom_length});
 		});
 
 		$(".cart-items").on('click', '.number-spinner button', function () {
 			var btn = $(this),
 				input = btn.closest('.number-spinner').find('input'),
-				oldValue = input.val().trim(),
+				oldValue = parseInt(input.val().trim()) || 1,
 				newVal = 0;
 
 			if (btn.attr('data-dir') == 'up') {
-				newVal = parseInt(oldValue) + 1;
+				newVal = oldValue + 1;
 			} else {
 				if (oldValue > 1) {
-					newVal = parseInt(oldValue) - 1;
+					newVal = oldValue - 1;
+				} else {
+					newVal = 1;
 				}
 			}
 			input.val(newVal);
 
-			let notes = input.closest("td").siblings().find(".notes").text().trim();
 			var item_code = input.attr("data-item-code");
+			var stemsPerBunch = parseInt(input.attr("data-stems-per-bunch")) || 1;
+			var row = input.closest("tr");
+			var uom = row.attr("data-uom") || undefined;
+			var custom_length = row.attr("data-custom-length") || undefined;
 			shopping_cart.shopping_cart_update({
 				item_code,
-				qty: newVal,
-				additional_notes: notes
-			});
-		});
-	},
-
-	bind_change_notes: function() {
-		$('.cart-items').on('change', 'textarea', function() {
-			const $textarea = $(this);
-			const item_code = $textarea.attr('data-item-code');
-			const qty = $textarea.closest('tr').find('.cart-qty').val();
-			const notes = $textarea.val();
-			shopping_cart.shopping_cart_update({
-				item_code,
-				qty,
-				additional_notes: notes
+				qty: newVal * stemsPerBunch,
+				uom,
+				custom_length
 			});
 		});
 	},
@@ -238,6 +238,8 @@ $.extend(shopping_cart, {
 frappe.ready(function() {
 	if (window.location.pathname === "/cart") {
 		$(".cart-icon").hide();
+		// Prevent Frappe's "unsaved changes" warning on the cart page
+		window.onbeforeunload = null;
 	}
 	shopping_cart.parent = $(".cart-container");
 	shopping_cart.bind_events();

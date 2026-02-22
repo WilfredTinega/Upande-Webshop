@@ -6,35 +6,15 @@
 <div class="item-cart row mt-2" data-variant-item-code="{{ item_code }}">
 	<div class="col-md-12">
 		<!-- Price and Availability -->
-		{% if cart_settings.show_price and product_info.price %}
-			{% set price_info = product_info.price %}
-
-			<div class="product-price" itemprop="offers" itemscope itemtype="https://schema.org/AggregateOffer">
-				<!-- Final Price -->
-				{% if price_info.formatted_mrp %}
-					<span itemprop="lowPrice" content="{{ price_info.formatted_price_sales_uom }}">{{ price_info.formatted_price_sales_uom }}</span>
-				{% else %}
-					<span itemprop="highPrice" content="{{ price_info.formatted_price_sales_uom }}">{{ price_info.formatted_price_sales_uom }}</span>
-				{% endif %}
-
-				<!-- Striked Price and Discount  -->
-				{% if price_info.formatted_mrp %}
-					<small itemprop="highPrice" class="formatted-price">
-						<s>MRP {{ price_info.formatted_mrp }}</s>
-					</small>
-					<small class="ml-1 formatted-price in-green">
-						-{{ price_info.get("formatted_discount_percent") or price_info.get("formatted_discount_rate")}}
-					</small>
-				{% endif %}
-
-				<!-- Price per UOM -->
-				<small class="formatted-price ml-2">
-					({{ price_info.formatted_price }} / {{ product_info.uom }})
-				</small>
-			</div>
-		{% else %}
-			{{ _("UOM") }} : {{ product_info.uom }}
-		{% endif %}
+		<!-- Dynamic price (populated by JS when stem length + bunch UOM are selected) -->
+		<div id="dynamic-price-display" class="product-price mt-2 mb-2">
+			{% if cart_settings.show_price and product_info.price %}
+				<span id="dynamic-price-value" class="font-weight-bold" style="font-size: 1.4em;">{{ product_info.price.formatted_price }} / {{ _('stem') }}</span>
+			{% else %}
+				<span id="dynamic-price-value" class="font-weight-bold" style="font-size: 1.4em;">—</span>
+			{% endif %}
+			<small class="text-muted ml-2" id="dynamic-price-uom-label"></small>
+		</div>
 
 		{% if cart_settings.show_stock_availability %}
 		<div class="mt-2">
@@ -129,9 +109,19 @@
 			const $btn = $(e.currentTarget);
 			$btn.prop('disabled', true);
 			const item_code = $btn.data('item-code');
+			const custom_length = $('#stem-length').val() || undefined;
+			const uom = $('#bunch-uom').val() || undefined;
+
+			// Default to 1 bunch: parse stems-per-bunch from UOM name e.g. "Bunch (10)" → 10
+			const uomText = $('#bunch-uom option:selected').text().trim();
+			const stemMatch = uomText.match(/\((\d+)\)/);
+			const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+
 			webshop.webshop.shopping_cart.update_cart({
 				item_code,
-				qty: 1,
+				qty: stemsPerBunch,
+				custom_length,
+				uom,
 				callback(r) {
 					$btn.prop('disabled', false);
 					if (r.message) {

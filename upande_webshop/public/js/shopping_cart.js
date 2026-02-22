@@ -153,11 +153,13 @@ $.extend(shopping_cart, {
 		}
 	},
 
-	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes}) {
+	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes, uom, custom_length}) {
 		shopping_cart.update_cart({
 			item_code,
 			qty,
 			additional_notes,
+			uom,
+			custom_length,
 			with_items: 1,
 			btn: this,
 			callback: function(r) {

@@ -1,6 +1,12 @@
 <!-- Total at the end of the cart items -->
+{%- set total_stems = namespace(value=0) -%}
+{%- for d in doc.items -%}
+	{%- set total_stems.value = total_stems.value + d.qty -%}
+{%- endfor -%}
 <tr>
-	<th></th>
+	<th class="text-muted" style="font-weight:normal; font-size:0.9em;">
+		{{ _("Total Stems") }}: {{ total_stems.value | int }}
+	</th>
 	<th class="text-left item-grand-total" colspan="1">
 		{{ _("Net Total") }}
 	</th>

@@ -1,10 +1,6 @@
 {% from "upande_webshop/templates/includes/macros.html" import product_image %}
 
 {% macro item_subtotal(item) %}
-	<div>
-		{{ item.get_formatted('amount') }}
-	</div>
-
 	{% if item.is_free_item %}
 		<div class="text-success mt-4">
 			<span class="free-tag">
@@ -12,19 +8,35 @@
 			</span>
 		</div>
 	{% else %}
-		<span class="item-rate">
-			{{ _('Rate:') }} {{ item.get_formatted('rate') }}
-		</span>
+		<div class="item-rate text-muted" style="font-size:0.85em;">
+			{{ item.get_formatted('rate') }} / {{ _('stem') }}
+		</div>
+		<div class="font-weight-bold mt-1">
+			{{ item.get_formatted('amount') }}
+		</div>
 	{% endif %}
 {% endmacro %}
 
 {% for d in doc.items %}
-	<tr data-name="{{ d.name }}">
+	{#- Parse stems per bunch from UOM name: "Bunch (25)" → 25 -#}
+	{%- set uom_name = d.uom or '' -%}
+	{%- set ns = namespace(stems_per_bunch=1) -%}
+	{%- for part in uom_name.split('(') -%}
+		{%- if loop.index > 1 and ')' in part -%}
+			{%- set num_str = part.split(')')[0].strip() -%}
+			{%- if num_str.isdigit() -%}
+				{%- set ns.stems_per_bunch = num_str | int -%}
+			{%- endif -%}
+		{%- endif -%}
+	{%- endfor -%}
+	{%- set bunches = (d.qty / ns.stems_per_bunch) | round(0, 'floor') | int -%}
+
+	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}">
 		<td style="width: 60%;">
 			<div class="d-flex">
 				<div class="cart-item-image mr-4">
 					{% if d.thumbnail %}
-						{{ product_image(d.thumbnail, alt="d.web_item_name", no_border=True) }}
+						{{ product_image(d.thumbnail, alt=d.web_item_name, no_border=True) }}
 					{% else %}
 						<div class = "no-image-cart-item">
 							{{ frappe.utils.get_abbr(d.web_item_name) or "NA" }}
@@ -36,27 +48,25 @@
 					<div class="item-title mb-1 mr-3">
 						{{ d.get("web_item_name") or d.item_name }}
 					</div>
-					<div class="item-subtitle mr-2">
-						{{ d.item_code }}
-					</div>
-					{%- set variant_of = frappe.db.get_value('Item', d.item_code, 'variant_of') %}
-					{% if variant_of %}
-					<span class="item-subtitle mr-2">
-						{{ _('Variant of') }}
-						<a href="{{frappe.db.get_value('Website Item', {'item_code': variant_of}, 'route') or '#'}}">
-							{{ variant_of }}
-						</a>
+
+					{% if d.custom_length %}
+					<span class="item-subtitle mr-2 mt-1">
+						{{ _('Length') }}: <strong>{{ d.custom_length }}</strong>
 					</span>
 					{% endif %}
-
-						<div class="mt-2 notes">
-							<textarea data-item-code="{{d.item_code}}" class="form-control" rows="2" placeholder="{{ _('Add notes') }}">{{d.additional_notes or ''}}</textarea>
-						</div>
+					{% if d.uom %}
+					<span class="item-subtitle mr-2">
+						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
+					</span>
+					{% endif %}
+					<span class="item-subtitle mr-2">
+						{{ _('Total Stems') }}: <strong>{{ d.qty | int }}</strong>
+					</span>
 				</div>
 			</div>
 		</td>
 
-		<!-- Qty column -->
+		<!-- Qty column (in bunches) -->
 		<td class="text-right" style="width: 25%;">
 			<div class="d-flex">
 				{% set disabled = 'disabled' if d.is_free_item else '' %}
@@ -67,7 +77,10 @@
 						</button>
 					</span>
 
-					<input class="form-control text-center cart-qty" value="{{ d.get_formatted('qty') }}" data-item-code="{{ d.item_code }}"
+					<input class="form-control text-center cart-qty"
+						value="{{ bunches }}"
+						data-item-code="{{ d.item_code }}"
+						data-stems-per-bunch="{{ ns.stems_per_bunch }}"
 						style="max-width: 70px;" {{ disabled }}>
 
 					<span class="input-group-append d-sm-inline-block">
@@ -94,18 +107,14 @@
 
 
 			<!-- Shown on mobile view, else hidden -->
-			{% if cart_settings.enable_checkout or cart_settings.show_price_in_quotation %}
-				<div class="text-right sm-item-subtotal">
-					{{ item_subtotal(d) }}
-				</div>
-			{% endif %}
+			<div class="text-right sm-item-subtotal">
+				{{ item_subtotal(d) }}
+			</div>
 		</td>
 
-		<!-- Subtotal column -->
-		{% if cart_settings.enable_checkout or cart_settings.show_price_in_quotation %}
-			<td class="text-right item-subtotal column-sm-view w-100">
-				{{ item_subtotal(d) }}
-			</td>
-		{% endif %}
+		<!-- Price column -->
+		<td class="text-right item-subtotal column-sm-view w-100">
+			{{ item_subtotal(d) }}
+		</td>
 	</tr>
 {% endfor %}

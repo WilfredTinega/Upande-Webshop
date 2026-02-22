@@ -26,9 +26,7 @@
 						<tr>
 							<th class="item-column">{{ _('Item') }}</th>
 							<th width="20%">{{ _('Quantity') }}</th>
-							{% if cart_settings.enable_checkout or cart_settings.show_price_in_quotation %}
-								<th width="20" class="text-right column-sm-view">{{ _('Subtotal') }}</th>
-							{% endif %}
+							<th width="20%" class="text-right column-sm-view">{{ _('Price') }}</th>
 							<th width="10%" class="column-sm-view"></th>
 						</tr>
 					</thead>
@@ -36,11 +34,9 @@
 						{% include "templates/includes/cart/cart_items.html" %}
 					</tbody>
 
-					{% if cart_settings.enable_checkout or cart_settings.show_price_in_quotation %}
-						<tfoot class="cart-tax-items">
-							{% include "templates/includes/cart/cart_items_total.html" %}
-						</tfoot>
-					{% endif %}
+					<tfoot class="cart-tax-items">
+						{% include "templates/includes/cart/cart_items_total.html" %}
+					</tfoot>
 				</table>
 
 				<div class="row mt-2">
@@ -58,7 +54,7 @@
 					<div class="col-9">
 						{% if doc.items %}
 						<div class="place-order-container">
-							<a class="btn btn-primary-light mr-2 font-md" href="/all-products">
+							<a class="btn btn-primary-light mr-2 font-md" href="/upande-webshop">
 								{{ _('Continue Shopping') }}
 							</a>
 						</div>

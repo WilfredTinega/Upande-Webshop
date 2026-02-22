@@ -143,13 +143,77 @@ def place_order():
 def request_for_quotation():
 	quotation = _get_cart_quotation()
 	quotation.flags.ignore_permissions = True
-
-	if get_shopping_cart_settings().save_quotations_as_draft:
-		quotation.save()
-	else:
-		quotation.submit()
-
+	quotation.flags.ignore_validate = True
+	quotation.save()
 	return quotation.name
+
+
+def _get_per_stem_rate(item_code, custom_length, currency, price_list):
+	"""Fetch per-stem price from Item Price filtered by custom_length."""
+	if not custom_length:
+		return None
+	price_records = frappe.db.get_all(
+		"Item Price",
+		filters={
+			"item_code": item_code,
+			"price_list": price_list,
+			"currency": currency,
+			"custom_length": custom_length,
+		},
+		fields=["price_list_rate"],
+		limit=1,
+	)
+	if price_records:
+		return flt(price_records[0].price_list_rate)
+	return None
+
+
+def _stems_per_bunch_from_uom(uom_name):
+	"""Parse stems per bunch from UOM name like 'Bunch (10)' → 10."""
+	import re
+	if uom_name:
+		m = re.search(r'\((\d+)\)', uom_name)
+		if m:
+			return int(m.group(1))
+	return 1
+
+
+def _apply_length_price_db(quotation):
+	"""After quotation.save(), directly update rate/amount in DB for length-priced items.
+	This bypasses ERPNext's calculate_taxes_and_totals which overwrites our values.
+	Item Price.price_list_rate is already per-stem (same as product listing price).
+	rate = per_stem price, amount = per_stem × qty (qty is total stems).
+	"""
+	price_list = quotation.selling_price_list
+	currency = quotation.currency
+	net_total = flt(0)
+	any_changed = False
+
+	for item in quotation.get("items"):
+		if item.custom_length and item.name:
+			per_stem = _get_per_stem_rate(item.item_code, item.custom_length, currency, price_list)
+			if per_stem is not None:
+				amount = flt(per_stem * item.qty, 9)
+				frappe.db.set_value(
+					"Quotation Item", item.name,
+					{"rate": per_stem, "amount": amount},
+					update_modified=False
+				)
+				item.rate = per_stem
+				item.amount = amount
+				any_changed = True
+		net_total += flt(item.amount)
+
+	if any_changed:
+		# Update quotation-level totals in DB and in-memory so template context is correct
+		frappe.db.set_value(
+			"Quotation", quotation.name,
+			{"total": net_total, "net_total": net_total, "grand_total": net_total},
+			update_modified=False
+		)
+		quotation.total = net_total
+		quotation.net_total = net_total
+		quotation.grand_total = net_total
 
 
 @frappe.whitelist()
@@ -158,8 +222,6 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 
 	empty_card = False
 	qty = flt(qty)
-	if not uom:
-		uom = frappe.db.get_value("Item", item_code, "stock_uom")
 
 	if qty == 0:
 		quotation_items = quotation.get("items", {"item_code": ["!=", item_code]})
@@ -175,6 +237,9 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 
 		quotation_items = quotation.get("items", {"item_code": item_code})
 		if not quotation_items:
+			# New item — fall back to stock_uom if no uom provided
+			if not uom:
+				uom = frappe.db.get_value("Item", item_code, "stock_uom")
 			quotation.append(
 				"items",
 				{
@@ -189,17 +254,22 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			)
 		else:
 			quotation_items[0].qty = qty
-			quotation_items[0].uom = uom
-			quotation_items[0].custom_length = custom_length
+			# Only update uom/custom_length if explicitly provided — preserve existing values otherwise
+			if uom:
+				quotation_items[0].uom = uom
+			if custom_length:
+				quotation_items[0].custom_length = custom_length
 			quotation_items[0].warehouse = warehouse
 			quotation_items[0].additional_notes = additional_notes
 
 	apply_cart_settings(quotation=quotation)
 
 	quotation.flags.ignore_permissions = True
+	quotation.flags.ignore_validate = True
 	quotation.payment_schedule = []
 	if not empty_card:
 		quotation.save()
+		_apply_length_price_db(quotation)
 	else:
 		quotation.delete()
 		quotation = None

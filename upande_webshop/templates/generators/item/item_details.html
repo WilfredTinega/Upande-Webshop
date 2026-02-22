@@ -29,6 +29,12 @@
 <!-- Set first bunch UOM as default if available -->
 {% set default_bunch_value = bunch_uoms[0].name if bunch_uoms else '' %}
 
+<div id="product-meta"
+	data-item-code="{{ doc.item_code }}"
+	data-currency="{{ price_info.get('currency') or 'USD' }}"
+	data-price-list="{{ cart_settings.price_list }}">
+</div>
+
 <div class="col-md-7 product-details {{ width_class }}">
 	<div class="d-flex">
 		<!-- title -->
@@ -52,16 +58,6 @@
 
 	<div itemprop="review" itemscope itemtype="https://schema.org/Review">
 	</div>
-
-	<p class="product-code">
-		<span class="product-item-group">
-			{{ _(doc.item_group) }}
-		</span>
-		<span class="product-item-code" itemprop="name">
-			{{ _("Item Code") }}:
-		</span>
-		<span itemprop="name">{{ _(doc.item_code) }}</span>
-	</p>
 
 	<!-- STEM LENGTH SELECTOR - DYNAMICALLY FROM DOCTYPE -->
 	{% if not has_variants and stem_lengths %}
@@ -147,16 +143,6 @@
 		{% include "templates/generators/item/item_add_to_cart.html" %}
 	{% endif %}
 	
-	<!-- description -->
-	<div class="product-description" itemprop="description">
-	{% if frappe.utils.strip_html(doc.web_long_description or '') %}
-		{{ _(doc.web_long_description) | safe }}
-	{% elif frappe.utils.strip_html(doc.description or '')  %}
-		{{ _(doc.description) | safe }}
-	{% else %}
-		{{ "" }}
-	{% endif  %}
-	</div>
 </div>
 
 <!-- Hidden field to store stem length selection -->
@@ -177,48 +163,61 @@
 			webshop.webshop.wishlist.wishlist_action($btn);
 		});
 	
+	// Live price calculation: per-stem price × stems per bunch
+	function updatePriceDisplay() {
+		const stemLength = $('#stem-length').val();
+		const bunchUOM = $('#bunch-uom').val();
+		if (!stemLength || !bunchUOM) return;
+
+		const meta = document.getElementById('product-meta');
+		if (!meta) return;
+		const itemCode = meta.dataset.itemCode;
+		const currency = meta.dataset.currency;
+		const priceList = meta.dataset.priceList;
+
+		// Parse stems count from UOM name: "Bunch (25)" → 25
+		const uomText = $('#bunch-uom option:selected').text().trim();
+		const stemMatch = uomText.match(/\((\d+)\)/);
+		const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+
+		frappe.call({
+			method: 'upande_webshop.api.item_price.get_item_length_price',
+			args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
+			callback(r) {
+				if (r.message && r.message.price_list_rate) {
+					const perStem = r.message.price_list_rate;
+					const formatted = format_currency(perStem, currency);
+					$('#dynamic-price-value').text(formatted + ' / stem');
+					$('#dynamic-price-uom-label').text('(' + stemsPerBunch + ' stems per bunch)');
+				} else {
+					$('#dynamic-price-value').text('—');
+					$('#dynamic-price-uom-label').text('{{ _("No price available for this length") }}');
+				}
+			}
+		});
+	}
+
 	// Handle stem length selection
 	$('.page_content').on('change', '#stem-length', function() {
 		const selectedLength = $(this).val();
-		const selectedOption = $(this).find('option:selected');
-		const priceMultiplier = selectedOption.data('price-multiplier');
-		const description = selectedOption.data('description');
-		
 		$('#selected_stem_length').val(selectedLength);
-		
-		// Show price info if available
-		if (selectedLength) {
-			let priceMessage = '';
-			
-			if (priceMultiplier && priceMultiplier != 1.0) {
-				priceMessage = '{{ _("Price multiplier") }}: ' + priceMultiplier + 'x';
-			}
-			
-			if (description) {
-				priceMessage = priceMessage ? priceMessage + ' - ' + description : description;
-			}
-			
-			if (priceMessage) {
-				$('.length-price-info').show().find('#length-price-message').text(priceMessage);
-			} else {
-				$('.length-price-info').hide();
-			}
-		} else {
-			$('.length-price-info').hide();
-		}
+		updatePriceDisplay();
 	});
-	
+
 	// Handle bunch UOM selection
 	$('.page_content').on('change', '#bunch-uom', function() {
 		const selectedUOM = $(this).val();
 		$('#selected_bunch_uom').val(selectedUOM);
-		
-		// Optional: Show confirmation
-		if (selectedUOM) {
-			console.log('Bunch UOM selected:', selectedUOM);
-		}
+		updatePriceDisplay();
 	});
 	
+	// Auto-trigger price display once frappe is ready (defaults may already be selected)
+	frappe.ready(function() {
+		if ($('#stem-length').val() && $('#bunch-uom').val()) {
+			updatePriceDisplay();
+		}
+	});
+
 	// Modify add to cart to include both selections
 	$('.page_content').on('click', '.add-to-cart', function(e) {
 		const stemLength = $('#stem-length').val();
