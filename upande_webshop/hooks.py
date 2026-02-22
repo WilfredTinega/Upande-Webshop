@@ -1,14 +1,17 @@
+from . import __version__ as _version
+
 app_name = "upande_webshop"
 app_title = "Upande Webshop"
 app_publisher = "Upande LTD"
 app_description = "Upande Webshop"
 app_email = "wilfred@upande.com"
 app_license = "mit"
+app_version = _version
 
 # Apps
 # ------------------
 
-required_apps = ["erpnext","payments","webshop"]
+required_apps = ["erpnext","payments"]
 
 # Each item in the list will be shown as an app in the apps page
 add_to_apps_screen = [
@@ -29,8 +32,8 @@ add_to_apps_screen = [
 # app_include_js = "/assets/upande_webshop/js/upande_webshop.js"
 
 # include js, css files in header of web template
-# web_include_css = "/assets/upande_webshop/css/upande_webshop.css"
-# web_include_js = "/assets/upande_webshop/js/upande_webshop.js"
+web_include_css = "upande_webshop-web.bundle.css"
+web_include_js = "upande_webshop-web.bundle.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "upande_webshop/public/scss/website"
@@ -43,9 +46,12 @@ add_to_apps_screen = [
 # page_js = {"page" : "public/js/file.js"}
 
 # include js in doctype views
-# doctype_js = {"doctype" : "public/js/doctype.js"}
+doctype_js = {
+    "Item": "public/js/override/item.js",
+    "Homepage": "public/js/override/homepage.js",
+}
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
-# doctype_tree_js = {"doctype" : "public/js/doctype_tree.js"}
+# doctree_js = {"doctype" : "public/js/doctype_tree.js"}
 # doctype_calendar_js = {"doctype" : "public/js/doctype_calendar.js"}
 
 # Svg Icons
@@ -68,7 +74,7 @@ add_to_apps_screen = [
 # ----------
 
 # automatically create page for each record of this doctype
-# website_generators = ["Web Page"]
+website_generators = ["Website Item", "Item Group"]
 
 # automatically load and sync documents of this doctype from downstream apps
 # importable_doctypes = [doctype_1]
@@ -86,7 +92,7 @@ add_to_apps_screen = [
 # ------------
 
 # before_install = "upande_webshop.install.before_install"
-# after_install = "upande_webshop.install.after_install"
+after_install = "upande_webshop.setup.install.after_install"
 
 # Uninstallation
 # ------------
@@ -128,53 +134,55 @@ add_to_apps_screen = [
 # 	"Event": "frappe.desk.doctype.event.event.has_permission",
 # }
 
+has_website_permission = {
+    "Website Item": "upande_webshop.upande_webshop.doctype.website_item.website_item.has_website_permission_for_website_item",
+    "Item Group": "upande_webshop.upande_webshop.doctype.website_item.website_item.has_website_permission_for_item_group"
+}
+
 # Document Events
 # ---------------
 # Hook on document methods and events
 
-# doc_events = {
-# 	"*": {
-# 		"on_update": "method",
-# 		"on_cancel": "method",
-# 		"on_trash": "method"
-# 	}
-# }
+doc_events = {
+    "Item": {
+        "on_update": [
+            "upande_webshop.upande_webshop.crud_events.item.update_website_item.execute",
+            "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
+        ],
+        "before_rename": [
+            "upande_webshop.upande_webshop.crud_events.item.validate_duplicate_website_item.execute",
+        ],
+        "after_rename": [
+            "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
+        ],
+        # "onload" hook removed because:
+        # 1. You have an override class for Item that can handle onload functionality
+        # 2. The module path was incorrect (utils/item.py doesn't exist)
+        # 3. If onload functionality is needed, add it to the WebshopItem class in override_doctype/item.py
+    },
+    "Sales Taxes and Charges Template": {
+        "on_update": [
+            "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.validate_cart_settings",
+        ],
+    },
+    "Quotation": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.quotation.validate_shopping_cart_items.execute",
+        ],
+    },
+    "Price List": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.price_list.check_impact_on_cart.execute"
+        ],
+    },
+    "Tax Rule": {
+        "validate": [
+            "upande_webshop.upande_webshop.crud_events.tax_rule.validate_use_for_cart.execute",
+        ],
+    },
+}
 
-# Scheduled Tasks
-# ---------------
-
-# scheduler_events = {
-# 	"all": [
-# 		"upande_webshop.tasks.all"
-# 	],
-# 	"daily": [
-# 		"upande_webshop.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"upande_webshop.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"upande_webshop.tasks.weekly"
-# 	],
-# 	"monthly": [
-# 		"upande_webshop.tasks.monthly"
-# 	],
-# }
-
-# Testing
-# -------
-
-# before_tests = "upande_webshop.install.before_tests"
-
-# Extend DocType Class
-# ------------------------------
-#
-# Specify custom mixins to extend the standard doctype controller.
-# extend_doctype_class = {
-# 	"Task": "upande_webshop.custom.task.CustomTaskMixin"
-# }
-
-# Overriding Methods
+# Override Methods
 # ------------------------------
 #
 # override_whitelisted_methods = {
@@ -187,6 +195,12 @@ add_to_apps_screen = [
 # override_doctype_dashboards = {
 # 	"Task": "upande_webshop.task.get_dashboard_data"
 # }
+
+override_doctype_class = {
+    "Payment Request": "upande_webshop.upande_webshop.doctype.override_doctype.payment_request.PaymentRequest",
+    "Item Group": "upande_webshop.upande_webshop.doctype.override_doctype.item_group.WebshopItemGroup",
+    "Item": "upande_webshop.upande_webshop.doctype.override_doctype.item.WebshopItem",
+}
 
 # exempt linked doctypes from being automatically cancelled
 #
@@ -206,6 +220,15 @@ add_to_apps_screen = [
 # ----------
 # before_job = ["upande_webshop.utils.before_job"]
 # after_job = ["upande_webshop.utils.after_job"]
+
+on_logout = "upande_webshop.upande_webshop.shopping_cart.utils.clear_cart_count"
+on_session_creation = [
+    "upande_webshop.upande_webshop.utils.portal.update_debtors_account",
+    "upande_webshop.upande_webshop.shopping_cart.utils.set_cart_count",
+]
+update_website_context = [
+    "upande_webshop.upande_webshop.shopping_cart.utils.update_website_context",
+]
 
 # User Data Protection
 # --------------------
@@ -250,7 +273,6 @@ add_to_apps_screen = [
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
 
-
 fixtures = [
 	{"dt": "Web Page", "filters": []},
 	{"dt": "Website Sidebar", "filters": []},
@@ -258,5 +280,4 @@ fixtures = [
 	{"dt": "Website Settings", "filters": []},
 	{"dt": "Portal Settings", "filters": []},
 	{"dt": "Website Script", "filters": []},
-	
 ]
