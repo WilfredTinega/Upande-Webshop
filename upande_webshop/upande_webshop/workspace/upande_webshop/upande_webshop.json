@@ -102,9 +102,19 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Website Settings",
+   "link_count": 0,
+   "link_to": "Website Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-02-02 03:14:15.209846",
+ "modified": "2026-02-22 19:53:36.224646",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",
@@ -125,36 +135,7 @@
   }
  ],
  "sequence_id": 28.0,
- "shortcuts": [
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Webshop",
-   "type": "URL",
-   "url": "/webshop"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Products",
-   "type": "URL",
-   "url": "/all-products"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Webshop Cart",
-   "type": "URL",
-   "url": "/cart"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Quotations",
-   "type": "URL",
-   "url": "/quotations"
-  }
- ],
+ "shortcuts": [],
  "title": "Upande Webshop",
  "type": "Workspace"
 }
