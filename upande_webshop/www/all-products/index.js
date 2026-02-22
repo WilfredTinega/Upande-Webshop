@@ -18,8 +18,8 @@ $(() => {
 		}
 
 		bind_card_actions() {
-			upande_webshop.upande_webshop.shopping_cart.bind_add_to_cart_action();
-			upande_webshop.upande_webshop.wishlist.bind_wishlist_action();
+			webshop.webshop.shopping_cart.bind_add_to_cart_action();
+			webshop.webshop.wishlist.bind_wishlist_action();
 		}
 	}
 

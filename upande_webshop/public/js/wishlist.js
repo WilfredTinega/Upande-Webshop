@@ -1,7 +1,7 @@
-frappe.provide("upande_webshop.upande_webshop.wishlist");
+frappe.provide("webshop.webshop.wishlist");
 var wishlist = webshop.webshop.wishlist;
 
-frappe.provide("upande_webshop.upande_webshop.shopping_cart");
+frappe.provide("webshop.webshop.shopping_cart");
 var shopping_cart = webshop.webshop.shopping_cart;
 
 $.extend(wishlist, {

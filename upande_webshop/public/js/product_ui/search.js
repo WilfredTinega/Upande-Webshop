@@ -48,7 +48,7 @@ webshop.ProductSearch = class {
 			if (query.length < 3 || !query.length) return;
 
 			frappe.call({
-				method: "webshop.templates.pages.product_search.search",
+				method: "upande_webshop.templates.pages.product_search.search",
 				args: {
 					query: query
 				},
@@ -197,7 +197,7 @@ webshop.ProductSearch = class {
 		let html = "";
 
 		product_results.forEach((res) => {
-			let thumbnail = res.thumbnail || '/assets/webshop/images/cart-empty-state.png';
+			let thumbnail = res.thumbnail || '/assets/upande_webshop/images/cart-empty-state.png';
 			html += `
 				<div class="dropdown-item" style="display: flex;">
 					<img class="item-thumb col-2" src=${encodeURI(thumbnail)} />

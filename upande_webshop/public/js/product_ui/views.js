@@ -45,7 +45,7 @@ webshop.ProductView =  class {
 		this.disable_view_toggler(true);
 
 		frappe.call({
-			method: "webshop.webshop.api.get_product_filter_data",
+			method: "upande_webshop.upande_webshop.api.get_product_filter_data",
 			args: {
 				query_args: args
 			},
@@ -494,7 +494,7 @@ webshop.ProductView =  class {
 		let no_results_section = `
 			<div class="cart-empty frappe-card mt-4">
 				<div class="cart-empty-state">
-					<img src="/assets/webshop/images/cart-empty-state.png" alt="Empty Cart">
+					<img src="/assets/upande_webshop/images/cart-empty-state.png" alt="Empty Cart">
 				</div>
 				<div class="cart-empty-message mt-4">${ __("No products found") }</p>
 			</div>

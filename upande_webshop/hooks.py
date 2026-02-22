@@ -32,8 +32,8 @@ add_to_apps_screen = [
 # app_include_js = "/assets/upande_webshop/js/upande_webshop.js"
 
 # include js, css files in header of web template
-web_include_css = "upande_webshop-web.bundle.css"
-web_include_js = "upande_webshop-web.bundle.js"
+web_include_css = "webshop-web.bundle.css"
+web_include_js = "web.bundle.js"
 
 # include custom scss in every website theme (without file extension ".scss")
 # website_theme_scss = "upande_webshop/public/scss/website"
