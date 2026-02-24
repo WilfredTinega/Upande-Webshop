@@ -62,9 +62,9 @@ frappe.ready(function() {
 		return;
 	}
 
-	// Hide Frappe navbar on webshop pages only when logged in.
-	// Guests on /upande-webshop see the default Frappe navbar (with Login).
+	// Hide Frappe navbar on webshop pages for all users (guests and logged-in).
 	// Use prefix matching so /issues/list, /orders/new etc. are also covered.
+	// Also hide on item detail pages (identified by the product-page body class).
 	var webshop_prefixes = [
 		'/upande-webshop', '/cart', '/quotations', '/invoices',
 		'/orders', '/shipments', '/issues', '/contact'
@@ -72,8 +72,8 @@ frappe.ready(function() {
 	var is_webshop_page = webshop_prefixes.some(function(prefix) {
 		return current_path === prefix || current_path.indexOf(prefix + '/') === 0;
 	});
-	var is_logged_in = frappe.session.user && frappe.session.user !== 'Guest';
-	if (is_webshop_page && is_logged_in) {
+	var is_item_page = $('body').hasClass('product-page');
+	if (is_webshop_page || is_item_page) {
 		$('body').addClass('hide-frappe-navbar');
 	}
 

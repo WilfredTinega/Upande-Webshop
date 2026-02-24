@@ -9,7 +9,7 @@ sitemap = 1
 def get_context(context):
 	# Add homepage as parent
 	context.body_class = "product-page"
-	context.parents = [{"name": frappe._("Home"), "route": "/"}]
+	context.parents = [{"name": frappe._("Home"), "route": "/upande-webshop"}]
 
 	filter_engine = ProductFiltersBuilder()
 	context.field_filters = filter_engine.get_field_filters()
