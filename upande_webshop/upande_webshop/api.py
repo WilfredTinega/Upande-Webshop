@@ -87,3 +87,13 @@ def get_product_filter_data(query_args=None):
 @frappe.whitelist(allow_guest=True)
 def get_guest_redirect_on_action():
 	return frappe.db.get_single_value("Webshop Settings", "redirect_on_action")
+
+
+@frappe.whitelist()
+def get_post_login_redirect():
+	"""Return the correct redirect URL after login based on the user's role.
+	Customers go to /upande-webshop; all other roles go to /app (desk).
+	"""
+	if "Customer" in frappe.get_roles(frappe.session.user):
+		return "/upande-webshop"
+	return "/app"

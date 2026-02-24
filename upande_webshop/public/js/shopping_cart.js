@@ -1,5 +1,3 @@
-// Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-// License: GNU General Public License v3. See license.txt
 
 // shopping cart
 frappe.provide("webshop.webshop.shopping_cart");
@@ -52,6 +50,36 @@ frappe.ready(function() {
 		$(".txtreferral_sales_partner").val(referral_sales_partner);
 	}
 
+	// Don't inject anything on auth pages (login, logout, register, etc.)
+	var auth_paths = ['/login', '/logout', '/register', '/update-password', '/forgot-password'];
+	var current_path = window.location.pathname.replace(/\/$/, '');
+	var is_auth_page = auth_paths.some(function(p) {
+		return current_path === p || current_path.indexOf(p + '/') === 0;
+	});
+	if (is_auth_page) {
+		// Clear last_visited so it doesn't override our server-side redirect_to
+		if (localStorage) localStorage.removeItem('last_visited');
+		return;
+	}
+
+	// Hide Frappe navbar on webshop pages only when logged in.
+	// Guests on /upande-webshop see the default Frappe navbar (with Login).
+	// Use prefix matching so /issues/list, /orders/new etc. are also covered.
+	var webshop_prefixes = [
+		'/upande-webshop', '/cart', '/quotations', '/invoices',
+		'/orders', '/shipments', '/issues', '/contact'
+	];
+	var is_webshop_page = webshop_prefixes.some(function(prefix) {
+		return current_path === prefix || current_path.indexOf(prefix + '/') === 0;
+	});
+	var is_logged_in = frappe.session.user && frappe.session.user !== 'Guest';
+	if (is_webshop_page && is_logged_in) {
+		$('body').addClass('hide-frappe-navbar');
+	}
+
+	// Inject webshop sub-navbar below the Frappe header
+	shopping_cart.inject_webshop_navbar();
+
 	// update login
 	shopping_cart.show_shoppingcart_dropdown();
 	shopping_cart.set_cart_count();
@@ -59,6 +87,104 @@ frappe.ready(function() {
 });
 
 $.extend(shopping_cart, {
+	inject_webshop_navbar: function() {
+		if ($('#webshop-subnav').length) return; // already injected
+
+		var cartCount = frappe.get_cookie("cart_count");
+		var badgeHtml = (cartCount && parseInt(cartCount) > 0)
+			? `<span class="webshop-subnav-badge" id="cart-count">${cartCount}</span>`
+			: `<span class="webshop-subnav-badge" id="cart-count" style="display:none;">${cartCount || 0}</span>`;
+
+		var appLogo = window.webshop_app_logo || (frappe.boot && frappe.boot.app_logo_url) || '';
+		var shopIconHtml = appLogo
+			? `<img src="${appLogo}" class="webshop-subnav-app-logo" alt="Shop">`
+			: `<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+					<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+					<line x1="3" y1="6" x2="21" y2="6"/>
+					<path d="M16 10a4 4 0 0 1-8 0"/>
+				</svg>`;
+
+		var html = `
+			<div id="webshop-subnav">
+				<div class="webshop-subnav-inner">
+					<!-- Left: App logo / Shop link -->
+					<nav class="webshop-subnav-links">
+						<a href="/upande-webshop" class="webshop-subnav-link webshop-subnav-shop-link" title="Shop">
+							${shopIconHtml}
+							<span class="webshop-subnav-shop-label">Shop</span>
+						</a>
+					</nav>
+
+					<!-- Right: Cart then Account dropdown -->
+					<div class="webshop-subnav-right">
+						${frappe.session.user && frappe.session.user !== 'Guest' ? `
+						<!-- Cart / Quote link (logged-in only) -->
+						<a href="/cart" class="webshop-subnav-cart-link cart-icon">
+							<svg class="icon icon-md" style="width:20px;height:20px;">
+								<use href="#icon-assets"></use>
+							</svg>
+							<span class="webshop-subnav-cart-label">Quote</span>
+							${badgeHtml}
+						</a>
+
+						<!-- Account dropdown -->
+						<div class="webshop-subnav-dropdown">
+							<button class="webshop-subnav-link webshop-subnav-dropdown-toggle" id="ws-account-toggle" aria-expanded="false">
+								Account
+								<svg style="width:12px;height:12px;margin-left:4px;vertical-align:middle;" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+									<polyline points="4 6 8 10 12 6"/>
+								</svg>
+							</button>
+							<ul class="webshop-subnav-dropdown-menu" id="ws-account-menu" role="menu">
+								<li><a href="/upande-webshop" class="webshop-subnav-dropdown-item">Products</a></li>
+								<li class="webshop-subnav-dropdown-divider"></li>
+								<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
+								<li><a href="/quotations" class="webshop-subnav-dropdown-item">Quotations</a></li>
+								<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
+								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart / Quote</a></li>
+								<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
+								<li class="webshop-subnav-dropdown-divider"></li>
+								<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
+								<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
+								<li class="webshop-subnav-dropdown-divider"></li>
+								<li><a href="/logout?redirect-to=/upande-webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
+							</ul>
+						</div>
+						` : `
+						<!-- Guest: show Login button prominently -->
+						<a href="/login" class="webshop-subnav-login-btn">Login</a>
+						`}
+					</div>
+				</div>
+			</div>
+		`;
+
+		// Insert after the main <header> / navbar
+		var $header = $('header.navbar, nav.navbar').first();
+		if ($header.length) {
+			$header.after(html);
+		} else {
+			$('body').prepend(html);
+		}
+
+		// Bind dropdown toggle
+		$(document).on('click', '#ws-account-toggle', function(e) {
+			e.stopPropagation();
+			var $menu = $('#ws-account-menu');
+			var isOpen = $menu.hasClass('open');
+			$menu.toggleClass('open', !isOpen);
+			$(this).attr('aria-expanded', !isOpen);
+		});
+
+		// Close dropdown on outside click
+		$(document).on('click.ws-subnav', function(e) {
+			if (!$(e.target).closest('.webshop-subnav-dropdown').length) {
+				$('#ws-account-menu').removeClass('open');
+				$('#ws-account-toggle').attr('aria-expanded', 'false');
+			}
+		});
+	},
+
 	show_shoppingcart_dropdown: function() {
 		$(".shopping-cart").on('shown.bs.dropdown', function() {
 			if (!$('.shopping-cart-menu .cart-container').length) {
@@ -115,15 +241,11 @@ $.extend(shopping_cart, {
 			cart_count = 0;
 		}
 
-		if(cart_count) {
-			$(".shopping-cart").toggleClass('hidden', false);
-		}
+		var $badge = $("#cart-count");
+		var count = parseInt(cart_count) || 0;
 
-		var $cart = $('.cart-icon');
-		var $badge = $cart.find("#cart-count");
-
-		if(parseInt(cart_count) === 0 || cart_count === undefined) {
-			$cart.css("display", "none");
+		if(count === 0 || cart_count === undefined) {
+			$badge.hide();
 			$(".cart-tax-items").hide();
 			$(".btn-place-order").hide();
 			$(".cart-payment-addresses").hide();
@@ -134,23 +256,16 @@ $.extend(shopping_cart, {
 				</div>
 			`;
 			$(".cart-table").after(intermediate_empty_cart_msg);
-		}
-		else {
-			$cart.css("display", "inline");
-			$("#cart-count").text(cart_count);
-		}
-
-		if(cart_count) {
-			$badge.html(cart_count);
+		} else {
+			$badge.text(count).show();
 
 			if (animate) {
-				$cart.addClass("cart-animate");
+				var $cartLink = $badge.closest('.webshop-subnav-cart-link');
+				$cartLink.addClass("cart-animate");
 				setTimeout(() => {
-					$cart.removeClass("cart-animate");
+					$cartLink.removeClass("cart-animate");
 				}, 500);
 			}
-		} else {
-			$badge.remove();
 		}
 	},
 
@@ -180,10 +295,13 @@ $.extend(shopping_cart, {
 	},
 
 	show_cart_navbar: function () {
+		// Sub-navbar is always visible; hide it entirely only if cart is disabled
 		frappe.call({
 			method: "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.is_cart_enabled",
 			callback: function(r) {
-				$(".shopping-cart").toggleClass('hidden', r.message ? false : true);
+				if (!r.message) {
+					$('#webshop-subnav .webshop-subnav-cart').hide();
+				}
 			}
 		});
 	},

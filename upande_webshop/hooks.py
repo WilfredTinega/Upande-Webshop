@@ -214,7 +214,7 @@ override_doctype_class = {
 # Request Events
 # ----------------
 # before_request = ["upande_webshop.utils.before_request"]
-# after_request = ["upande_webshop.utils.after_request"]
+after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
 
 # Job Events
 # ----------
@@ -222,9 +222,11 @@ override_doctype_class = {
 # after_job = ["upande_webshop.utils.after_job"]
 
 on_logout = "upande_webshop.upande_webshop.shopping_cart.utils.clear_cart_count"
+on_login = "upande_webshop.upande_webshop.shopping_cart.utils.redirect_after_login"
 on_session_creation = [
     "upande_webshop.upande_webshop.utils.portal.update_debtors_account",
     "upande_webshop.upande_webshop.shopping_cart.utils.set_cart_count",
+    "upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_on_session_creation",
 ]
 update_website_context = [
     "upande_webshop.upande_webshop.shopping_cart.utils.update_website_context",

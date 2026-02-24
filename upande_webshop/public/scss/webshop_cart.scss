@@ -10,6 +10,16 @@ body.product-page {
 	background: var(--body-bg-color);
 }
 
+// ─── Hide Frappe top navbar on webshop pages (logged-in only, applied via JS) ─
+// JS adds this class only when frappe.session.user !== 'Guest',
+// so guests on /upande-webshop still see the Frappe navbar with Login.
+body.hide-frappe-navbar {
+	header.navbar,
+	nav.navbar {
+		display: none !important;
+	}
+}
+
 .item-breadcrumbs {
 	.breadcrumb-container {
 		a {
@@ -1400,6 +1410,182 @@ body.product-page {
 	opacity: 1;
 	transform: translate3d(0, 0, 0);
 	pointer-events: auto;
+}
+
+// ─── Webshop Sub-Navbar ───────────────────────────────────────────────────────
+#webshop-subnav {
+	position: sticky;
+	top: 0;
+	z-index: 1000;
+	background: var(--fg-color, #fff);
+	border-bottom: 1px solid var(--border-color, #e2e8f0);
+	box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+
+	.webshop-subnav-inner {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 0 1rem;
+		height: 44px;
+	}
+
+	.webshop-subnav-links {
+		display: flex;
+		align-items: center;
+		gap: 1.5rem;
+	}
+
+	.webshop-subnav-link {
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--text-color, #1f272e);
+		text-decoration: none;
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+
+		&:hover {
+			color: var(--primary-color);
+		}
+	}
+
+	// ── Shop link with icon ───────────────────────────────────────────────────
+	.webshop-subnav-shop-link {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.webshop-subnav-app-logo {
+		height: 32px;
+		width: auto;
+		max-width: 120px;
+		object-fit: contain;
+		vertical-align: middle;
+	}
+
+	.webshop-subnav-shop-label {
+		font-size: 14px;
+		font-weight: 500;
+	}
+
+	// ── Right side (Account dropdown + Cart) ──────────────────────────────────
+	.webshop-subnav-right {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+	}
+
+	// ── Dropdown ──────────────────────────────────────────────────────────────
+	.webshop-subnav-dropdown {
+		position: relative;
+
+		.webshop-subnav-dropdown-toggle {
+			display: flex;
+			align-items: center;
+		}
+
+		.webshop-subnav-dropdown-menu {
+			display: none;
+			position: absolute;
+			top: calc(100% + 10px);
+			right: 0;
+			left: auto;
+			min-width: 180px;
+			background: var(--fg-color, #fff);
+			border: 1px solid var(--border-color, #e2e8f0);
+			border-radius: 6px;
+			box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+			list-style: none;
+			padding: 4px 0;
+			margin: 0;
+			z-index: 1100;
+
+			&.open {
+				display: block;
+			}
+
+			li {
+				margin: 0;
+			}
+		}
+
+		.webshop-subnav-dropdown-item {
+			display: block;
+			padding: 8px 16px;
+			font-size: 13px;
+			color: var(--text-color, #1f272e);
+			text-decoration: none;
+			white-space: nowrap;
+
+			&:hover {
+				background: var(--gray-100, #f1f5f9);
+				color: var(--primary-color);
+			}
+		}
+
+		.webshop-subnav-dropdown-divider {
+			border-top: 1px solid var(--border-color, #e2e8f0);
+			margin: 4px 0;
+		}
+	}
+
+	.webshop-subnav-login-btn {
+		display: inline-flex;
+		align-items: center;
+		padding: 6px 16px;
+		font-size: 14px;
+		font-weight: 600;
+		color: #fff;
+		background: var(--primary-color, #4f46e5);
+		border-radius: 6px;
+		text-decoration: none;
+
+		&:hover {
+			opacity: 0.9;
+			color: #fff;
+		}
+	}
+
+	.webshop-subnav-cart-link {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		font-size: 14px;
+		font-weight: 500;
+		color: var(--text-color, #1f272e);
+		text-decoration: none;
+		padding: 4px 10px;
+		border-radius: 6px;
+		border: 1px solid var(--border-color, #e2e8f0);
+
+		&:hover {
+			background: var(--gray-100, #f1f5f9);
+			color: var(--primary-color);
+		}
+
+		.webshop-subnav-cart-label {
+			font-size: 13px;
+		}
+	}
+
+	.webshop-subnav-badge {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 18px;
+		height: 18px;
+		padding: 0 4px;
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1;
+		color: #fff;
+		background: var(--red-600, #dc2626);
+		border-radius: 9px;
+	}
 }
 
 .w-fit {

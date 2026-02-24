@@ -1,6 +1,7 @@
 # Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 import frappe
+from frappe import _
 
 from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import is_cart_enabled
 
@@ -32,6 +33,66 @@ def set_cart_count(login_manager):
 		set_cart_count()
 
 
+def redirect_customer_after_login(response, request):
+	"""Called via after_request hook — runs after the full login response is built.
+	For Customer role users (System Users), override message='Logged In' to 'No App'
+	so login.js uses redirect_to directly instead of routing through the desk router.
+	"""
+	import json
+
+	# Only act on login POST requests
+	is_login = (
+		request.method == "POST"
+		and (
+			request.form.get("cmd") == "login"
+			or request.path in ("/login", "/api/method/login")
+		)
+	)
+	if not is_login:
+		return
+
+	# Only act if we have a JSON response with message='Logged In'
+	content_type = response.content_type or ""
+	if "json" not in content_type:
+		return
+
+	try:
+		data = json.loads(response.get_data(as_text=True))
+	except Exception:
+		return
+
+	message = data.get("message")
+	# Handle both System Users (Logged In) and Website Users (No App) with Customer role
+	if message not in ("Logged In", "No App"):
+		return
+
+	lm = getattr(frappe.local, "login_manager", None)
+	user = getattr(lm, "user", None) if lm else None
+	if not user or user == "Guest":
+		user = frappe.session.user if frappe.session else None
+
+	if not user or user == "Guest":
+		return
+
+	roles = frappe.get_roles(user)
+	meaningful_roles = [r for r in roles if r not in ("All", "Guest")]
+
+	# Only redirect if Customer is the sole meaningful role
+	if meaningful_roles == ["Customer"]:
+		data["message"] = "No App"
+		data["redirect_to"] = "/upande-webshop"
+		data["home_page"] = "/upande-webshop"
+		response.set_data(json.dumps(data))
+
+
+def redirect_after_login(login_manager):
+	pass
+
+
+def redirect_customer_on_session_creation(login_manager):
+	pass
+
+
 def clear_cart_count(login_manager):
 	if show_cart_count():
 		frappe.local.cookie_manager.delete_cookie("cart_count")
@@ -40,6 +101,28 @@ def clear_cart_count(login_manager):
 def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
+
+	# Expose app logo URL for the webshop sub-navbar via an inline script in <head>
+	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
+	import json
+	app_logo = get_app_logo() or ""
+	context["webshop_app_logo"] = app_logo
+	logo_script = f'<script>window.webshop_app_logo = {json.dumps(app_logo)};</script>'
+	context["head_include"] = (context.get("head_include") or "") + logo_script
+
+	# Remove "My Account" from the top navbar — it's now in the webshop sub-navbar dropdown
+	if context.get("post_login"):
+		context["post_login"] = [
+			item for item in context["post_login"]
+			if item.get("label") not in ("My Account", _("My Account"))
+		]
+
+	# Remove "My Account" from top_bar_items if present
+	if context.get("top_bar_items"):
+		context["top_bar_items"] = [
+			item for item in context["top_bar_items"]
+			if item.get("label") not in ("My Account", _("My Account"))
+		]
 
 
 def is_customer():
