@@ -1,8 +1,18 @@
 <!-- Total at the end of the cart items -->
 {%- set totals = namespace(bunches=0, stems=0) -%}
 {%- for d in doc.items -%}
+	{%- set uom_name = d.uom or '' -%}
+	{%- set ns = namespace(stems_per_bunch=1) -%}
+	{%- for part in uom_name.split('(') -%}
+		{%- if loop.index > 1 and ')' in part -%}
+			{%- set num_str = part.split(')')[0].strip() -%}
+			{%- if num_str.isdigit() -%}
+				{%- set ns.stems_per_bunch = num_str | int -%}
+			{%- endif -%}
+		{%- endif -%}
+	{%- endfor -%}
 	{%- set totals.bunches = totals.bunches + d.qty -%}
-	{%- set totals.stems = totals.stems + (d.qty * d.conversion_factor) -%}
+	{%- set totals.stems = totals.stems + (d.qty | int * ns.stems_per_bunch) -%}
 {%- endfor -%}
 <tr>
 	<th class="text-muted" style="font-weight:normal; font-size:0.9em;">

@@ -29,9 +29,9 @@
 			{%- endif -%}
 		{%- endif -%}
 	{%- endfor -%}
-	{#- qty is in bunches; total stems = qty × conversion_factor -#}
+	{#- qty is in bunches; use stems parsed from UOM name as source of truth -#}
 	{%- set bunches = d.qty | int -%}
-	{%- set total_stems = (d.qty * d.conversion_factor) | int -%}
+	{%- set total_stems = (bunches * ns.stems_per_bunch) -%}
 
 	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}">
 		<td style="width: 60%;">

@@ -220,10 +220,15 @@ def _apply_length_price_db(quotation):
 	any_changed = False
 
 	for item in quotation.get("items"):
-		total_stems = flt(item.qty) * flt(item.conversion_factor or 1)
+		# Derive conversion_factor from the UOM name (e.g. "Bunch (15)" → 15).
+		# This is the authoritative source — UOM Conversion Detail may be missing entries
+		# and ERPNext resets conversion_factor to 1 during calculate_taxes_and_totals.
+		cf = flt(_stems_per_bunch_from_uom(item.uom)) if item.uom else flt(item.conversion_factor or 1)
+		item.conversion_factor = cf
+		total_stems = flt(item.qty) * cf
 		if item.name:
 			per_stem = _get_per_stem_rate(item.item_code, item.custom_length, currency, price_list, uom=item.uom)
-			db_fields = {"stock_qty": total_stems, "custom_total_stems": total_stems}
+			db_fields = {"conversion_factor": cf, "stock_qty": total_stems, "custom_total_stems": total_stems}
 			item.stock_qty = total_stems
 			item.custom_total_stems = total_stems
 			if per_stem is not None:
@@ -285,11 +290,9 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			# New combination — append a new row
 			if not uom:
 				uom = frappe.db.get_value("Item", item_code, "stock_uom")
-			conversion_factor = flt(frappe.db.get_value(
-				"UOM Conversion Detail",
-				{"parent": item_code, "uom": uom},
-				"conversion_factor"
-			) or 1)
+			# Parse stems from UOM name (e.g. "Bunch (15)" → 15) as primary source.
+			# UOM Conversion Detail may be missing entries for custom bunch UOMs.
+			conversion_factor = flt(_stems_per_bunch_from_uom(uom))
 			total_stems = qty * conversion_factor
 			quotation.append(
 				"items",

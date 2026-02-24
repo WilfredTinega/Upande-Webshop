@@ -75,23 +75,21 @@
 		<div class="mt-6 mb-5">
 			<div class="mb-4 d-flex">
 				<!-- Add to Cart -->
-				{% if product_info.price and (cart_settings.allow_items_not_in_stock or product_info.get("in_stock")) %}
-					<a href="/cart" class="btn btn-light btn-view-in-cart mr-2 font-md"
-						role="button">
-						{{  _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
-					</a>
-					<button
-						data-item-code="{{item_code}}"
-						class="btn btn-primary btn-add-to-cart mr-2 w-30-40"
-					>
-						<span class="mr-2">
-							<svg class="icon icon-md">
-								<use href="#icon-assets"></use>
-							</svg>
-						</span>
-						{{ _("Add to Cart") if cart_settings.enable_checkout else  _("Add to Quote") }}
-					</button>
-				{% endif %}
+				<a href="/cart" class="btn btn-light btn-view-in-cart mr-2 font-md"
+					role="button">
+					{{  _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
+				</a>
+				<button
+					data-item-code="{{item_code}}"
+					class="btn btn-primary btn-add-to-cart mr-2 w-30-40"
+				>
+					<span class="mr-2">
+						<svg class="icon icon-md">
+							<use href="#icon-assets"></use>
+						</svg>
+					</span>
+					{{ _("Add to Cart") if cart_settings.enable_checkout else  _("Add to Quote") }}
+				</button>
 
 				<!-- Contact Us -->
 				{% if cart_settings.show_contact_us_button %}
