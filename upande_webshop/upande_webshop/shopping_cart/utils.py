@@ -74,11 +74,22 @@ def redirect_customer_after_login(response, request):
 	if not user or user == "Guest":
 		return
 
-	roles = frappe.get_roles(user)
+	# Use a fresh DB query to avoid stale cached roles from the current request.
+	# On first login, on_session_creation may have just assigned the Customer role
+	# but frappe.get_roles() returns the cached pre-login role list.
+	roles = frappe.db.get_values(
+		"Has Role", {"parent": user, "parenttype": "User"}, "role", pluck="role"
+	) or frappe.get_roles(user)
 	meaningful_roles = [r for r in roles if r not in ("All", "Guest")]
 
-	# Only redirect if Customer is the sole meaningful role
-	if meaningful_roles == ["Customer"]:
+	# Redirect if Customer role is present and user has no other meaningful roles,
+	# OR if user is a Website User with no meaningful roles yet (first-login race condition).
+	user_type = frappe.db.get_value("User", user, "user_type")
+	is_customer_redirect = (
+		meaningful_roles == ["Customer"]
+		or (not meaningful_roles and user_type == "Website User")
+	)
+	if is_customer_redirect:
 		data["message"] = "No App"
 		data["redirect_to"] = "/upande-webshop"
 		data["home_page"] = "/upande-webshop"
