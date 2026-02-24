@@ -29,7 +29,9 @@
 			{%- endif -%}
 		{%- endif -%}
 	{%- endfor -%}
-	{%- set bunches = (d.qty / ns.stems_per_bunch) | round(0, 'floor') | int -%}
+	{#- qty is in bunches; total stems = qty × conversion_factor -#}
+	{%- set bunches = d.qty | int -%}
+	{%- set total_stems = (d.qty * d.conversion_factor) | int -%}
 
 	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}">
 		<td style="width: 60%;">
@@ -60,7 +62,10 @@
 					</span>
 					{% endif %}
 					<span class="item-subtitle mr-2">
-						{{ _('Total Stems') }}: <strong>{{ d.qty | int }}</strong>
+						{{ _('Total Bunches') }}: <strong>{{ bunches }}</strong>
+					</span>
+					<span class="item-subtitle mr-2">
+						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>
 				</div>
 			</div>
@@ -80,7 +85,7 @@
 					<input class="form-control text-center cart-qty"
 						value="{{ bunches }}"
 						data-item-code="{{ d.item_code }}"
-						data-stems-per-bunch="{{ ns.stems_per_bunch }}"
+						data-stems-per-bunch="{{ d.conversion_factor | int }}"
 						style="max-width: 70px;" {{ disabled }}>
 
 					<span class="input-group-append d-sm-inline-block">
@@ -92,7 +97,7 @@
 
 				<div>
 					{% if not d.is_free_item %}
-						<div class="remove-cart-item column-sm-view d-flex" data-item-code="{{ d.item_code }}">
+						<div class="remove-cart-item column-sm-view d-flex" data-item-code="{{ d.item_code }}" data-child-docname="{{ d.name }}">
 							<span>
 								<svg class="icon sm remove-cart-item-logo"
 									width="18" height="18" viewBox="0 0 18 18"

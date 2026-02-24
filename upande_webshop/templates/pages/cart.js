@@ -36,17 +36,16 @@ $.extend(shopping_cart, {
 	},
 
 	bind_change_qty: function() {
-		// Qty input is in bunches; multiply by stems-per-bunch before sending.
-		// Also pass uom and custom_length so cart.py does not wipe them on update.
+		// qty sent to server is in bunches; use child_docname to target the exact row.
 		$(".cart-items").on("change", ".cart-qty", function() {
 			var input = $(this);
 			var item_code = input.attr("data-item-code");
-			var stemsPerBunch = parseInt(input.attr("data-stems-per-bunch")) || 1;
 			var bunches = parseInt(input.val()) || 1;
 			var row = input.closest("tr");
 			var uom = row.attr("data-uom") || undefined;
 			var custom_length = row.attr("data-custom-length") || undefined;
-			shopping_cart.shopping_cart_update({item_code, qty: bunches * stemsPerBunch, uom, custom_length});
+			var child_docname = row.attr("data-name") || undefined;
+			shopping_cart.shopping_cart_update({item_code, qty: bunches, uom, custom_length, child_docname});
 		});
 
 		$(".cart-items").on('click', '.number-spinner button', function () {
@@ -67,27 +66,30 @@ $.extend(shopping_cart, {
 			input.val(newVal);
 
 			var item_code = input.attr("data-item-code");
-			var stemsPerBunch = parseInt(input.attr("data-stems-per-bunch")) || 1;
 			var row = input.closest("tr");
 			var uom = row.attr("data-uom") || undefined;
 			var custom_length = row.attr("data-custom-length") || undefined;
+			var child_docname = row.attr("data-name") || undefined;
 			shopping_cart.shopping_cart_update({
 				item_code,
-				qty: newVal * stemsPerBunch,
+				qty: newVal,
 				uom,
-				custom_length
+				custom_length,
+				child_docname
 			});
 		});
 	},
 
 	bind_remove_cart_item: function() {
 		$(".cart-items").on("click", ".remove-cart-item", (e) => {
-			const $remove_cart_item_btn = $(e.currentTarget);
-			var item_code = $remove_cart_item_btn.data("item-code");
+			const $btn = $(e.currentTarget);
+			var item_code = $btn.data("item-code");
+			var child_docname = $btn.data("child-docname") || undefined;
 
 			shopping_cart.shopping_cart_update({
 				item_code: item_code,
-				qty: 0
+				qty: 0,
+				child_docname: child_docname
 			});
 		});
 	},

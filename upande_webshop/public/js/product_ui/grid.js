@@ -63,9 +63,6 @@ webshop.ProductGrid = class {
 
 		// get floating elements
 		if (!item.has_variants) {
-			if (settings.enable_wishlist) {
-				body_html += this.get_wishlist_icon(item);
-			}
 			if (settings.enabled) {
 				body_html += this.get_cart_indicator(item);
 			}

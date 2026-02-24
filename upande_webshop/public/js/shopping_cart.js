@@ -93,7 +93,8 @@ $.extend(shopping_cart, {
 					uom: opts.uom || undefined,
 					custom_length: opts.custom_length || undefined,
 					additional_notes: opts.additional_notes !== undefined ? opts.additional_notes : undefined,
-					with_items: opts.with_items || 0
+					with_items: opts.with_items || 0,
+					child_docname: opts.child_docname || undefined
 				},
 				btn: opts.btn,
 				callback: function(r) {
@@ -153,13 +154,14 @@ $.extend(shopping_cart, {
 		}
 	},
 
-	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes, uom, custom_length}) {
+	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes, uom, custom_length, child_docname}) {
 		shopping_cart.update_cart({
 			item_code,
 			qty,
 			additional_notes,
 			uom,
 			custom_length,
+			child_docname,
 			with_items: 1,
 			btn: this,
 			callback: function(r) {

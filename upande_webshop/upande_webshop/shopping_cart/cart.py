@@ -148,18 +148,47 @@ def request_for_quotation():
 	return quotation.name
 
 
-def _get_per_stem_rate(item_code, custom_length, currency, price_list):
-	"""Fetch per-stem price from Item Price filtered by custom_length."""
-	if not custom_length:
-		return None
+def _get_per_stem_rate(item_code, custom_length, currency, price_list, uom=None):
+	"""Fetch per-stem price from Item Price.
+	First tries matching by uom (bunch-specific price), then falls back to stock_uom (Stems) price.
+	"""
+	base_filters = {
+		"item_code": item_code,
+		"price_list": price_list,
+		"currency": currency,
+	}
+	# Try bunch-specific price first
+	if uom:
+		price_records = frappe.db.get_all(
+			"Item Price",
+			filters={**base_filters, "uom": uom},
+			fields=["price_list_rate"],
+			limit=1,
+		)
+		if price_records:
+			# Bunch-specific price is per-bunch; divide by conversion_factor to get per-stem
+			conversion_factor = flt(frappe.db.get_value(
+				"UOM Conversion Detail",
+				{"parent": item_code, "uom": uom},
+				"conversion_factor"
+			) or 1)
+			return flt(price_records[0].price_list_rate) / conversion_factor if conversion_factor else flt(price_records[0].price_list_rate)
+
+	# Fall back to stock UOM (Stems) price — already per-stem
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
 	price_records = frappe.db.get_all(
 		"Item Price",
-		filters={
-			"item_code": item_code,
-			"price_list": price_list,
-			"currency": currency,
-			"custom_length": custom_length,
-		},
+		filters={**base_filters, "uom": stock_uom},
+		fields=["price_list_rate"],
+		limit=1,
+	)
+	if price_records:
+		return flt(price_records[0].price_list_rate)
+
+	# Last resort: any price for this item
+	price_records = frappe.db.get_all(
+		"Item Price",
+		filters=base_filters,
 		fields=["price_list_rate"],
 		limit=1,
 	)
@@ -181,8 +210,9 @@ def _stems_per_bunch_from_uom(uom_name):
 def _apply_length_price_db(quotation):
 	"""After quotation.save(), directly update rate/amount in DB for length-priced items.
 	This bypasses ERPNext's calculate_taxes_and_totals which overwrites our values.
-	Item Price.price_list_rate is already per-stem (same as product listing price).
-	rate = per_stem price, amount = per_stem × qty (qty is total stems).
+	Item Price.price_list_rate is already per-stem.
+	qty is in bunches; stock_qty = qty × conversion_factor = total stems.
+	rate = per_stem price, amount = per_stem × total_stems.
 	"""
 	price_list = quotation.selling_price_list
 	currency = quotation.currency
@@ -190,18 +220,19 @@ def _apply_length_price_db(quotation):
 	any_changed = False
 
 	for item in quotation.get("items"):
-		if item.custom_length and item.name:
-			per_stem = _get_per_stem_rate(item.item_code, item.custom_length, currency, price_list)
+		total_stems = flt(item.qty) * flt(item.conversion_factor or 1)
+		if item.name:
+			per_stem = _get_per_stem_rate(item.item_code, item.custom_length, currency, price_list, uom=item.uom)
+			db_fields = {"stock_qty": total_stems, "custom_total_stems": total_stems}
+			item.stock_qty = total_stems
+			item.custom_total_stems = total_stems
 			if per_stem is not None:
-				amount = flt(per_stem * item.qty, 9)
-				frappe.db.set_value(
-					"Quotation Item", item.name,
-					{"rate": per_stem, "amount": amount},
-					update_modified=False
-				)
+				amount = flt(per_stem * total_stems, 9)
+				db_fields.update({"rate": per_stem, "amount": amount})
 				item.rate = per_stem
 				item.amount = amount
 				any_changed = True
+			frappe.db.set_value("Quotation Item", item.name, db_fields, update_modified=False)
 		net_total += flt(item.amount)
 
 	if any_changed:
@@ -217,16 +248,20 @@ def _apply_length_price_db(quotation):
 
 
 @frappe.whitelist()
-def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, with_items=False):
+def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, with_items=False, child_docname=None):
 	quotation = _get_cart_quotation()
 
 	empty_card = False
 	qty = flt(qty)
 
 	if qty == 0:
-		quotation_items = quotation.get("items", {"item_code": ["!=", item_code]})
-		if quotation_items:
-			quotation.set("items", quotation_items)
+		# Remove specific row by child_docname if provided, otherwise remove all rows for item_code
+		if child_docname:
+			remaining = [i for i in quotation.get("items") if i.name != child_docname]
+		else:
+			remaining = quotation.get("items", {"item_code": ["!=", item_code]})
+		if remaining:
+			quotation.set("items", remaining)
 		else:
 			empty_card = True
 
@@ -235,11 +270,27 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			"Website Item", {"item_code": item_code}, "website_warehouse"
 		)
 
-		quotation_items = quotation.get("items", {"item_code": item_code})
-		if not quotation_items:
-			# New item — fall back to stock_uom if no uom provided
+		# Match by child_docname (update), or by item_code + custom_length + uom (existing row), else append new
+		if child_docname:
+			matched = [i for i in quotation.get("items") if i.name == child_docname]
+		else:
+			matched = [
+				i for i in quotation.get("items")
+				if i.item_code == item_code
+				and (i.custom_length or "") == (custom_length or "")
+				and (i.uom or "") == (uom or "")
+			]
+
+		if not matched:
+			# New combination — append a new row
 			if not uom:
 				uom = frappe.db.get_value("Item", item_code, "stock_uom")
+			conversion_factor = flt(frappe.db.get_value(
+				"UOM Conversion Detail",
+				{"parent": item_code, "uom": uom},
+				"conversion_factor"
+			) or 1)
+			total_stems = qty * conversion_factor
 			quotation.append(
 				"items",
 				{
@@ -247,20 +298,26 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 					"item_code": item_code,
 					"qty": qty,
 					"uom": uom,
+					"conversion_factor": conversion_factor,
+					"stock_qty": total_stems,
+					"custom_total_stems": total_stems,
 					"custom_length": custom_length,
 					"additional_notes": additional_notes,
 					"warehouse": warehouse,
 				},
 			)
 		else:
-			quotation_items[0].qty = qty
-			# Only update uom/custom_length if explicitly provided — preserve existing values otherwise
+			item = matched[0]
+			item.qty = qty
 			if uom:
-				quotation_items[0].uom = uom
+				item.uom = uom
 			if custom_length:
-				quotation_items[0].custom_length = custom_length
-			quotation_items[0].warehouse = warehouse
-			quotation_items[0].additional_notes = additional_notes
+				item.custom_length = custom_length
+			item.warehouse = warehouse
+			item.additional_notes = additional_notes
+			total_stems = qty * flt(item.conversion_factor or 1)
+			item.stock_qty = total_stems
+			item.custom_total_stems = total_stems
 
 	apply_cart_settings(quotation=quotation)
 

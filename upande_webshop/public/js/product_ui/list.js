@@ -36,7 +36,7 @@ webshop.ProductList = class {
 
 	get_image_html(item, title, settings) {
 		let image = item.website_image;
-		let wishlist_enabled = !item.has_variants && settings.enable_wishlist;
+		let wishlist_enabled = false; // wishlist disabled
 		let image_html = ``;
 
 		if (image) {

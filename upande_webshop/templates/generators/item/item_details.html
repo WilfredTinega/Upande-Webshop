@@ -42,15 +42,7 @@
 			{{ _(doc.web_item_name) }}
 		</div>
 
-		<!-- Wishlist -->
-		{% if cart_settings.enable_wishlist %}
-			<div class="like-action-item-fp like-action {{ 'like-action-wished' if wished else ''}} ml-2"
-				data-item-code="{{ doc.item_code }}">
-				<svg class="icon sm">
-					<use class="{{ 'wished' if wished else 'not-wished' }} wish-icon" href="#icon-heart"></use>
-				</svg>
-			</div>
-		{% endif %}
+		<!-- Wishlist disabled -->
 	</div>
 
 	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">

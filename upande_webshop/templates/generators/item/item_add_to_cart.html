@@ -76,7 +76,7 @@
 			<div class="mb-4 d-flex">
 				<!-- Add to Cart -->
 				{% if product_info.price and (cart_settings.allow_items_not_in_stock or product_info.get("in_stock")) %}
-					<a href="/cart" class="btn btn-light btn-view-in-cart hidden mr-2 font-md"
+					<a href="/cart" class="btn btn-light btn-view-in-cart mr-2 font-md"
 						role="button">
 						{{  _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
 					</a>
@@ -107,25 +107,33 @@
 		$('.page_content').on('click', '.btn-add-to-cart', (e) => {
 			// Bind action on add to cart button
 			const $btn = $(e.currentTarget);
-			$btn.prop('disabled', true);
 			const item_code = $btn.data('item-code');
 			const custom_length = $('#stem-length').val() || undefined;
 			const uom = $('#bunch-uom').val() || undefined;
 
-			// Default to 1 bunch: parse stems-per-bunch from UOM name e.g. "Bunch (10)" → 10
-			const uomText = $('#bunch-uom option:selected').text().trim();
-			const stemMatch = uomText.match(/\((\d+)\)/);
-			const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+			// Validate: stem length is mandatory
+			if (!custom_length) {
+				frappe.show_alert({
+					message: __('Please select a stem length before adding to cart.'),
+					indicator: 'red'
+				}, 4);
+				$('#stem-length').focus();
+				return;
+			}
 
+			$btn.prop('disabled', true);
+
+			// qty is in bunches; ERPNext converts to stems via conversion_factor
 			webshop.webshop.shopping_cart.update_cart({
 				item_code,
-				qty: stemsPerBunch,
+				qty: 1,
 				custom_length,
 				uom,
 				callback(r) {
 					$btn.prop('disabled', false);
 					if (r.message) {
-						$('.btn-add-to-cart, .btn-view-in-cart').toggleClass('hidden');
+						// Keep 'Add to Quote' visible so customer can add different specs
+						$('.btn-view-in-cart').removeClass('hidden');
 					}
 				}
 			});
