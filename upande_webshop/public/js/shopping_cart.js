@@ -111,7 +111,7 @@ $.extend(shopping_cart, {
 					<nav class="webshop-subnav-links">
 						<a href="/upande-webshop" class="webshop-subnav-link webshop-subnav-shop-link" title="Shop">
 							${shopIconHtml}
-							<span class="webshop-subnav-shop-label">Shop</span>
+							<span class="webshop-subnav-shop-label">Upande Webshop</span>
 						</a>
 					</nav>
 
