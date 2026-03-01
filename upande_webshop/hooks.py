@@ -19,7 +19,7 @@ add_to_apps_screen = [
 		"name": "upande_webshop",
 		"logo": "/assets/upande_webshop/images/UpandeLogo.png",
 		"title": "Upande Webshop",
-		"route": "/webshop",
+		"route": "/upande-webshop",
 		# "has_permission": "upande_webshop.api.permission.has_app_permission"
 	}
 ]
