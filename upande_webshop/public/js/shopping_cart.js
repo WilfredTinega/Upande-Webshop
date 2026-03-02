@@ -1,4 +1,3 @@
-
 // shopping cart
 frappe.provide("webshop.webshop.shopping_cart");
 var shopping_cart = webshop.webshop.shopping_cart;
@@ -50,15 +49,26 @@ frappe.ready(function() {
 		$(".txtreferral_sales_partner").val(referral_sales_partner);
 	}
 
-	// Don't inject anything on auth pages (login, logout, register, etc.)
+	// Don't inject anything on auth pages (login, logout, register, etc.) or base URL
 	var auth_paths = ['/login', '/logout', '/register', '/update-password', '/forgot-password'];
 	var current_path = window.location.pathname.replace(/\/$/, '');
 	var is_auth_page = auth_paths.some(function(p) {
 		return current_path === p || current_path.indexOf(p + '/') === 0;
 	});
-	if (is_auth_page) {
+	
+	// Check if it's the base URL (empty path or just '/')
+	var is_base_url = current_path === '' || current_path === '/';
+	
+	if (is_auth_page || is_base_url) {
 		// Clear last_visited so it doesn't override our server-side redirect_to
 		if (localStorage) localStorage.removeItem('last_visited');
+		
+		// Remove custom navbar if it exists (in case user navigates from webshop to auth page)
+		if ($('#webshop-subnav').length) {
+			$('#webshop-subnav').remove();
+		}
+		
+		// Don't proceed with webshop initialization
 		return;
 	}
 
@@ -88,6 +98,23 @@ frappe.ready(function() {
 
 $.extend(shopping_cart, {
 	inject_webshop_navbar: function() {
+		// Double-check we're not on auth pages or base URL before injecting
+		var auth_paths = ['/login', '/logout', '/register', '/update-password', '/forgot-password'];
+		var current_path = window.location.pathname.replace(/\/$/, '');
+		var is_auth_page = auth_paths.some(function(p) {
+			return current_path === p || current_path.indexOf(p + '/') === 0;
+		});
+		var is_base_url = current_path === '' || current_path === '/';
+		
+		// Don't inject on auth pages or base URL
+		if (is_auth_page || is_base_url) {
+			// Remove navbar if it exists (in case user navigates from a webshop page to login)
+			if ($('#webshop-subnav').length) {
+				$('#webshop-subnav').remove();
+			}
+			return;
+		}
+		
 		if ($('#webshop-subnav').length) return; // already injected
 
 		var cartCount = frappe.get_cookie("cart_count");
@@ -365,3 +392,5 @@ $.extend(shopping_cart, {
 		}
 	}
 });
+
+
