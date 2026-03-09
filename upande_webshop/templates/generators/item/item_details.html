@@ -3,8 +3,8 @@
 {% set product_info = shopping_cart.product_info %}
 {% set price_info = product_info.get('price') or {} %}
 
-{% set stem_lengths = frappe.get_list('Stem Length', 
-    fields=['name', 'length', 'display_name', 'price_multiplier', 'description', 'is_popular'],
+{% set stem_lengths = frappe.get_list('Stem Length',
+    fields=['name', 'length'],
     order_by='length asc'
 ) %}
 
@@ -23,7 +23,7 @@
     {% endif %}
 {% endfor %}
 
-{% set default_length = stem_lengths | selectattr('is_popular', 'equalto', 1) | first %}
+{% set default_length = stem_lengths | first %}
 {% set default_length_value = default_length.length if default_length else '' %}
 
 <!-- Set first bunch UOM as default if available -->
@@ -57,17 +57,8 @@
 		<select id="stem-length" class="form-control" name="stem_length" style="max-width: 200px;" required>
 			<option value="">{{ _("Stem Length") }}</option>
 			{% for length in stem_lengths %}
-				<option value="{{ length.length }}" 
-						{% if length.is_popular %}selected{% endif %}
-						data-price-multiplier="{{ length.price_multiplier or 1.0 }}"
-						data-description="{{ length.description or '' }}">
-					{{ length.display_name or length.length }}
-					{% if length.is_popular %}
-						{{ _("(Most Popular)") }}
-					{% endif %}
-					{% if length.description %}
-						- {{ length.description }}
-					{% endif %}
+				<option value="{{ length.length }}" {% if loop.first %}selected{% endif %}>
+					{{ length.length }}
 				</option>
 			{% endfor %}
 		</select>
@@ -183,7 +174,6 @@
 					$('#dynamic-price-uom-label').text('(' + stemsPerBunch + ' stems per bunch)');
 				} else {
 					$('#dynamic-price-value').text('—');
-					$('#dynamic-price-uom-label').text('{{ _("No price available for this length") }}');
 				}
 			}
 		});
