@@ -5,7 +5,24 @@
 
 {% block breadcrumbs %}
 <div class="item-breadcrumbs small text-muted">
-	{% include "templates/includes/breadcrumbs.html" %}
+	<div class="breadcrumb-container container">
+		<nav aria-label="breadcrumb">
+			<ol class="breadcrumb" itemscope itemtype="http://schema.org/BreadcrumbList">
+				<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="breadcrumb-item">
+					<a itemprop="item" href="/upande-webshop">
+						<span itemprop="name">{{ _("All Products") }}</span>
+						<meta itemprop="position" content="1" />
+					</a>
+				</li>
+				<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="breadcrumb-item active" aria-current="page">
+					<span itemprop="item">
+						<span itemprop="name">{{ _(title) }}</span>
+						<meta itemprop="position" content="2"/>
+					</span>
+				</li>
+			</ol>
+		</nav>
+	</div>
 </div>
 {% endblock %}
 
