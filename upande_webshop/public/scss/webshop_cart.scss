@@ -1050,6 +1050,20 @@ body.hide-frappe-navbar {
 	fill: #F47A7A !important;
 }
 
+.not-wished-fp {
+	cursor: pointer;
+	--icon-stroke: #6c757d !important;
+
+	&:hover {
+		fill: #28a745;
+	}
+}
+
+.wished-green {
+	--icon-stroke: none;
+	fill: #28a745 !important;
+}
+
 .list-row-checkbox {
 	&:before {
 		display: none;

@@ -5,14 +5,16 @@
 
 {% set stem_lengths = frappe.get_list('Stem Length',
     fields=['name', 'length'],
-    order_by='length asc'
+    order_by='length asc',
+    ignore_permissions=True
 ) %}
 
 <!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
 {% set all_uoms = frappe.get_list('UOM', 
     fields=['name', 'uom_name', 'enabled'],
     filters={'enabled': 1},
-    order_by='name asc'
+    order_by='name asc',
+    ignore_permissions=True
 ) %}
 
 <!-- Filter to only show UOMs that have "Bunch" in the name -->
@@ -43,10 +45,10 @@
 		</div>
 
 		{% if shopping_cart.cart_settings.enabled %}
-		<div class="like-action-item-fp ml-2" style="cursor:pointer;" title="{{ _('Add to Wishlist') }}"
+		<div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2" style="cursor:pointer;" title="{{ _('Go to Wishlist') }}"
 			data-item-code="{{ doc.item_code }}">
 			<svg class="icon icon-md">
-				<use href="#icon-heart"></use>
+				<use class="wish-icon {% if wished %}wished-green{% else %}not-wished-fp{% endif %}" href="#icon-heart"></use>
 			</svg>
 		</div>
 		{% endif %}
@@ -161,10 +163,28 @@
 
 <script>
 	$('.page_content').on('click', '.like-action-item-fp', (e) => {
-			// Bind action on wishlist button
-			const $btn = $(e.currentTarget);
-			upande_webshop.upande_webshop.wishlist.wishlist_action($btn);
+		const $btn = $(e.currentTarget);
+		const item_code = $btn.data('item-code');
+
+		if (frappe.session.user === 'Guest') {
+			if (localStorage) {
+				localStorage.setItem('last_visited', window.location.pathname);
+			}
+			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
+				window.location.href = res.message || '/login';
+			});
+			return;
+		}
+
+		frappe.call({
+			type: 'POST',
+			method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist',
+			args: { item_code: item_code },
+			callback: function(r) {
+				window.location.href = '/wishlist';
+			}
 		});
+	});
 	
 	// Live price calculation: per-stem price × stems per bunch
 	function updatePriceDisplay() {

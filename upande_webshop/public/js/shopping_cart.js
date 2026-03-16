@@ -367,6 +367,24 @@ $.extend(shopping_cart, {
 			});
 
 		});
+
+		// Remove from quote via cart-indicator × button in grid view
+		$('.page_content').on('click', '.remove-from-cart-grid', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const $btn = $(e.currentTarget);
+			const item_code = $btn.data('item-code');
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
+				item_code,
+				qty: 0,
+				callback: function(r) {
+					if (!r.exc) {
+						$btn.closest('.cart-indicator').addClass('hidden');
+						shopping_cart.set_cart_count();
+					}
+				}
+			});
+		});
 	},
 
 	freeze() {

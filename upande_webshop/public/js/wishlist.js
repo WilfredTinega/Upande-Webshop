@@ -42,10 +42,14 @@ $.extend(wishlist, {
 		$('.page_content').on("click", ".btn-add-to-cart", (e) => {
 			const $move_to_cart_btn = $(e.currentTarget);
 			let item_code = $move_to_cart_btn.data("item-code");
+			let uom = $move_to_cart_btn.data("uom") || undefined;
+			let custom_length = $move_to_cart_btn.data("custom-length") || undefined;
 
 			shopping_cart.shopping_cart_update({
 				item_code,
 				qty: 1,
+				uom,
+				custom_length,
 				cart_dropdown: true
 			});
 

@@ -347,7 +347,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 		quotation.save()
 		_apply_length_price_db(quotation)
 	else:
-		quotation.delete()
+		frappe.delete_doc("Quotation", quotation.name, ignore_permissions=True, force=True)
 		quotation = None
 
 	set_cart_count(quotation)
