@@ -108,6 +108,7 @@
 			const item_code = $btn.data('item-code');
 			const custom_length = $('#stem-length').val() || undefined;
 			const uom = $('#bunch-uom').val() || undefined;
+			const custom_box_type = $('#box-type').val() || undefined;
 
 			// Validate: stem length is mandatory
 			if (!custom_length) {
@@ -122,11 +123,12 @@
 			$btn.prop('disabled', true);
 
 			// qty is in bunches; ERPNext converts to stems via conversion_factor
-			webshop.webshop.shopping_cart.update_cart({
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
 				item_code,
 				qty: 1,
 				custom_length,
 				uom,
+				custom_box_type,
 				callback(r) {
 					$btn.prop('disabled', false);
 					if (r.message) {

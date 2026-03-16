@@ -18,8 +18,8 @@ $(() => {
 		}
 
 		bind_card_actions() {
-			webshop.webshop.shopping_cart.bind_add_to_cart_action();
-			webshop.webshop.wishlist.bind_wishlist_action();
+			upande_webshop.upande_webshop.shopping_cart.bind_add_to_cart_action();
+			upande_webshop.upande_webshop.wishlist.bind_wishlist_action();
 
 			// Stop clicks on inner interactive elements from bubbling up to the card-level link
 			$('#product-listing').on('click', '.go-to-cart, .go-to-cart-grid, .like-action, .like-action-list, .btn-add-to-cart-list', (e) => {

@@ -42,7 +42,14 @@
 			{{ _(doc.web_item_name) }}
 		</div>
 
-		<!-- Wishlist disabled -->
+		{% if shopping_cart.cart_settings.enabled %}
+		<div class="like-action-item-fp ml-2" style="cursor:pointer;" title="{{ _('Add to Wishlist') }}"
+			data-item-code="{{ doc.item_code }}">
+			<svg class="icon icon-md">
+				<use href="#icon-heart"></use>
+			</svg>
+		</div>
+		{% endif %}
 	</div>
 
 	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">
@@ -81,6 +88,19 @@
 					{{ uom.uom_name or uom.name }}
 				</option>
 			{% endfor %}
+		</select>
+	</div>
+	{% endif %}
+
+	<!-- BOX TYPE SELECTOR -->
+	{% if not has_variants %}
+	<div class="box-type-selector form-group mt-4 mb-4">
+		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;">
+			<option value="">{{ _("Box Type") }}</option>
+			<option value="Small">{{ _("Small") }}</option>
+			<option value="Standard">{{ _("Standard") }}</option>
+			<option value="Large">{{ _("Large") }}</option>
+			<option value="Pro Flower Pack">{{ _("Pro Flower Pack") }}</option>
 		</select>
 	</div>
 	{% endif %}
@@ -143,7 +163,7 @@
 	$('.page_content').on('click', '.like-action-item-fp', (e) => {
 			// Bind action on wishlist button
 			const $btn = $(e.currentTarget);
-			webshop.webshop.wishlist.wishlist_action($btn);
+			upande_webshop.upande_webshop.wishlist.wishlist_action($btn);
 		});
 	
 	// Live price calculation: per-stem price × stems per bunch
