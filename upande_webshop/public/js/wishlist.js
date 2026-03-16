@@ -1,8 +1,8 @@
-frappe.provide("webshop.webshop.wishlist");
-var wishlist = webshop.webshop.wishlist;
+frappe.provide("upande_webshop.upande_webshop.wishlist");
+var wishlist = upande_webshop.upande_webshop.wishlist;
 
-frappe.provide("webshop.webshop.shopping_cart");
-var shopping_cart = webshop.webshop.shopping_cart;
+frappe.provide("upande_webshop.upande_webshop.shopping_cart");
+var shopping_cart = upande_webshop.upande_webshop.shopping_cart;
 
 $.extend(wishlist, {
 	set_wishlist_count: function(animate=false) {
@@ -81,7 +81,7 @@ $.extend(wishlist, {
 
 	bind_wishlist_action() {
 		// 'wish'('like') or 'unwish' item in product listing
-		$('.page_content').on('click', '.like-action, .like-action-list', (e) => {
+		$('.page_content').on('click', '.like-action, .like-action-list, .like-action-item-fp', (e) => {
 			const $btn = $(e.currentTarget);
 			this.wishlist_action($btn);
 		});
@@ -100,7 +100,7 @@ $.extend(wishlist, {
 		}
 
 		let success_action = function() {
-			webshop.webshop.wishlist.set_wishlist_count(true);
+			upande_webshop.upande_webshop.wishlist.set_wishlist_count(true);
 		};
 
 		if ($wish_icon.hasClass('wished')) {

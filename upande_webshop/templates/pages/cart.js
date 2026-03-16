@@ -3,7 +3,7 @@
 
 // JS exclusive to /cart page
 frappe.provide("upande_webshop.upande_webshop.shopping_cart");
-var shopping_cart = webshop.webshop.shopping_cart;
+var shopping_cart = upande_webshop.upande_webshop.shopping_cart;
 
 $.extend(shopping_cart, {
 	show_error: function(title, text) {
@@ -18,17 +18,27 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_remove_cart_item();
 		shopping_cart.bind_coupon_code();
 		shopping_cart.bind_remove_coupon_code();
+		shopping_cart.bind_delivery_date();
 	},
 
 	bind_place_order: function() {
 		$(".btn-place-order").on("click", function() {
+			// Validate delivery date is set before placing order
+			var delivery_date = $("#delivery-date").val();
+			if (!delivery_date) {
+				frappe.show_alert({
+					message: __('Please select an expected delivery date before placing your order.'),
+					indicator: 'red'
+				}, 5);
+				$("#delivery-date").focus();
+				return;
+			}
 			shopping_cart.place_order(this);
 		});
 	},
 
 	bind_request_quotation: function() {
 		$('.btn-request-for-quotation').on('click', function() {
-			// Clear any dirty-form flags so Frappe doesn't block navigation
 			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
 			window.onbeforeunload = null;
 			shopping_cart.request_quotation(this);
@@ -36,7 +46,6 @@ $.extend(shopping_cart, {
 	},
 
 	bind_change_qty: function() {
-		// qty sent to server is in bunches; use child_docname to target the exact row.
 		$(".cart-items").on("change", ".cart-qty", function() {
 			var input = $(this);
 			var item_code = input.attr("data-item-code");
@@ -93,6 +102,96 @@ $.extend(shopping_cart, {
 			});
 		});
 	},
+
+	// ---- Delivery Date & Shipment Date ----
+	bind_delivery_date: function() {
+		var $deliveryInput = $("#delivery-date");
+		if (!$deliveryInput.length) return;
+
+		// Set minimum date: today + transit_days
+		var transit_days = parseInt($("#transit-days-label").text()) || 2;
+		var min_date = new Date();
+		min_date.setDate(min_date.getDate() + transit_days);
+		$deliveryInput.attr("min", shopping_cart._format_date(min_date));
+
+		// If a delivery date is already saved on the quotation, show shipment date
+		if ($deliveryInput.val()) {
+			shopping_cart._calculate_shipment_date($deliveryInput.val(), transit_days);
+		}
+
+		// Bind change event
+		$deliveryInput.on("change", function() {
+			var delivery_date = $(this).val();
+			if (!delivery_date) {
+				$("#shipment-date-display").text("—");
+				return;
+			}
+
+			// Validate: delivery date must be at least transit_days from today
+			var selected = new Date(delivery_date);
+			var min_allowed = new Date();
+			min_allowed.setDate(min_allowed.getDate() + transit_days);
+			min_allowed.setHours(0, 0, 0, 0);
+
+			if (selected < min_allowed) {
+				frappe.show_alert({
+					message: __('Expected delivery date must be at least {0} days from today (transit time).', [transit_days]),
+					indicator: 'orange'
+				}, 5);
+				$(this).val("");
+				$("#shipment-date-display").text("—");
+				return;
+			}
+
+			// Show calculated shipment date immediately (client-side)
+			shopping_cart._calculate_shipment_date(delivery_date, transit_days);
+
+			// Save to server
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
+				args: { delivery_date: delivery_date },
+				callback: function(r) {
+					if (r.message && r.message.shipment_date) {
+						// Only update if server returned a valid date
+						$("#shipment-date-display")
+							.text(shopping_cart._display_date(r.message.shipment_date))
+							.css("color", "var(--text-color)");
+					}
+					// Otherwise keep the client-side calculated value already showing
+				}
+			});
+		});
+	},
+
+	_calculate_shipment_date: function(delivery_date, transit_days) {
+		var d = new Date(delivery_date);
+		d.setDate(d.getDate() - transit_days);
+		var formatted = shopping_cart._display_date(shopping_cart._format_date(d));
+		$("#shipment-date-display")
+			.text(formatted)
+			.css("color", "var(--text-color)");
+	},
+
+	_format_date: function(date) {
+		// Returns YYYY-MM-DD
+		var y = date.getFullYear();
+		var m = String(date.getMonth() + 1).padStart(2, "0");
+		var d = String(date.getDate()).padStart(2, "0");
+		return y + "-" + m + "-" + d;
+	},
+
+	_display_date: function(date_str) {
+		// Converts YYYY-MM-DD to "14 Mar 2026"
+		if (!date_str) return "—";
+		var parts = date_str.split("-");
+		if (parts.length !== 3) return date_str;
+		var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+		var day = parseInt(parts[2]);
+		var month = months[parseInt(parts[1]) - 1];
+		var year = parts[0];
+		return day + " " + month + " " + year;
+	},
+	// ---- End Delivery Date & Shipment Date ----
 
 	render_tax_row: function($cart_taxes, doc, shipping_rules) {
 		var shipping_selector;
@@ -223,6 +322,7 @@ $.extend(shopping_cart, {
 			shopping_cart.remove_coupon_code(this);
 		});
 	},
+
 	remove_coupon_code: function(btn) {
 		return frappe.call({
 			type: "POST",
@@ -240,7 +340,6 @@ $.extend(shopping_cart, {
 frappe.ready(function() {
 	if (window.location.pathname === "/cart") {
 		$(".cart-icon").hide();
-		// Prevent Frappe's "unsaved changes" warning on the cart page
 		window.onbeforeunload = null;
 	}
 	shopping_cart.parent = $(".cart-container");

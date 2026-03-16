@@ -61,6 +61,11 @@
 						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
 					</span>
 					{% endif %}
+					{% if d.custom_box_type %}
+					<span class="item-subtitle mr-2">
+						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>
+					</span>
+					{% endif %}
 					<span class="item-subtitle mr-2">
 						{{ _('Total Bunches') }}: <strong>{{ bunches }}</strong>
 					</span>

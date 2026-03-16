@@ -53,7 +53,7 @@ frappe.ready(function() {
 	})
 
 	$("#item-add-to-cart button").on("click", function() {
-		webshop.webshop.shopping_cart.update_cart({
+		upande_webshop.upande_webshop.shopping_cart.update_cart({
 			item_code: get_item_code(),
 			qty: $("#item-spinner .cart-qty").val(),
 			callback: function(r) {
