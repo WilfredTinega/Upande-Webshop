@@ -1,0 +1,276 @@
+{% set width_class = "expand" if not slides else "" %}
+{% set cart_settings = shopping_cart.cart_settings %}
+{% set product_info = shopping_cart.product_info %}
+{% set price_info = product_info.get('price') or {} %}
+
+{% set stem_lengths = frappe.get_list('Stem Length',
+    fields=['name', 'length'],
+    order_by='length asc',
+    ignore_permissions=True
+) %}
+
+<!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
+{% set all_uoms = frappe.get_list('UOM', 
+    fields=['name', 'uom_name', 'enabled'],
+    filters={'enabled': 1},
+    order_by='name asc',
+    ignore_permissions=True
+) %}
+
+<!-- Filter to only show UOMs that have "Bunch" in the name -->
+{% set bunch_uoms = [] %}
+{% for uom in all_uoms %}
+    {% if 'bunch' in uom.name|lower or 'bunch' in uom.uom_name|lower %}
+        {% set bunch_uoms = bunch_uoms.append(uom) %}
+    {% endif %}
+{% endfor %}
+
+{% set default_length = stem_lengths | first %}
+{% set default_length_value = default_length.length if default_length else '' %}
+
+<!-- Set first bunch UOM as default if available -->
+{% set default_bunch_value = bunch_uoms[0].name if bunch_uoms else '' %}
+
+<div id="product-meta"
+	data-item-code="{{ doc.item_code }}"
+	data-currency="{{ price_info.get('currency') or 'USD' }}"
+	data-price-list="{{ cart_settings.price_list }}">
+</div>
+
+<div class="col-md-7 product-details {{ width_class }}">
+	<div class="d-flex">
+		<!-- title -->
+		<div class="product-title col-11" itemprop="name">
+			{{ _(doc.web_item_name) }}
+		</div>
+
+		{% if shopping_cart.cart_settings.enabled %}
+		<div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2" style="cursor:pointer;" title="{{ _('Go to Wishlist') }}"
+			data-item-code="{{ doc.item_code }}">
+			<svg class="icon icon-md">
+				<use class="wish-icon {% if wished %}wished-green{% else %}not-wished-fp{% endif %}" href="#icon-heart"></use>
+			</svg>
+		</div>
+		{% endif %}
+	</div>
+
+	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">
+	</div>
+
+	<div itemprop="review" itemscope itemtype="https://schema.org/Review">
+	</div>
+
+	<!-- STEM LENGTH SELECTOR - DYNAMICALLY FROM DOCTYPE -->
+	{% if not has_variants and stem_lengths %}
+	<div class="stem-length-selector form-group mt-4 mb-4">
+		<select id="stem-length" class="form-control" name="stem_length" style="max-width: 200px;" required>
+			<option value="">{{ _("Stem Length") }}</option>
+			{% for length in stem_lengths %}
+				<option value="{{ length.length }}" {% if loop.first %}selected{% endif %}>
+					{{ length.length }}
+				</option>
+			{% endfor %}
+		</select>
+		
+		<!-- Price indicator based on length (optional) -->
+		<div class="mt-2 length-price-info" style="display: none;">
+			<small class="text-muted" id="length-price-message"></small>
+		</div>
+		
+	</div>
+	{% endif %}
+
+	<!-- BUNCH UOM SELECTOR - DYNAMICALLY FROM UOM DOCTYPE -->
+	{% if not has_variants and bunch_uoms %}
+	<div class="bunch-uom-selector form-group mt-4 mb-4">
+		<select id="bunch-uom" class="form-control" name="bunch_uom" style="max-width: 200px;" required>
+			<option value="">{{ _("Bunch Size") }}</option>
+			{% for uom in bunch_uoms %}
+				<option value="{{ uom.name }}" {% if loop.first %}selected{% endif %}>
+					{{ uom.uom_name or uom.name }}
+				</option>
+			{% endfor %}
+		</select>
+	</div>
+	{% endif %}
+
+	<!-- BOX TYPE SELECTOR -->
+	{% if not has_variants %}
+	<div class="box-type-selector form-group mt-4 mb-4">
+		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;">
+			<option value="">{{ _("Box Type") }}</option>
+			<option value="Small">{{ _("Small") }}</option>
+			<option value="Standard">{{ _("Standard") }}</option>
+			<option value="Large">{{ _("Large") }}</option>
+			<option value="Pro Flower Pack">{{ _("Pro Flower Pack") }}</option>
+		</select>
+	</div>
+	{% endif %}
+
+	<!-- Filter based on available lengths from attributes -->
+	{% if doc.attributes and not has_variants and stem_lengths %}
+		{% set available_lengths = [] %}
+		{% for attr in doc.attributes %}
+			{% if attr.attribute == "Stem Length" or attr.attribute == "Length" %}
+				{% set available_lengths = available_lengths.append(attr.attribute_value) %}
+			{% endif %}
+		{% endfor %}
+		
+		{% if available_lengths %}
+		<script>
+			// Enable/disable options based on available lengths
+			$(document).ready(function() {
+				const availableLengths = {{ available_lengths | tojson }};
+				const $select = $('#stem-length');
+				
+				$select.find('option').each(function() {
+					const value = $(this).val();
+					if (value && !availableLengths.includes(value) && availableLengths.length > 0) {
+						$(this).prop('disabled', true);
+						$(this).text($(this).text() + ' ({{ _("Not available") }})');
+					}
+				});
+				
+				// Update stock message
+				if (availableLengths.length > 0) {
+					$('.stock-message').text('{{ _("Available in") }}: ' + availableLengths.join(', '));
+				}
+			});
+		</script>
+		{% endif %}
+	{% endif %}
+
+	{% if has_variants %}
+		<!-- configure template -->
+		{% include "templates/generators/item/item_configure.html" %}
+	{% else %}
+		<!-- add variant to cart -->
+		{% include "templates/generators/item/item_add_to_cart.html" %}
+	{% endif %}
+	
+</div>
+
+<!-- Hidden field to store stem length selection -->
+<input type="hidden" id="selected_stem_length" name="selected_stem_length" value="{{ default_length_value }}">
+
+<!-- Hidden field to store bunch UOM selection -->
+<input type="hidden" id="selected_bunch_uom" name="selected_bunch_uom" value="{{ default_bunch_value }}">
+
+{% block base_scripts %}
+<!-- js should be loaded in body! -->
+<script type="text/javascript" src="/assets/frappe/js/lib/jquery/jquery.min.js"></script>
+{% endblock %}
+
+<script>
+	$('.page_content').on('click', '.like-action-item-fp', (e) => {
+		const $btn = $(e.currentTarget);
+		const item_code = $btn.data('item-code');
+
+		if (frappe.session.user === 'Guest') {
+			if (localStorage) {
+				localStorage.setItem('last_visited', window.location.pathname);
+			}
+			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
+				window.location.href = res.message || '/login';
+			});
+			return;
+		}
+
+		frappe.call({
+			type: 'POST',
+			method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist',
+			args: { item_code: item_code },
+			callback: function(r) {
+				window.location.href = '/wishlist';
+			}
+		});
+	});
+	
+	// Live price calculation: per-stem price × stems per bunch
+	function updatePriceDisplay() {
+		const stemLength = $('#stem-length').val();
+		const bunchUOM = $('#bunch-uom').val();
+		if (!stemLength || !bunchUOM) return;
+
+		const meta = document.getElementById('product-meta');
+		if (!meta) return;
+		const itemCode = meta.dataset.itemCode;
+		const currency = meta.dataset.currency;
+		const priceList = meta.dataset.priceList;
+
+		// Parse stems count from UOM name: "Bunch (25)" → 25
+		const uomText = $('#bunch-uom option:selected').text().trim();
+		const stemMatch = uomText.match(/\((\d+)\)/);
+		const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+
+		frappe.call({
+			method: 'upande_webshop.api.item_price.get_item_length_price',
+			args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
+			callback(r) {
+				if (r.message && r.message.price_list_rate) {
+					const perStem = r.message.price_list_rate;
+					const formatted = format_currency(perStem, currency);
+					$('#dynamic-price-value').text(formatted + ' / stem');
+					$('#dynamic-price-uom-label').text('(' + stemsPerBunch + ' stems per bunch)');
+				} else {
+					$('#dynamic-price-value').text('—');
+				}
+			}
+		});
+	}
+
+	// Handle stem length selection
+	$('.page_content').on('change', '#stem-length', function() {
+		const selectedLength = $(this).val();
+		$('#selected_stem_length').val(selectedLength);
+		updatePriceDisplay();
+	});
+
+	// Handle bunch UOM selection
+	$('.page_content').on('change', '#bunch-uom', function() {
+		const selectedUOM = $(this).val();
+		$('#selected_bunch_uom').val(selectedUOM);
+		updatePriceDisplay();
+	});
+	
+	// Auto-trigger price display once frappe is ready (defaults may already be selected)
+	frappe.ready(function() {
+		if ($('#stem-length').val() && $('#bunch-uom').val()) {
+			updatePriceDisplay();
+		}
+	});
+
+	// Modify add to cart to include both selections
+	$('.page_content').on('click', '.add-to-cart', function(e) {
+		const stemLength = $('#stem-length').val();
+		const bunchUOM = $('#bunch-uom').val();
+		
+		if (!stemLength) {
+			e.preventDefault();
+			frappe.show_alert({
+				message: '{{ _("Please select a stem length") }}',
+				indicator: 'red'
+			}, 3);
+			return false;
+		}
+		
+		if (!bunchUOM) {
+			e.preventDefault();
+			frappe.show_alert({
+				message: '{{ _("Please select a pack size") }}',
+				indicator: 'red'
+			}, 3);
+			return false;
+		}
+		
+		// Add selections to the button data
+		$(this).data('stem-length', stemLength);
+		$(this).data('bunch-uom', bunchUOM);
+		
+		// Show confirmation
+		frappe.show_alert({
+			message: '{{ _("Stem length") }}: ' + stemLength + ', {{ _("Pack") }}: ' + bunchUOM,
+			indicator: 'green'
+		}, 3);
+	});
+</script>

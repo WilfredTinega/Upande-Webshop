@@ -1,0 +1,130 @@
+{% from "upande_webshop/templates/includes/macros.html" import product_image %}
+
+{% macro item_subtotal(item) %}
+	{% if item.is_free_item %}
+		<div class="text-success mt-4">
+			<span class="free-tag">
+				{{ _('FREE') }}
+			</span>
+		</div>
+	{% else %}
+		<div class="item-rate text-muted" style="font-size:0.85em;">
+			{{ item.get_formatted('rate') }} / {{ _('stem') }}
+		</div>
+		<div class="font-weight-bold mt-1">
+			{{ item.get_formatted('amount') }}
+		</div>
+	{% endif %}
+{% endmacro %}
+
+{% for d in doc.items %}
+	{#- Parse stems per bunch from UOM name: "Bunch (25)" → 25 -#}
+	{%- set uom_name = d.uom or '' -%}
+	{%- set ns = namespace(stems_per_bunch=1) -%}
+	{%- for part in uom_name.split('(') -%}
+		{%- if loop.index > 1 and ')' in part -%}
+			{%- set num_str = part.split(')')[0].strip() -%}
+			{%- if num_str.isdigit() -%}
+				{%- set ns.stems_per_bunch = num_str | int -%}
+			{%- endif -%}
+		{%- endif -%}
+	{%- endfor -%}
+	{#- qty is in bunches; use stems parsed from UOM name as source of truth -#}
+	{%- set bunches = d.qty | int -%}
+	{%- set total_stems = (bunches * ns.stems_per_bunch) -%}
+
+	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}">
+		<td style="width: 60%;">
+			<div class="d-flex">
+				<div class="cart-item-image mr-4">
+					{% if d.thumbnail %}
+						{{ product_image(d.thumbnail, alt=d.web_item_name, no_border=True) }}
+					{% else %}
+						<div class = "no-image-cart-item">
+							{{ frappe.utils.get_abbr(d.web_item_name) or "NA" }}
+						</div>
+					{% endif %}
+				</div>
+
+				<div class="d-flex w-100" style="flex-direction: column;">
+					<div class="item-title mb-1 mr-3">
+						{{ d.get("web_item_name") or d.item_name }}
+					</div>
+
+					{% if d.custom_length %}
+					<span class="item-subtitle mr-2 mt-1">
+						{{ _('Length') }}: <strong>{{ d.custom_length }}</strong>
+					</span>
+					{% endif %}
+					{% if d.uom %}
+					<span class="item-subtitle mr-2">
+						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
+					</span>
+					{% endif %}
+					{% if d.custom_box_type %}
+					<span class="item-subtitle mr-2">
+						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>
+					</span>
+					{% endif %}
+					<span class="item-subtitle mr-2">
+						{{ _('Total Bunches') }}: <strong>{{ bunches }}</strong>
+					</span>
+					<span class="item-subtitle mr-2">
+						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
+					</span>
+				</div>
+			</div>
+		</td>
+
+		<!-- Qty column (in bunches) -->
+		<td class="text-right" style="width: 25%;">
+			<div class="d-flex">
+				{% set disabled = 'disabled' if d.is_free_item else '' %}
+				<div class="input-group number-spinner mt-1 mb-4">
+					<span class="input-group-prepend d-sm-inline-block">
+						<button class="btn cart-btn" data-dir="dwn" {{ disabled }}>
+							{{ '–' if not d.is_free_item else ''}}
+						</button>
+					</span>
+
+					<input class="form-control text-center cart-qty"
+						value="{{ bunches }}"
+						data-item-code="{{ d.item_code }}"
+						data-stems-per-bunch="{{ d.conversion_factor | int }}"
+						style="max-width: 70px;" {{ disabled }}>
+
+					<span class="input-group-append d-sm-inline-block">
+						<button class="btn cart-btn" data-dir="up" {{ disabled }}>
+							{{ '+' if not d.is_free_item else ''}}
+						</button>
+					</span>
+					</div>
+
+				<div>
+					{% if not d.is_free_item %}
+						<div class="remove-cart-item column-sm-view d-flex" data-item-code="{{ d.item_code }}" data-child-docname="{{ d.name }}">
+							<span>
+								<svg class="icon sm remove-cart-item-logo"
+									width="18" height="18" viewBox="0 0 18 18"
+									xmlns="http://www.w3.org/2000/svg" id="icon-close">
+									<path fill-rule="evenodd" clip-rule="evenodd" d="M4.146 11.217a.5.5 0 1 0 .708.708l3.182-3.182 3.181 3.182a.5.5 0 1 0 .708-.708l-3.182-3.18 3.182-3.182a.5.5 0 1 0-.708-.708l-3.18 3.181-3.183-3.182a.5.5 0 0 0-.708.708l3.182 3.182-3.182 3.181z" stroke-width="0"></path>
+								</svg>
+							</span>
+						</div>
+					{% endif %}
+					</div>
+			</div>
+
+
+			<!-- Shown on mobile view, else hidden -->
+			<div class="text-right sm-item-subtotal">
+				{{ item_subtotal(d) }}
+			</div>
+		</td>
+
+		<!-- Price column -->
+		<td class="text-right item-subtotal column-sm-view w-100">
+			{{ item_subtotal(d) }}
+		</td>
+	</tr>
+{% endfor %}
