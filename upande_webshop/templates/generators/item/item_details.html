@@ -1,0 +1,221 @@
+{% set width_class = "expand" if not slides else "" %}
+{% set cart_settings = shopping_cart.cart_settings %}
+{% set product_info = shopping_cart.product_info %}
+{% set price_info = product_info.get('price') or {} %}
+
+{% set stem_lengths = frappe.get_list('Stem Length',
+    fields=['name', 'length'],
+    order_by='length asc'
+) %}
+
+<div id="product-meta"
+	data-item-code="{{ doc.item_code }}"
+	data-currency="{{ price_info.get('currency') or 'USD' }}"
+	data-price-list="{{ cart_settings.price_list }}">
+</div>
+
+<div class="col-md-7 product-details {{ width_class }}">
+	<div class="d-flex">
+		<div class="product-title col-11" itemprop="name">
+			{{ _(doc.web_item_name) }}
+		</div>
+	</div>
+
+	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">
+	</div>
+
+	<div itemprop="review" itemscope itemtype="https://schema.org/Review">
+	</div>
+
+	<!-- ORDER CONFIG CARD: only for non-variant items -->
+	{% if not has_variants %}
+	<div class="order-config-card mt-4 mb-4 p-3" style="background: var(--gray-50); border-radius: 8px; border: 1px solid var(--gray-200);">
+		<div style="font-weight: 600; font-size: 14px; margin-bottom: 12px; color: var(--gray-700);">
+			{{ _("Configure Your Order") }}
+		</div>
+
+		<div class="d-flex justify-content-between mb-3" style="font-size: 13px;">
+			<span style="color: var(--gray-600);">{{ doc.item_group }}</span>
+			<span style="color: var(--gray-600);">{{ doc.item_code }}</span>
+		</div>
+
+		{% if stem_lengths %}
+		<div class="form-group mb-3">
+			<label for="stem-length" style="font-size: 13px; font-weight: 500; color: var(--gray-700); margin-bottom: 4px;">
+				{{ _("Stem Length") }} <span style="color: var(--red-500);">*</span>
+			</label>
+			<select id="stem-length" class="form-control" name="stem_length" required>
+				<option value="">{{ _("Select length...") }}</option>
+				{% for length in stem_lengths %}
+					<option value="{{ length.length }}">{{ length.length }}</option>
+				{% endfor %}
+			</select>
+		</div>
+		{% endif %}
+
+		<div class="form-group mb-3">
+			<label for="bunch-uom" style="font-size: 13px; font-weight: 500; color: var(--gray-700); margin-bottom: 4px;">
+				{{ _("Bunch Size") }} <span style="color: var(--red-500);">*</span>
+			</label>
+			<select id="bunch-uom" class="form-control" name="bunch_uom" required>
+				<option value="">{{ _("Select bunch size...") }}</option>
+				<option value="10">10 Stems</option>
+				<option value="20">20 Stems</option>
+				<option value="25">25 Stems</option>
+			</select>
+		</div>
+
+		<div class="form-group mb-3">
+			<label for="box-type" style="font-size: 13px; font-weight: 500; color: var(--gray-700); margin-bottom: 4px;">
+				{{ _("Box Type") }} <span style="color: var(--red-500);">*</span>
+			</label>
+			<select id="box-type" class="form-control" name="box_type" required>
+				<option value="">{{ _("Select box type...") }}</option>
+				<option value="QB">QB (Quarter Box)</option>
+				<option value="HB">HB (Half Box)</option>
+				<option value="FB">FB (Full Box)</option>
+			</select>
+		</div>
+
+		<div class="form-group mb-3">
+			<label for="order-qty" style="font-size: 13px; font-weight: 500; color: var(--gray-700); margin-bottom: 4px;">
+				{{ _("Quantity (Bunches)") }} <span style="color: var(--red-500);">*</span>
+			</label>
+			<input type="number" id="order-qty" class="form-control" name="order_qty" min="1" value="1" required>
+		</div>
+
+		<div class="price-summary mt-3 p-2" style="background: white; border-radius: 6px; border: 1px solid var(--gray-200); display: none;" id="price-summary">
+			<div class="d-flex justify-content-between align-items-center">
+				<span style="font-size: 13px; color: var(--gray-600);">{{ _("Price per stem") }}</span>
+				<span style="font-size: 15px; font-weight: 600;" id="dynamic-price-value">—</span>
+			</div>
+			<div class="d-flex justify-content-between align-items-center mt-1">
+				<span style="font-size: 12px; color: var(--gray-500);" id="dynamic-price-uom-label"></span>
+				<span style="font-size: 12px; color: var(--gray-500);" id="dynamic-total-label"></span>
+			</div>
+		</div>
+
+		<div class="order-summary mt-3 p-2" style="background: var(--green-50, #f0fdf4); border-radius: 6px; border: 1px solid var(--green-200, #bbf7d0); display: none;" id="order-summary">
+			<div style="font-size: 12px; color: var(--green-700, #15803d);" id="order-summary-text"></div>
+		</div>
+	</div>
+	{% endif %}
+
+	{% if has_variants %}
+		{% include "templates/generators/item/item_configure.html" %}
+	{% else %}
+		{% include "templates/generators/item/item_add_to_cart.html" %}
+	{% endif %}
+	
+</div>
+
+<input type="hidden" id="selected_stem_length" name="selected_stem_length" value="">
+<input type="hidden" id="selected_bunch_uom" name="selected_bunch_uom" value="">
+<input type="hidden" id="selected_box_type" name="selected_box_type" value="">
+
+{% block base_scripts %}
+<script type="text/javascript" src="/assets/frappe/js/lib/jquery/jquery.min.js"></script>
+{% endblock %}
+
+<script>
+	$('.page_content').on('click', '.like-action-item-fp', (e) => {
+		const $btn = $(e.currentTarget);
+		webshop.webshop.wishlist.wishlist_action($btn);
+	});
+
+	function updateOrderSummary() {
+		const bunchText = $('#bunch-uom option:selected').text().trim();
+		const bunchVal = $('#bunch-uom').val();
+		const boxText = $('#box-type option:selected').text().trim();
+		const boxVal = $('#box-type').val();
+		const qty = $('#order-qty').val();
+		const stemLength = $('#stem-length').length ? $('#stem-length').val() : null;
+
+		$('#selected_stem_length').val(stemLength || '');
+		$('#selected_bunch_uom').val(bunchVal);
+		$('#selected_box_type').val(boxVal);
+
+		let parts = [];
+		if (stemLength) parts.push(stemLength);
+		if (bunchVal) parts.push(bunchText);
+		if (boxVal) parts.push(boxText);
+		if (qty) parts.push('Qty: ' + qty);
+
+		if (bunchVal && boxVal && qty && (!$('#stem-length').length || stemLength)) {
+			$('#order-summary-text').text(parts.join(' · '));
+			$('#order-summary').show();
+		} else {
+			$('#order-summary').hide();
+		}
+
+		updatePriceDisplay();
+	}
+
+	function updatePriceDisplay() {
+		const stemLength = $('#stem-length').length ? $('#stem-length').val() : null;
+		const bunchUOM = $('#bunch-uom').val();
+
+		if (!bunchUOM || ($('#stem-length').length && !stemLength)) {
+			$('#price-summary').hide();
+			return;
+		}
+
+		const meta = document.getElementById('product-meta');
+		if (!meta) return;
+		const itemCode = meta.dataset.itemCode;
+		const currency = meta.dataset.currency;
+		const priceList = meta.dataset.priceList;
+
+		const stemsPerBunch = parseInt(bunchUOM) || 1;
+		const qty = parseInt($('#order-qty').val()) || 1;
+
+		if (stemLength) {
+			frappe.call({
+				method: 'upande_webshop.api.item_price.get_item_length_price',
+				args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
+				callback(r) {
+					if (r.message && r.message.price_list_rate) {
+						const perStem = r.message.price_list_rate;
+						const formatted = format_currency(perStem, currency);
+						const totalOrder = perStem * stemsPerBunch * qty;
+						$('#dynamic-price-value').text(formatted + ' / stem');
+						$('#dynamic-price-uom-label').text(stemsPerBunch + ' stems per bunch');
+						$('#dynamic-total-label').text('Total: ' + format_currency(totalOrder, currency));
+						$('#price-summary').show();
+					} else {
+						$('#dynamic-price-value').text('—');
+						$('#price-summary').show();
+					}
+				}
+			});
+		}
+	}
+
+	$('.page_content').on('change', '#stem-length, #bunch-uom, #box-type', updateOrderSummary);
+	$('.page_content').on('input', '#order-qty', updateOrderSummary);
+
+	// Validate only for non-variant add-to-cart
+	$('.page_content').on('click', '.add-to-cart', function(e) {
+		const bunchUOM = $('#bunch-uom').val();
+		const boxType = $('#box-type').val();
+
+		let missing = [];
+		if ($('#stem-length').length && !$('#stem-length').val()) missing.push('{{ _("Stem Length") }}');
+		if (!bunchUOM) missing.push('{{ _("Bunch Size") }}');
+		if (!boxType) missing.push('{{ _("Box Type") }}');
+
+		if (missing.length) {
+			e.preventDefault();
+			e.stopImmediatePropagation();
+			frappe.show_alert({
+				message: '{{ _("Please select") }}: ' + missing.join(', '),
+				indicator: 'red'
+			}, 3);
+			return false;
+		}
+	});
+
+	frappe.ready(function() {
+		updateOrderSummary();
+	});
+</script>
