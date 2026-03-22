@@ -1,7 +1,7 @@
 {
  "app": "upande_webshop",
  "charts": [],
- "content": "[{\"id\":\"hQxbR1RYqz\",\"type\":\"card\",\"data\":{\"card_name\":\"Shortcuts\",\"col\":5}},{\"id\":\"QezGmPdrPg\",\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":5}},{\"id\":\"0ynahrwc1Y\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"4msh4qyvP1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2-Z0G3AqQL\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Published Items\",\"col\":12}},{\"id\":\"8Z-deooKfk\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2kOIHfGTOH\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"vJ4Xtm0Ojy\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop\",\"col\":3}},{\"id\":\"lLr4v7rg-R\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Products\",\"col\":3}},{\"id\":\"tYl2IM-K_e\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop Cart\",\"col\":3}},{\"id\":\"Mnsd1o6t7b\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Quotations\",\"col\":3}},{\"id\":\"a38S7G1sXR\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"9YC5xiD1dO\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+ "content": "[{\"id\":\"hQxbR1RYqz\",\"type\":\"card\",\"data\":{\"card_name\":\"Shortcuts\",\"col\":5}},{\"id\":\"QezGmPdrPg\",\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":5}},{\"id\":\"0ynahrwc1Y\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"_b1tCgi3Z3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop\",\"col\":3}},{\"id\":\"4msh4qyvP1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2-Z0G3AqQL\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Published Items\",\"col\":12}},{\"id\":\"8Z-deooKfk\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2kOIHfGTOH\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"a38S7G1sXR\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"9YC5xiD1dO\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
  "creation": "2025-11-20 20:43:34.240751",
  "custom_blocks": [],
  "docstatus": 0,
@@ -102,9 +102,19 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Website Settings",
+   "link_count": 0,
+   "link_to": "Website Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-02-02 03:14:15.209846",
+ "modified": "2026-02-24 17:36:49.648556",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",
@@ -124,35 +134,14 @@
    "role": "Sales Manager"
   }
  ],
- "sequence_id": 28.0,
+ "sequence_id": 1.0,
  "shortcuts": [
   {
    "color": "Grey",
    "doc_view": "List",
    "label": "Webshop",
    "type": "URL",
-   "url": "/webshop"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Products",
-   "type": "URL",
-   "url": "/all-products"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Webshop Cart",
-   "type": "URL",
-   "url": "/cart"
-  },
-  {
-   "color": "Grey",
-   "doc_view": "List",
-   "label": "Quotations",
-   "type": "URL",
-   "url": "/quotations"
+   "url": "/upande-webshop"
   }
  ],
  "title": "Upande Webshop",

@@ -394,28 +394,3 @@ $.extend(shopping_cart, {
 });
 
 
-
-// Remove item from cart
-$(document).on("click", ".remove-cart-item", function() {
-        var item_code = $(this).data("item-code");
-        var child_docname = $(this).data("child-docname");
-
-        webshop.webshop.shopping_cart.freeze();
-
-        frappe.call({
-                type: "POST",
-                method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart",
-                args: {
-                        item_code: item_code,
-                        qty: 0,
-                        child_docname: child_docname
-                },
-                callback: function(r) {
-                        if (!r.exc) {
-                                window.location.reload();
-                        } else {
-                                webshop.webshop.shopping_cart.unfreeze();
-                        }
-                }
-        });
-});

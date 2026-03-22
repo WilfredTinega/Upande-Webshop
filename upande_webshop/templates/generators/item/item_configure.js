@@ -17,49 +17,15 @@ class ItemConfigure {
 				label: a.attribute,
 				fieldname: a.attribute,
 				options: a.values.map(v => {
-					return { label: v, value: v };
+					return {
+						label: v,
+						value: v
+					};
 				}),
 				change: (e) => {
 					this.on_attribute_selection(e);
 				}
 			};
-		});
-
-		fields.push({ fieldtype: 'Section Break', label: __('Order Details') });
-
-		fields.push({
-			fieldtype: 'Select',
-			label: __('Bunch Size'),
-			fieldname: 'bunch_size',
-			options: [
-				{ label: __('Select bunch size...'), value: '' },
-				{ label: '10 Stems', value: '10' },
-				{ label: '20 Stems', value: '20' },
-				{ label: '25 Stems', value: '25' }
-			]
-		});
-
-		fields.push({ fieldtype: 'Column Break' });
-
-		fields.push({
-			fieldtype: 'Select',
-			label: __('Box Type'),
-			fieldname: 'box_type',
-			options: [
-				{ label: __('Select box type...'), value: '' },
-				{ label: 'QB (Quarter Box)', value: 'QB' },
-				{ label: 'HB (Half Box)', value: 'HB' },
-				{ label: 'FB (Full Box)', value: 'FB' }
-			]
-		});
-
-		fields.push({ fieldtype: 'Column Break' });
-
-		fields.push({
-			fieldtype: 'Data',
-			label: __('Quantity (Bunches)'),
-			fieldname: 'order_qty',
-			default: '1'
 		});
 
 		this.dialog = new frappe.ui.Dialog({
@@ -83,15 +49,7 @@ class ItemConfigure {
 		this.append_status_area();
 		this.dialog.show();
 
-		const cached = JSON.parse(localStorage.getItem(this.get_cache_key()));
-		if (cached) {
-			const attribute_names = this.attribute_data.map(a => a.attribute);
-			for (let key in cached) {
-				if (attribute_names.includes(key)) {
-					this.dialog.set_value(key, cached[key]);
-				}
-			}
-		}
+		this.dialog.set_values(JSON.parse(localStorage.getItem(this.get_cache_key())));
 
 		$('.btn-configure').prop('disabled', false);
 	}
@@ -104,33 +62,30 @@ class ItemConfigure {
 			this.show_range_input_for_all_fields();
 		}
 
-		const values = {};
-		this.attribute_data.forEach(a => {
-			const val = this.dialog.get_value(a.attribute);
-			if (val) values[a.attribute] = val;
-		});
-
+		const values = this.dialog.get_values();
 		if (Object.keys(values).length === 0) {
 			this.clear_status();
 			localStorage.removeItem(this.get_cache_key());
 			return;
 		}
 
+		// save state
 		localStorage.setItem(this.get_cache_key(), JSON.stringify(values));
 
+		// show
 		this.set_loading_status();
 
 		this.get_next_attribute_and_values(values)
 			.then(data => {
-				const { valid_options_for_attributes } = data;
+				const {
+					valid_options_for_attributes,
+				} = data;
 
 				this.set_item_found_status(data);
 
 				for (let attribute in valid_options_for_attributes) {
 					const valid_options = valid_options_for_attributes[attribute];
-					const field = this.dialog.get_field(attribute);
-					if (!field) continue;
-					const options = field.df.options;
+					const options = this.dialog.get_field(attribute).df.options;
 					const new_options = options.map(o => {
 						o.disabled = !valid_options.includes(o.value);
 						return o;
@@ -143,9 +98,8 @@ class ItemConfigure {
 	}
 
 	show_range_input_for_all_fields() {
-		const attribute_names = this.attribute_data.map(a => a.attribute);
 		this.dialog.fields.forEach(f => {
-			if (attribute_names.includes(f.fieldname)) {
+			if (!["Section Break", "Coulmn Break"].includes(f.fieldtype)) {
 				this.show_range_input_if_applicable(f.fieldname);
 			}
 		});
@@ -153,25 +107,25 @@ class ItemConfigure {
 
 	show_range_input_if_applicable(fieldname) {
 		const changed_field = this.dialog.get_field(fieldname);
-		if (!changed_field) return;
 		const changed_value = changed_field.get_value();
-		if (changed_value && typeof changed_value === 'string' && changed_value.includes(' to ')) {
+		if (changed_value && changed_value.includes(' to ')) {
+			// possible range input
 			let numbers = changed_value.split(' to ');
 			numbers = numbers.map(number => parseFloat(number));
 
 			if (!numbers.some(n => isNaN(n))) {
 				numbers.sort((a, b) => a - b);
-				if (changed_field.$input_wrapper && changed_field.$input_wrapper.find('.range-selector').length) {
+				if (changed_field.$input_wrapper.find('.range-selector').length) {
 					return;
 				}
 				const parent = $('<div class="range-selector">')
 					.insertBefore(changed_field.$input_wrapper.find('.help-box'));
 				const control = frappe.ui.form.make_control({
 					df: {
-						fieldtype: 'Data',
+						fieldtype: 'Int',
 						label: __('Enter value betweeen {0} and {1}', [numbers[0], numbers[1]]),
 						change: () => {
-							const value = parseInt(control.get_value()) || 0;
+							const value = control.get_value();
 							if (value < numbers[0] || value > numbers[1]) {
 								control.$wrapper.addClass('was-validated');
 								control.set_description(
@@ -199,6 +153,8 @@ class ItemConfigure {
 	}
 
 	show_remaining_optional_attributes() {
+		// show all attributes if remaining
+		// unselected attributes are all optional
 		const unselected_attributes = this.dialog.fields.filter(df => {
 			const value_selected = this.dialog.get_value(df.fieldname);
 			return !value_selected;
@@ -255,6 +211,7 @@ class ItemConfigure {
 			__('{0} item found.', [filtered_items_count]) :
 			__('{0} items found.', [filtered_items_count]);
 
+		/* eslint-disable indent */
 		const item_found_status = exact_match.length === 1
 			? `<div class="alert alert-success d-flex justify-content-between align-items-center" role="alert">
 				<div><div>
@@ -276,6 +233,7 @@ class ItemConfigure {
 						${__('Clear values')}
 					</a>
 			</div>`;
+		/* eslint-disable indent */
 
 		return `
 			${item_found_status}
@@ -284,76 +242,17 @@ class ItemConfigure {
 	}
 
 	btn_add_to_cart(e) {
-		const bunchSize = this.dialog.get_value('bunch_size');
-		const boxType = this.dialog.get_value('box_type');
-		const orderQty = parseInt(this.dialog.get_value('order_qty')) || 0;
-
-		let missing = [];
-		if (!bunchSize) missing.push(__('Bunch Size'));
-		if (!boxType) missing.push(__('Box Type'));
-		if (!orderQty || orderQty < 1) missing.push(__('Quantity'));
-
-		if (missing.length) {
-			frappe.show_alert({
-				message: __('Please fill in: ') + missing.join(', '),
-				indicator: 'red'
-			}, 5);
-			this.dialog.$wrapper.find('.modal-body').animate({
-				scrollTop: this.dialog.$wrapper.find('.modal-body')[0].scrollHeight
-			}, 300);
-			return;
-		}
-
 		if (frappe.session.user !== 'Guest') {
 			localStorage.removeItem(this.get_cache_key());
 		}
-
 		const item_code = $(e.currentTarget).data('item-code');
-
-		const stemsPerBunch = parseInt(bunchSize) || 1;
-		const totalStems = stemsPerBunch * orderQty;
-
-		const notes_parts = [];
-
-		if (this.range_values) {
-			Object.keys(this.range_values).forEach(attribute => {
-				notes_parts.push(`${attribute}: ${this.range_values[attribute]}`);
-			});
-		}
-
-		const bunchField = this.dialog.get_field('bunch_size');
-		const boxField = this.dialog.get_field('box_type');
-		const bunchText = bunchField ? bunchField.$input.find('option:selected').text().trim() : bunchSize;
-		const boxText = boxField ? boxField.$input.find('option:selected').text().trim() : boxType;
-
-		notes_parts.push(`Bunch Size: ${bunchText}`);
-		notes_parts.push(`Box Type: ${boxText}`);
-		notes_parts.push(`Bunches: ${orderQty}`);
-		notes_parts.push(`Total Stems: ${totalStems}`);
-
-		const additional_notes = notes_parts.join('\n');
-
-		frappe.call({
-			method: 'upande_webshop.upande_webshop.shopping_cart.cart.update_cart',
-			args: {
-				item_code: item_code,
-				qty: totalStems,
-				additional_notes: additional_notes,
-				with_items: true
-			},
-			callback: (r) => {
-				if (r.message) {
-					frappe.show_alert({
-						message: __('Added to cart: {0} × {1} stems ({2} bunches of {3}, {4})', 
-							[item_code, totalStems, orderQty, bunchText, boxText]),
-						indicator: 'green'
-					}, 5);
-					// Update cart indicator in header
-					$('.cart-badge, .shopping-cart-header .badge').text(
-						r.message.doc && r.message.doc.items ? r.message.doc.items.length : ''
-					);
-				}
-			}
+		const additional_notes = Object.keys(this.range_values || {}).map(attribute => {
+			return `${attribute}: ${this.range_values[attribute]}`;
+		}).join('\n');
+		upande_webshop.upande_webshop.shopping_cart.update_cart({
+			item_code,
+			additional_notes,
+			qty: 1
 		});
 		this.dialog.hide();
 	}
@@ -368,7 +267,6 @@ class ItemConfigure {
 			}
 		});
 		this.dialog.clear();
-		this.dialog.set_value('order_qty', '1');
 		this.on_attribute_selection();
 	}
 
@@ -403,6 +301,7 @@ class ItemConfigure {
 	}
 
 	call(method, args) {
+		// promisified frappe.call
 		return new Promise((resolve, reject) => {
 			frappe.call(method, args)
 				.then(r => resolve(r.message))
