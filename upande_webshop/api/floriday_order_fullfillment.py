@@ -168,7 +168,7 @@ def update_delivery_note_with_fulfillment(sales_order_name, fulfillment_id):
 @frappe.whitelist()
 def order_fullment():
     """
-    Creates fulfillment orders in Floriday for Sales Orders created in the last 3 hours.
+    Creates fulfillment orders in Floriday for Sales Orders created in the last 1 hour.
     Uses POST /fulfillment-orders endpoint.
     """
     logger = frappe.logger()
@@ -178,8 +178,8 @@ def order_fullment():
 
     try:
         now = now_datetime()
-        three_hours_ago = add_to_date(now, hours=-3)
-        step(f"STEP 1: Started. now={now}, looking back to {three_hours_ago}")
+        start_time = add_to_date(now, hours=-1)
+        step(f"STEP 1: Started. now={now}, looking back to {start_time}")
 
         # ── Settings ────────────────────────────────────────────────────────
         settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
@@ -208,24 +208,24 @@ def order_fullment():
             "Accept": "text/plain"
         }
 
-        # ── Query Sales Orders (Last 3 hours) ───────────────────────────────
+        # ── Query Sales Orders (Last 1 hour) ────────────────────────────────
         sales_orders = frappe.get_all(
             "Sales Order",
             filters={
                 "docstatus": 1,
                 "customer_group": "Floriday",
                 "po_no": ["!=", ""],
-                "creation": [">=", three_hours_ago]
+                "creation": [">=", start_time]
             },
             fields=["name", "po_no", "customer", "delivery_date", "status", "creation", "custom_delivery_point"]
         )
-        step(f"STEP 3: Orders in last 3 hours: {len(sales_orders)}")
+        step(f"STEP 3: Orders in last 1 hour: {len(sales_orders)}")
 
         if not sales_orders:
-            step("STEP 3: No orders in last 3 hours — nothing to fulfill")
+            step("STEP 3: No orders in last 1 hour — nothing to fulfill")
             return {
                 "status": "success",
-                "message": "No Floriday Sales Orders found in the last 3 hours",
+                "message": "No Floriday Sales Orders found in the last 1 hour",
                 "results": []
             }
 

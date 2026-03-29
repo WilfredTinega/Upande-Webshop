@@ -136,7 +136,7 @@ def create_sales_orders_from_floriday():
 
         # Set date range for last 1 hour
         end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(hours=5)
+        start_date = end_date - timedelta(hours=1)
 
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
