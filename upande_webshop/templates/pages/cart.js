@@ -18,21 +18,11 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_remove_cart_item();
 		shopping_cart.bind_coupon_code();
 		shopping_cart.bind_remove_coupon_code();
-		shopping_cart.bind_delivery_date();
+		shopping_cart.bind_drop_off_point();
 	},
 
 	bind_place_order: function() {
 		$(".btn-place-order").on("click", function() {
-			// Validate delivery date is set before placing order
-			var delivery_date = $("#delivery-date").val();
-			if (!delivery_date) {
-				frappe.show_alert({
-					message: __('Please select an expected delivery date before placing your order.'),
-					indicator: 'red'
-				}, 5);
-				$("#delivery-date").focus();
-				return;
-			}
 			shopping_cart.place_order(this);
 		});
 	},
@@ -103,95 +93,39 @@ $.extend(shopping_cart, {
 		});
 	},
 
-	// ---- Delivery Date & Shipment Date ----
-	bind_delivery_date: function() {
-		var $deliveryInput = $("#delivery-date");
-		if (!$deliveryInput.length) return;
-
-		// Set minimum date: today + transit_days
-		var transit_days = parseInt($("#transit-days-label").text()) || 2;
-		var min_date = new Date();
-		min_date.setDate(min_date.getDate() + transit_days);
-		$deliveryInput.attr("min", shopping_cart._format_date(min_date));
-
-		// If a delivery date is already saved on the quotation, show shipment date
-		if ($deliveryInput.val()) {
-			shopping_cart._calculate_shipment_date($deliveryInput.val(), transit_days);
-		}
-
-		// Bind change event
-		$deliveryInput.on("change", function() {
-			var delivery_date = $(this).val();
-			if (!delivery_date) {
-				$("#shipment-date-display").text("—");
-				return;
-			}
-
-			// Validate: delivery date must be at least transit_days from today
-			var selected = new Date(delivery_date);
-			var min_allowed = new Date();
-			min_allowed.setDate(min_allowed.getDate() + transit_days);
-			min_allowed.setHours(0, 0, 0, 0);
-
-			if (selected < min_allowed) {
-				frappe.show_alert({
-					message: __('Expected delivery date must be at least {0} days from today (transit time).', [transit_days]),
-					indicator: 'orange'
-				}, 5);
-				$(this).val("");
-				$("#shipment-date-display").text("—");
-				return;
-			}
-
-			// Show calculated shipment date immediately (client-side)
-			shopping_cart._calculate_shipment_date(delivery_date, transit_days);
-
-			// Save to server
+	// ---- Drop-off Point ----
+	bind_drop_off_point: function() {
+		$("#drop-off-point").on("change", function() {
+			var drop_off_point = $(this).val();
 			frappe.call({
-				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
-				args: { delivery_date: delivery_date },
-				callback: function(r) {
-					if (r.message && r.message.shipment_date) {
-						// Only update if server returned a valid date
-						$("#shipment-date-display")
-							.text(shopping_cart._display_date(r.message.shipment_date))
-							.css("color", "var(--text-color)");
-					}
-					// Otherwise keep the client-side calculated value already showing
-				}
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_drop_off_point",
+				args: { drop_off_point: drop_off_point }
 			});
 		});
 	},
 
-	_calculate_shipment_date: function(delivery_date, transit_days) {
-		var d = new Date(delivery_date);
-		d.setDate(d.getDate() - transit_days);
-		var formatted = shopping_cart._display_date(shopping_cart._format_date(d));
-		$("#shipment-date-display")
-			.text(formatted)
-			.css("color", "var(--text-color)");
+	load_drop_off_points: function() {
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Delivery Point',
+				fields: ['name', 'delivery_point'],
+				limit_page_length: 100,
+				order_by: 'name asc'
+			},
+			callback: function(r) {
+				var current = $("#drop-off-point").data("current");
+				var $select = $("#drop-off-point");
+				$select.empty().append('<option value="">-- Select Drop-off Point --</option>');
+				(r.message || []).forEach(function(p) {
+					var label = p.delivery_point || p.name;
+					var selected = p.name === current ? 'selected' : '';
+					$select.append('<option value="' + p.name + '" ' + selected + '>' + label + '</option>');
+				});
+			}
+		});
 	},
-
-	_format_date: function(date) {
-		// Returns YYYY-MM-DD
-		var y = date.getFullYear();
-		var m = String(date.getMonth() + 1).padStart(2, "0");
-		var d = String(date.getDate()).padStart(2, "0");
-		return y + "-" + m + "-" + d;
-	},
-
-	_display_date: function(date_str) {
-		// Converts YYYY-MM-DD to "14 Mar 2026"
-		if (!date_str) return "—";
-		var parts = date_str.split("-");
-		if (parts.length !== 3) return date_str;
-		var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-		var day = parseInt(parts[2]);
-		var month = months[parseInt(parts[1]) - 1];
-		var year = parts[0];
-		return day + " " + month + " " + year;
-	},
-	// ---- End Delivery Date & Shipment Date ----
+	// ---- End Drop-off Point ----
 
 	render_tax_row: function($cart_taxes, doc, shipping_rules) {
 		var shipping_selector;
@@ -344,6 +278,7 @@ frappe.ready(function() {
 	}
 	shopping_cart.parent = $(".cart-container");
 	shopping_cart.bind_events();
+	shopping_cart.load_drop_off_points();
 });
 
 function show_terms() {

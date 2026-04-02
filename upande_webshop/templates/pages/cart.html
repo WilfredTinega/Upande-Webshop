@@ -79,35 +79,17 @@
 		<div class="col-md-4">
 			<div class="cart-payment-addresses">
 
-				<!-- Delivery & Shipment Dates -->
+				<!-- Drop-off Point -->
 				<div class="mb-3 frappe-card p-5">
-					<div class="delivery-date-section">
-						<h6 class="mb-3" style="font-weight: 600;">{{ _('Delivery Schedule') }}</h6>
-
+					<div class="drop-off-section">
+						<h6 class="mb-3" style="font-weight: 600;">{{ _('Drop-off Point') }}</h6>
 						<div class="mb-3">
-							<label for="delivery-date" class="form-label" style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: block;">
-								{{ _('Expected Delivery Date') }} <span class="text-danger">*</span>
+							<label for="drop-off-point" class="form-label" style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: block;">
+								{{ _('Drop-off Location') }}
 							</label>
-							<input type="date" id="delivery-date" class="form-control font-md"
-								value="{{ doc.custom_delivery_date or '' }}"
-								min=""
-								placeholder="{{ _('Select delivery date') }}">
-							<small class="text-muted" id="delivery-date-help">
-								{{ _('When do you need the flowers delivered?') }}
-							</small>
-						</div>
-
-						<div class="mb-1">
-							<label class="form-label" style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: block;">
-								{{ _('Shipment Date') }}
-							</label>
-							<div id="shipment-date-display" class="font-md" style="padding: 6px 0; font-weight: 500;">
-								{{ _('—') }}
-							</div>
-							<small class="text-muted" id="shipment-date-help">
-								{{ _('Auto-calculated based on transit time') }}
-								(<span id="transit-days-label">{{ transit_days or 2 }}</span> {{ _('days') }})
-							</small>
+							<select id="drop-off-point" class="form-control font-md" data-current="{{ doc.custom_drop_off_point or '' }}">
+								<option value="">Loading...</option>
+							</select>
 						</div>
 					</div>
 				</div>
