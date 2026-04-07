@@ -61,9 +61,15 @@
 						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
 					</span>
 					{% endif %}
+					{%- set ns = namespace(box_val='') -%}
+					{%- for part in (d.additional_notes or '').split(' | ') -%}
+						{%- if part.startswith('Box:') -%}{%- set ns.box_val = part[4:].strip() -%}{%- endif -%}
+					{%- endfor -%}
+					{% if ns.box_val %}
 					<span class="item-subtitle mr-2">
-						{{ _('Total Bunches') }}: <strong>{{ bunches }}</strong>
+						{{ _('Box') }}: <strong>{{ ns.box_val }}</strong>
 					</span>
+					{% endif %}
 					<span class="item-subtitle mr-2">
 						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>

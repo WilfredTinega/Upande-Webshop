@@ -253,7 +253,7 @@ def _apply_length_price_db(quotation):
 
 
 @frappe.whitelist()
-def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, with_items=False, child_docname=None):
+def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, box_type=None, with_items=False, child_docname=None):
 	quotation = _get_cart_quotation()
 
 	empty_card = False
@@ -306,6 +306,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 					"custom_total_stems": total_stems,
 					"custom_length": custom_length,
 					"additional_notes": additional_notes,
+     				"custom_box_type": box_type,
 					"warehouse": warehouse,
 				},
 			)
@@ -316,6 +317,8 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 				item.uom = uom
 			if custom_length:
 				item.custom_length = custom_length
+			if box_type:
+				item.custom_box_type = box_type
 			item.warehouse = warehouse
 			item.additional_notes = additional_notes
 			total_stems = qty * flt(item.conversion_factor or 1)
@@ -963,3 +966,38 @@ def update_cart_delivery_date(delivery_date):
 	quotation.flags.ignore_permissions = True
 	quotation.save()
 	return {"name": quotation.name}
+
+@frappe.whitelist()
+def get_item_price_for_configure(item_code):
+	"""Return per-stem price for a variant item, used in the configure dialog."""
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	price_list = cart_settings.price_list
+
+	try:
+		party = get_party()
+		if party:
+			from erpnext.accounts.party import get_default_price_list
+			customer_pl = get_default_price_list(party)
+			if customer_pl:
+				price_list = customer_pl
+	except Exception:
+		pass
+
+	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
+
+	price = frappe.db.get_value(
+		"Item Price",
+		{"item_code": item_code, "price_list": price_list, "uom": stock_uom},
+		["price_list_rate", "currency"],
+		as_dict=True,
+	)
+
+	if not price:
+		price = frappe.db.get_value(
+			"Item Price",
+			{"item_code": item_code, "price_list": price_list},
+			["price_list_rate", "currency"],
+			as_dict=True,
+		)
+
+	return price or {}

@@ -6,7 +6,6 @@
 <div class="item-cart row mt-2" data-variant-item-code="{{ item_code }}">
 	<div class="col-md-12">
 		<!-- Price and Availability -->
-		<!-- Dynamic price (populated by JS when stem length + bunch UOM are selected) -->
 		<div id="dynamic-price-display" class="product-price mt-2 mb-2">
 			{% if cart_settings.show_price and product_info.price %}
 				<span id="dynamic-price-value" class="font-weight-bold" style="font-size: 1.4em;">{{ product_info.price.formatted_price }} / {{ _('stem') }}</span>
@@ -49,7 +48,7 @@
 			<div class="offer-container">
 				{% for offer in doc.offers %}
 				<div class="mt-2 d-flex">
-					<div class="mr-2" >
+					<div class="mr-2">
 						<svg width="24" height="24" viewBox="0 0 24 24" stroke="var(--yellow-500)" fill="none" xmlns="http://www.w3.org/2000/svg">
 							<path d="M19 15.6213C19 15.2235 19.158 14.842 19.4393 14.5607L20.9393 13.0607C21.5251 12.4749 21.5251 11.5251 20.9393 10.9393L19.4393 9.43934C19.158 9.15804 19 8.7765 19 8.37868V6.5C19 5.67157 18.3284 5 17.5 5H15.6213C15.2235 5 14.842 4.84196 14.5607 4.56066L13.0607 3.06066C12.4749 2.47487 11.5251 2.47487 10.9393 3.06066L9.43934 4.56066C9.15804 4.84196 8.7765 5 8.37868 5H6.5C5.67157 5 5 5.67157 5 6.5V8.37868C5 8.7765 4.84196 9.15804 4.56066 9.43934L3.06066 10.9393C2.47487 11.5251 2.47487 12.4749 3.06066 13.0607L4.56066 14.5607C4.84196 14.842 5 15.2235 5 15.6213V17.5C5 18.3284 5.67157 19 6.5 19H8.37868C8.7765 19 9.15804 19.158 9.43934 19.4393L10.9393 20.9393C11.5251 21.5251 12.4749 21.5251 13.0607 20.9393L14.5607 19.4393C14.842 19.158 15.2235 19 15.6213 19H17.5C18.3284 19 19 18.3284 19 17.5V15.6213Z" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
 							<path d="M15 9L9 15" stroke-miterlimit="10" stroke-linecap="round" stroke-linejoin="round"/>
@@ -71,24 +70,39 @@
 			</div>
 		{% endif %}
 
-		<!-- Add to Cart / View in Cart, Contact Us -->
+		<!-- Add to Cart / View in Cart / Wishlist / Contact Us -->
 		<div class="mt-6 mb-5">
-			<div class="mb-4 d-flex">
-				<!-- Add to Cart -->
-				<a href="/cart" class="btn btn-light btn-view-in-cart mr-2 font-md"
-					role="button">
-					{{  _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
+			<div class="mb-4 d-flex flex-wrap" style="gap:8px;">
+				<!-- View in Cart -->
+				<a href="/cart" class="btn btn-light btn-view-in-cart font-md" role="button">
+					{{ _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
 				</a>
+
+				<!-- Add to Cart -->
 				<button
-					data-item-code="{{item_code}}"
-					class="btn btn-primary btn-add-to-cart mr-2 w-30-40"
+					data-item-code="{{ item_code }}"
+					class="btn btn-primary btn-add-to-cart w-30-40"
 				>
 					<span class="mr-2">
 						<svg class="icon icon-md">
 							<use href="#icon-assets"></use>
 						</svg>
 					</span>
-					{{ _("Add to Cart") if cart_settings.enable_checkout else  _("Add to Quote") }}
+					{{ _("Add to Cart") if cart_settings.enable_checkout else _("Add to Quote") }}
+				</button>
+
+				<!-- Add to Wishlist -->
+				<button class="btn btn-light btn-add-to-wishlist"
+					data-item-code="{{ item_code }}"
+					title="{{ _('Add to Wishlist') }}"
+					style="display:flex; align-items:center; gap:6px;">
+					<svg class="wish-icon" xmlns="http://www.w3.org/2000/svg"
+						style="width:16px;height:16px;" viewBox="0 0 24 24"
+						fill="none" stroke="currentColor" stroke-width="2"
+						stroke-linecap="round" stroke-linejoin="round">
+						<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+					</svg>
+					<span class="wish-label">{{ _('Wishlist') }}</span>
 				</button>
 
 				<!-- Contact Us -->
@@ -102,14 +116,13 @@
 
 <script>
 	frappe.ready(() => {
+		// Add to Cart
 		$('.page_content').on('click', '.btn-add-to-cart', (e) => {
-			// Bind action on add to cart button
 			const $btn = $(e.currentTarget);
 			const item_code = $btn.data('item-code');
 			const custom_length = $('#stem-length').val() || undefined;
 			const uom = $('#bunch-uom').val() || undefined;
 
-			// Validate: stem length is mandatory
 			if (!custom_length) {
 				frappe.show_alert({
 					message: __('Please select a stem length before adding to cart.'),
@@ -121,7 +134,6 @@
 
 			$btn.prop('disabled', true);
 
-			// qty is in bunches; ERPNext converts to stems via conversion_factor
 			webshop.webshop.shopping_cart.update_cart({
 				item_code,
 				qty: 1,
@@ -130,48 +142,67 @@
 				callback(r) {
 					$btn.prop('disabled', false);
 					if (r.message) {
-						// Keep 'Add to Quote' visible so customer can add different specs
 						$('.btn-view-in-cart').removeClass('hidden');
 					}
 				}
 			});
 		});
 
+		// Add to Wishlist
+		$('.page_content').on('click', '.btn-add-to-wishlist', (e) => {
+			const $btn = $(e.currentTarget);
+			const item_code = $btn.data('item-code');
+			const wished = $btn.hasClass('wished');
+			const action = wished ? 'remove' : 'add';
+
+			frappe.call({
+				method: action === 'add' ? 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist' : 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.remove_from_wishlist',
+				args: { item_code },
+				callback(r) {
+					if (!r.exc) {
+						if (action === 'add') {
+							$btn.addClass('wished');
+							$btn.find('.wish-icon').attr('fill', 'red').attr('stroke', 'red');
+							$btn.find('.wish-label').text(__('Wishlisted'));
+							frappe.show_alert({ message: __('Added to Wishlist'), indicator: 'green' }, 3);
+						} else {
+							$btn.removeClass('wished');
+							$btn.find('.wish-icon').attr('fill', 'none').attr('stroke', 'currentColor');
+							$btn.find('.wish-label').text(__('Wishlist'));
+							frappe.show_alert({ message: __('Removed from Wishlist'), indicator: 'orange' }, 3);
+						}
+						if (typeof webshop !== 'undefined' && webshop.webshop && webshop.webshop.wishlist) {
+							webshop.webshop.wishlist.set_wishlist_count(true);
+						}
+					}
+				}
+			});
+		});
+
+		// Offer details
 		$('.page_content').on('click', '.offer-details', (e) => {
-			// Bind action on More link in Offers
 			const $btn = $(e.currentTarget);
 			$btn.prop('disabled', true);
 
 			var d = new frappe.ui.Dialog({
 				title: __($btn.data('offer-title')),
 				fields: [
-					{
-						fieldname: 'offer_details',
-						fieldtype: 'HTML'
-					},
-					{
-						fieldname: 'section_break',
-						fieldtype: 'Section Break'
-					}
+					{ fieldname: 'offer_details', fieldtype: 'HTML' },
+					{ fieldname: 'section_break', fieldtype: 'Section Break' }
 				]
 			});
 
 			frappe.call({
 				method: 'upande_webshop.upande_webshop.doctype.website_offer.website_offer.get_offer_details',
-				args: {
-					offer_id: $btn.data('offer-id')
-				},
+				args: { offer_id: $btn.data('offer-id') },
 				callback: (value) => {
 					d.set_value("offer_details", value.message);
 					d.show();
 					$btn.prop('disabled', false);
 				}
-			})
-
+			});
 		});
 	});
-
-
 </script>
 
 {% endif %}

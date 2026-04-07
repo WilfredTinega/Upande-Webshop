@@ -55,10 +55,14 @@
 			<div class="col-6 text-muted small mt-1">
 				{{ frappe.utils.format_date(doc.transaction_date, 'medium') }}
 				{% if doc.valid_till %}
-					<p>
-						{{ _("Valid Till") }}: {{ frappe.utils.format_date(doc.valid_till, 'medium') }}
-					</p>
-				{% endif %}
+						<p>{{ _("Valid Till") }}: {{ frappe.utils.format_date(doc.valid_till, 'medium') }}</p>
+					{% endif %}
+					{% if doc.due_date %}
+						<p>{{ _("Due Date") }}: {{ frappe.utils.format_date(doc.due_date, 'medium') }}</p>
+					{% endif %}
+					{% if doc.delivery_date %}
+						<p>{{ _("Delivery Date") }}: {{ frappe.utils.format_date(doc.delivery_date, 'medium') }}</p>
+					{% endif %}
 			</div>
 		</div>
 		<div class="row indicator-container mt-2">
