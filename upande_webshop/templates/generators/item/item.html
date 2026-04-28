@@ -1,5 +1,4 @@
 {% extends "templates/web.html" %}
-{% from "upande_webshop/templates/includes/macros.html" import recommended_item_row %}
 
 {% block title %} {{ title }} {% endblock %}
 
@@ -42,10 +41,9 @@
 
 <!-- Additional Info/Reviews, Recommendations -->
 <div class="d-flex">
-	{% set show_recommended_items = recommended_items and shopping_cart.cart_settings.enable_recommendations %}
-	{% set info_col = 'col-9' if show_recommended_items else 'col-12' %}
-
-	{% set padding_top = 'pt-0' if (show_tabs and tabs) else '' %}
+        {% set show_recommended_items = false %}
+        {% set info_col = 'col-12' %}
+		{% set padding_top = 'pt-0' if (show_tabs and tabs) else '' %}
 
 	<div class="product-container mt-4 {{ padding_top }} {{ info_col }}">
 		<div class="item-content {{ 'mt-minus-2' if (show_tabs and tabs) else '' }}">
@@ -73,17 +71,6 @@
 		</div>
 	</div>
 
-	<!-- Recommended Items -->
-	{% if show_recommended_items %}
-		<div class="mt-4 col-3 recommended-item-section">
-			<span class="recommendation-header">{{ _("Recommended") }}</span>
-			<div class="product-container mt-2 recommendation-container">
-				{% for item in recommended_items %}
-					{{ recommended_item_row(item) }}
-				{% endfor %}
-			</div>
-		</div>
-	{% endif %}
 
 </div>
 {% endblock %}

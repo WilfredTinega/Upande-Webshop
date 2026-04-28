@@ -1,20 +1,70 @@
 {% if shopping_cart and shopping_cart.cart_settings.enabled %}
 {% set cart_settings = shopping_cart.cart_settings %}
-
 <div class="mt-5 mb-6">
-	{% if cart_settings.enable_variants | int %}
-	<button class="btn btn-primary-light btn-configure font-md mr-2"
-		data-item-code="{{ doc.item_code }}"
-		data-item-name="{{ doc.web_item_name }}"
-	>
-		{{ _('Select Variant') }}
-	</button>
-	{% endif %}
-	{% if cart_settings.show_contact_us_button %}
-		{% include "templates/generators/item/item_inquiry.html" %}
-	{% endif %}
+	<div class="d-flex flex-wrap" style="gap:8px;">
+		{% if cart_settings.enable_variants | int %}
+		<button class="btn btn-primary-light btn-configure font-md"
+			data-item-code="{{ doc.item_code }}"
+			data-item-name="{{ doc.web_item_name }}"
+		>
+			{{ _('Select Variant') }}
+		</button>
+		{% endif %}
+
+		<!-- Wishlist button -->
+		<button class="btn btn-light btn-add-to-wishlist"
+			data-item-code="{{ doc.item_code }}"
+			title="{{ _('Add to Wishlist') }}"
+			style="display:flex; align-items:center; gap:6px;">
+			<svg class="wish-icon" xmlns="http://www.w3.org/2000/svg"
+				style="width:16px;height:16px;" viewBox="0 0 24 24"
+				fill="none" stroke="currentColor" stroke-width="2"
+				stroke-linecap="round" stroke-linejoin="round">
+				<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+			</svg>
+			<span class="wish-label">{{ _('Wishlist') }}</span>
+		</button>
+
+		{% if cart_settings.show_contact_us_button %}
+			{% include "templates/generators/item/item_inquiry.html" %}
+		{% endif %}
+	</div>
 </div>
 <script>
 {% include "templates/generators/item/item_configure.js" %}
+</script>
+
+<script>
+frappe.ready(() => {
+	$('.page_content').on('click', '.btn-add-to-wishlist', (e) => {
+		const $btn = $(e.currentTarget);
+		const item_code = $btn.data('item-code');
+		const wished = $btn.hasClass('wished');
+		const action = wished ? 'remove' : 'add';
+
+		frappe.call({
+			method: action === 'add' ? 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist' : 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.remove_from_wishlist',
+			args: { item_code },
+			callback(r) {
+				if (!r.exc) {
+					if (action === 'add') {
+						$btn.addClass('wished');
+						$btn.find('.wish-icon').attr('fill', 'red').attr('stroke', 'red');
+						$btn.find('.wish-label').text(__('Wishlisted'));
+						frappe.show_alert({ message: __('Added to Wishlist'), indicator: 'green' }, 3);
+					} else {
+						$btn.removeClass('wished');
+						$btn.find('.wish-icon').attr('fill', 'none').attr('stroke', 'currentColor');
+						$btn.find('.wish-label').text(__('Wishlist'));
+						frappe.show_alert({ message: __('Removed from Wishlist'), indicator: 'orange' }, 3);
+					}
+					if (typeof webshop !== 'undefined' && webshop.webshop && webshop.webshop.wishlist) {
+						webshop.webshop.wishlist.set_wishlist_count(true);
+					}
+				}
+			}
+		});
+	});
+});
 </script>
 {% endif %}

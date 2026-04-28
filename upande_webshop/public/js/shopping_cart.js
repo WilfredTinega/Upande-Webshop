@@ -17,20 +17,16 @@ var getParams = function (url) {
 
 frappe.ready(function() {
 	var full_name = frappe.session && frappe.session.user_fullname;
-	// update user
 	if(full_name) {
 		$('.navbar li[data-label="User"] a')
 			.html('<i class="fa fa-fixed-width fa fa-user"></i> ' + full_name);
 	}
-	// set coupon code and sales partner code
 
 	var url_args = getParams(window.location.href);
-
 	var referral_coupon_code = url_args['cc'];
 	var referral_sales_partner = url_args['sp'];
 
 	var d = new Date();
-	// expires within 30 minutes
 	d.setTime(d.getTime() + (0.02 * 24 * 60 * 60 * 1000));
 	var expires = "expires="+d.toUTCString();
 	if (referral_coupon_code) {
@@ -49,35 +45,24 @@ frappe.ready(function() {
 		$(".txtreferral_sales_partner").val(referral_sales_partner);
 	}
 
-	// Don't inject anything on auth pages (login, logout, register, etc.) or base URL
 	var auth_paths = ['/login', '/logout', '/register', '/update-password', '/forgot-password'];
 	var current_path = window.location.pathname.replace(/\/$/, '');
 	var is_auth_page = auth_paths.some(function(p) {
 		return current_path === p || current_path.indexOf(p + '/') === 0;
 	});
-	
-	// Check if it's the base URL (empty path or just '/')
 	var is_base_url = current_path === '' || current_path === '/';
-	
+
 	if (is_auth_page || is_base_url) {
-		// Clear last_visited so it doesn't override our server-side redirect_to
 		if (localStorage) localStorage.removeItem('last_visited');
-		
-		// Remove custom navbar if it exists (in case user navigates from webshop to auth page)
 		if ($('#webshop-subnav').length) {
 			$('#webshop-subnav').remove();
 		}
-		
-		// Don't proceed with webshop initialization
 		return;
 	}
 
-	// Hide Frappe navbar on webshop pages for all users (guests and logged-in).
-	// Use prefix matching so /issues/list, /orders/new etc. are also covered.
-	// Also hide on item detail pages (identified by the product-page body class).
 	var webshop_prefixes = [
 		'/upande-webshop', '/cart', '/quotations', '/invoices',
-		'/orders', '/shipments', '/issues', '/contact'
+		'/orders', '/shipments', '/issues', '/contact', '/wishlist'
 	];
 	var is_webshop_page = webshop_prefixes.some(function(prefix) {
 		return current_path === prefix || current_path.indexOf(prefix + '/') === 0;
@@ -87,40 +72,44 @@ frappe.ready(function() {
 		$('body').addClass('hide-frappe-navbar');
 	}
 
-	// Inject webshop sub-navbar below the Frappe header
 	shopping_cart.inject_webshop_navbar();
-
-	// update login
 	shopping_cart.show_shoppingcart_dropdown();
 	shopping_cart.set_cart_count();
 	shopping_cart.show_cart_navbar();
+
+	// Init wishlist count
+	if (typeof webshop !== 'undefined' && webshop.webshop && webshop.webshop.wishlist) {
+		webshop.webshop.wishlist.set_wishlist_count();
+	}
 });
 
 $.extend(shopping_cart, {
 	inject_webshop_navbar: function() {
-		// Double-check we're not on auth pages or base URL before injecting
 		var auth_paths = ['/login', '/logout', '/register', '/update-password', '/forgot-password'];
 		var current_path = window.location.pathname.replace(/\/$/, '');
 		var is_auth_page = auth_paths.some(function(p) {
 			return current_path === p || current_path.indexOf(p + '/') === 0;
 		});
 		var is_base_url = current_path === '' || current_path === '/';
-		
-		// Don't inject on auth pages or base URL
+
 		if (is_auth_page || is_base_url) {
-			// Remove navbar if it exists (in case user navigates from a webshop page to login)
 			if ($('#webshop-subnav').length) {
 				$('#webshop-subnav').remove();
 			}
 			return;
 		}
-		
-		if ($('#webshop-subnav').length) return; // already injected
+
+		if ($('#webshop-subnav').length) return;
 
 		var cartCount = frappe.get_cookie("cart_count");
 		var badgeHtml = (cartCount && parseInt(cartCount) > 0)
 			? `<span class="webshop-subnav-badge" id="cart-count">${cartCount}</span>`
 			: `<span class="webshop-subnav-badge" id="cart-count" style="display:none;">${cartCount || 0}</span>`;
+
+		var wishCount = frappe.get_cookie("wish_count");
+		var wishBadgeHtml = (wishCount && parseInt(wishCount) > 0)
+			? `<span class="webshop-subnav-badge" id="wish-count">${wishCount}</span>`
+			: `<span class="webshop-subnav-badge" id="wish-count" style="display:none;">${wishCount || 0}</span>`;
 
 		var appLogo = window.webshop_app_logo || (frappe.boot && frappe.boot.app_logo_url) || '';
 		var shopIconHtml = appLogo
@@ -142,10 +131,19 @@ $.extend(shopping_cart, {
 						</a>
 					</nav>
 
-					<!-- Right: Cart then Account dropdown -->
+					<!-- Right: Wishlist, Cart, Account -->
 					<div class="webshop-subnav-right">
 						${frappe.session.user && frappe.session.user !== 'Guest' ? `
-						<!-- Cart / Quote link (logged-in only) -->
+						<!-- Wishlist link -->
+						<a href="/wishlist" class="webshop-subnav-cart-link wishlist-icon mr-3">
+							<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+							</svg>
+							<span class="webshop-subnav-cart-label">Wishlist</span>
+							${wishBadgeHtml}
+						</a>
+
+						<!-- Cart / Quote link -->
 						<a href="/cart" class="webshop-subnav-cart-link cart-icon">
 							<svg class="icon icon-md" style="width:20px;height:20px;">
 								<use href="#icon-assets"></use>
@@ -169,6 +167,7 @@ $.extend(shopping_cart, {
 								<li><a href="/quotations" class="webshop-subnav-dropdown-item">Quotations</a></li>
 								<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
 								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart / Quote</a></li>
+								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
 								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li class="webshop-subnav-dropdown-divider"></li>
@@ -179,7 +178,7 @@ $.extend(shopping_cart, {
 							</ul>
 						</div>
 						` : `
-						<!-- Guest: show Login button prominently -->
+						<!-- Guest: show Login button -->
 						<a href="/login" class="webshop-subnav-login-btn">Login</a>
 						`}
 					</div>
@@ -187,7 +186,6 @@ $.extend(shopping_cart, {
 			</div>
 		`;
 
-		// Insert after the main <header> / navbar
 		var $header = $('header.navbar, nav.navbar').first();
 		if ($header.length) {
 			$header.after(html);
@@ -195,7 +193,6 @@ $.extend(shopping_cart, {
 			$('body').prepend(html);
 		}
 
-		// Bind dropdown toggle
 		$(document).on('click', '#ws-account-toggle', function(e) {
 			e.stopPropagation();
 			var $menu = $('#ws-account-menu');
@@ -204,7 +201,6 @@ $.extend(shopping_cart, {
 			$(this).attr('aria-expanded', !isOpen);
 		});
 
-		// Close dropdown on outside click
 		$(document).on('click.ws-subnav', function(e) {
 			if (!$(e.target).closest('.webshop-subnav-dropdown').length) {
 				$('#ws-account-menu').removeClass('open');
@@ -246,6 +242,7 @@ $.extend(shopping_cart, {
 					qty: opts.qty,
 					uom: opts.uom || undefined,
 					custom_length: opts.custom_length || undefined,
+					box_type: opts.box_type || undefined,
 					additional_notes: opts.additional_notes !== undefined ? opts.additional_notes : undefined,
 					with_items: opts.with_items || 0,
 					child_docname: opts.child_docname || undefined
@@ -297,13 +294,14 @@ $.extend(shopping_cart, {
 		}
 	},
 
-	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes, uom, custom_length, child_docname}) {
+	shopping_cart_update: function({item_code, qty, cart_dropdown, additional_notes, uom, custom_length, box_type, child_docname}) {
 		shopping_cart.update_cart({
 			item_code,
 			qty,
 			additional_notes,
 			uom,
 			custom_length,
+			box_type,
 			child_docname,
 			with_items: 1,
 			btn: this,
@@ -323,7 +321,6 @@ $.extend(shopping_cart, {
 	},
 
 	show_cart_navbar: function () {
-		// Sub-navbar is always visible; hide it entirely only if cart is disabled
 		frappe.call({
 			method: "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.is_cart_enabled",
 			callback: function(r) {
@@ -365,7 +362,6 @@ $.extend(shopping_cart, {
 				item_code,
 				qty: 1
 			});
-
 		});
 
 		// Remove from quote via cart-indicator × button in grid view
@@ -411,5 +407,3 @@ $.extend(shopping_cart, {
 		}
 	}
 });
-
-

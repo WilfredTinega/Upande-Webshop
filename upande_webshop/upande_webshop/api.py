@@ -97,3 +97,63 @@ def get_post_login_redirect():
 	if "Customer" in frappe.get_roles(frappe.session.user):
 		return "/upande-webshop"
 	return "/app"
+
+@frappe.whitelist(allow_guest=True)
+def get_box_items():
+	"""Return only BOX items from PACKAGING group for the box type dropdown."""
+	items = frappe.db.get_all(
+		"Item",
+		filters={"item_group": "PACKAGING", "disabled": 0, "item_name": ["like", "%BOX%"]},
+		fields=["name", "item_name"],
+		order_by="item_name asc"
+	)
+	return items
+
+@frappe.whitelist(allow_guest=True)
+def get_pack_rate(item_code):
+	"""Return default_pack_rate for a variant item."""
+	rate = frappe.db.get_value("Item", item_code, "default_pack_rate")
+	return {"default_pack_rate": rate or 0}
+
+@frappe.whitelist()
+def get_customer_boxes():
+	"""
+	Return allowed boxes for the logged-in customer.
+	If customer has specific boxes assigned, return those only.
+	Otherwise return all BOX items (general customers).
+	"""
+	user = frappe.session.user
+
+	if user and user != "Guest":
+		# Resolve user -> contact -> customer
+		contact_name = frappe.db.get_value("Contact", {"email_id": user})
+		if contact_name:
+			customer_name = frappe.db.get_value("Dynamic Link", {
+				"parenttype": "Contact",
+				"parent": contact_name,
+				"link_doctype": "Customer"
+			}, "link_name")
+
+			if customer_name:
+				# Check if customer has specific boxes assigned
+				allowed = frappe.db.get_all(
+					"Customer Allowed Box",
+					filters={"parent": customer_name, "parenttype": "Customer"},
+					fields=["box_item"]
+				)
+				if allowed:
+					# Fetch item_name for each allowed box
+					boxes = []
+					for row in allowed:
+						item_name = frappe.db.get_value("Item", row.box_item, "item_name")
+						if item_name:
+							boxes.append({"name": row.box_item, "item_name": item_name})
+					return boxes
+
+	# Fallback — return all BOX items for general customers
+	return frappe.db.get_all(
+		"Item",
+		filters={"item_group": "PACKAGING", "disabled": 0, "item_name": ["like", "%BOX%"]},
+		fields=["name", "item_name"],
+		order_by="item_name asc"
+	)
