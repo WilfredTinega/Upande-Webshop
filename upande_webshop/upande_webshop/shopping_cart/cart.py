@@ -31,6 +31,18 @@ def set_cart_count(quotation=None):
 			frappe.local.cookie_manager.set_cookie("cart_count", cart_count)
 
 
+
+def _get_transit_days_for_party(party=None):
+        """Get transit days from Customer record. Returns int (default 2)."""
+        if not party:
+                party = get_party()
+        if party and party.doctype == "Customer":
+                transit_days = frappe.db.get_value("Customer", party.name, "custom_transit_days")
+                if transit_days:
+                        return cint(transit_days)
+        return 2
+
+
 @frappe.whitelist()
 def get_cart_quotation(doc=None):
 	party = get_party()
@@ -45,12 +57,15 @@ def get_cart_quotation(doc=None):
 	if not doc.customer_address and addresses:
 		update_cart_address("billing", addresses[0].name)
 
+	transit_days = _get_transit_days_for_party(party)
+
 	return {
 		"doc": decorate_quotation_doc(doc),
 		"shipping_addresses": get_shipping_addresses(party),
 		"billing_addresses": get_billing_addresses(party),
 		"shipping_rules": get_applicable_shipping_rules(party),
 		"cart_settings": frappe.get_cached_doc("Webshop Settings"),
+		"transit_days": _get_transit_days_for_party(party),
 	}
 
 
@@ -253,7 +268,7 @@ def _apply_length_price_db(quotation):
 
 
 @frappe.whitelist()
-def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, box_type=None, with_items=False, child_docname=None):
+def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, custom_box_type=None, with_items=False, child_docname=None):
 	quotation = _get_cart_quotation()
 
 	empty_card = False
@@ -305,6 +320,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 					"stock_qty": total_stems,
 					"custom_total_stems": total_stems,
 					"custom_length": custom_length,
+					"custom_box_type": custom_box_type,
 					"additional_notes": additional_notes,
      				"custom_box_type": box_type,
 					"warehouse": warehouse,
@@ -334,7 +350,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 		quotation.save()
 		_apply_length_price_db(quotation)
 	else:
-		quotation.delete()
+		frappe.delete_doc("Quotation", quotation.name, ignore_permissions=True, force=True)
 		quotation = None
 
 	set_cart_count(quotation)

@@ -122,6 +122,7 @@
 			const item_code = $btn.data('item-code');
 			const custom_length = $('#stem-length').val() || undefined;
 			const uom = $('#bunch-uom').val() || undefined;
+			const custom_box_type = $('#box-type').val() || undefined;
 
 			if (!custom_length) {
 				frappe.show_alert({
@@ -134,11 +135,13 @@
 
 			$btn.prop('disabled', true);
 
-			webshop.webshop.shopping_cart.update_cart({
+			// qty is in bunches; ERPNext converts to stems via conversion_factor
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
 				item_code,
 				qty: 1,
 				custom_length,
 				uom,
+				custom_box_type,
 				callback(r) {
 					$btn.prop('disabled', false);
 					if (r.message) {

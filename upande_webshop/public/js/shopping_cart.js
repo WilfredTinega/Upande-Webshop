@@ -1,6 +1,6 @@
 // shopping cart
-frappe.provide("webshop.webshop.shopping_cart");
-var shopping_cart = webshop.webshop.shopping_cart;
+frappe.provide("upande_webshop.upande_webshop.shopping_cart");
+var shopping_cart = upande_webshop.upande_webshop.shopping_cart;
 
 var getParams = function (url) {
 	var params = [];
@@ -169,6 +169,7 @@ $.extend(shopping_cart, {
 								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart / Quote</a></li>
 								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
+								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li class="webshop-subnav-dropdown-divider"></li>
 								<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
 								<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
@@ -357,9 +358,27 @@ $.extend(shopping_cart, {
 			$btn.parent().find('.cart-indicator').removeClass('hidden');
 
 			const item_code = $btn.data('item-code');
-			webshop.webshop.shopping_cart.update_cart({
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
 				item_code,
 				qty: 1
+			});
+		});
+
+		// Remove from quote via cart-indicator × button in grid view
+		$('.page_content').on('click', '.remove-from-cart-grid', (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			const $btn = $(e.currentTarget);
+			const item_code = $btn.data('item-code');
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
+				item_code,
+				qty: 0,
+				callback: function(r) {
+					if (!r.exc) {
+						$btn.closest('.cart-indicator').addClass('hidden');
+						shopping_cart.set_cart_count();
+					}
+				}
 			});
 		});
 	},

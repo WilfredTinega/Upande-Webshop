@@ -5,14 +5,16 @@
 
 {% set stem_lengths = frappe.get_list('Stem Length',
     fields=['name', 'length'],
-    order_by='length asc'
+    order_by='length asc',
+    ignore_permissions=True
 ) %}
 
 <!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
 {% set all_uoms = frappe.get_list('UOM', 
     fields=['name', 'uom_name', 'enabled'],
     filters={'enabled': 1},
-    order_by='name asc'
+    order_by='name asc',
+    ignore_permissions=True
 ) %}
 
 <!-- Filter to only show UOMs that have "Bunch" in the name -->
@@ -42,7 +44,14 @@
 			{{ _(doc.web_item_name) }}
 		</div>
 
-		<!-- Wishlist disabled -->
+		{% if shopping_cart.cart_settings.enabled %}
+		<div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2" style="cursor:pointer;" title="{{ _('Go to Wishlist') }}"
+			data-item-code="{{ doc.item_code }}">
+			<svg class="icon icon-md">
+				<use class="wish-icon {% if wished %}wished-green{% else %}not-wished-fp{% endif %}" href="#icon-heart"></use>
+			</svg>
+		</div>
+		{% endif %}
 	</div>
 
 	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">
@@ -81,6 +90,19 @@
 					{{ uom.uom_name or uom.name }}
 				</option>
 			{% endfor %}
+		</select>
+	</div>
+	{% endif %}
+
+	<!-- BOX TYPE SELECTOR -->
+	{% if not has_variants %}
+	<div class="box-type-selector form-group mt-4 mb-4">
+		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;">
+			<option value="">{{ _("Box Type") }}</option>
+			<option value="Small">{{ _("Small") }}</option>
+			<option value="Standard">{{ _("Standard") }}</option>
+			<option value="Large">{{ _("Large") }}</option>
+			<option value="Pro Flower Pack">{{ _("Pro Flower Pack") }}</option>
 		</select>
 	</div>
 	{% endif %}
@@ -141,10 +163,28 @@
 
 <script>
 	$('.page_content').on('click', '.like-action-item-fp', (e) => {
-			// Bind action on wishlist button
-			const $btn = $(e.currentTarget);
-			webshop.webshop.wishlist.wishlist_action($btn);
+		const $btn = $(e.currentTarget);
+		const item_code = $btn.data('item-code');
+
+		if (frappe.session.user === 'Guest') {
+			if (localStorage) {
+				localStorage.setItem('last_visited', window.location.pathname);
+			}
+			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
+				window.location.href = res.message || '/login';
+			});
+			return;
+		}
+
+		frappe.call({
+			type: 'POST',
+			method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist',
+			args: { item_code: item_code },
+			callback: function(r) {
+				window.location.href = '/wishlist';
+			}
 		});
+	});
 	
 	// Live price calculation: per-stem price × stems per bunch
 	function updatePriceDisplay() {

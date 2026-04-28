@@ -191,22 +191,20 @@
 		{% endif %}
 	</div>
 
-	{% if (item.available and settings.show_stock_availability) or (not settings.show_stock_availability) %}
-		<!-- Show move to cart button if in stock or if showing stock availability is disabled -->
-		<button data-item-code="{{ item.item_code}}"
-			class="btn btn-primary btn-add-to-cart-list btn-add-to-cart mt-2 w-100">
-			<span class="mr-2">
-				<svg class="icon icon-md">
-					<use href="#icon-assets"></use>
-				</svg>
-			</span>
-			{{ _("Move to Cart") }}
-		</button>
-	{% else %}
-		<div class="out-of-stock">
-			{{ _("Out of stock") }}
-		</div>
+	{% if settings.show_stock_availability and not item.available %}
+		<div class="out-of-stock mb-2">{{ _("Out of stock") }}</div>
 	{% endif %}
+	<button data-item-code="{{ item.item_code }}"
+		data-custom-length="{{ item.get('default_length') or '' }}"
+		data-uom="{{ item.get('default_bunch') or '' }}"
+		class="btn btn-primary btn-add-to-cart-list btn-add-to-cart mt-2 w-100">
+		<span class="mr-2">
+			<svg class="icon icon-md">
+				<use href="#icon-assets"></use>
+			</svg>
+		</span>
+		{{ _("Add to Quote") }}
+	</button>
 </div>
 {%- endmacro -%}
 
