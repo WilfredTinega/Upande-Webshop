@@ -24,7 +24,7 @@ webshop.ProductList = class {
 			let title = item.web_item_name || item.item_name || item.item_code || "";
 			title =  title.length > 200 ? title.substr(0, 200) + "..." : title;
 
-			html += `<a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class='row list-row w-100 mb-4'>`;
+			html += `<a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block; width: 100%;"><div class='row list-row w-100 mb-4'>`;
 			html += me.get_image_html(item, title, me.settings);
 			html += me.get_row_body_html(item, title, me.settings);
 			html += `</div></a>`;
@@ -149,4 +149,3 @@ webshop.ProductList = class {
 	}
 
 };
-

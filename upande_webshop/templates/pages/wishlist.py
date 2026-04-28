@@ -18,6 +18,7 @@ def get_context(context):
 	selling_price_list = _set_price_list(settings) if not is_guest else None
 
 	items = set_stock_price_details(items, settings, selling_price_list)
+	items = set_default_stem_bunch(items)
 
 	context.body_class = "product-page"
 	context.items = items
@@ -86,5 +87,25 @@ def set_stock_price_details(items, settings, selling_price_list):
 				item.discount = price_details.get(
 					"formatted_discount_percent"
 				) or price_details.get("formatted_discount_rate")
+
+	return items
+
+
+def set_default_stem_bunch(items):
+	# Fetch first stem length
+	stem_lengths = frappe.get_all("Stem Length", fields=["length"], order_by="length asc", limit=1)
+	default_length = stem_lengths[0].length if stem_lengths else ""
+
+	# Fetch first bunch UOM
+	all_uoms = frappe.get_all("UOM", fields=["name"], filters={"enabled": 1}, order_by="name asc")
+	default_bunch = ""
+	for uom in all_uoms:
+		if "bunch" in uom.name.lower():
+			default_bunch = uom.name
+			break
+
+	for item in items:
+		item.default_length = default_length
+		item.default_bunch = default_bunch
 
 	return items

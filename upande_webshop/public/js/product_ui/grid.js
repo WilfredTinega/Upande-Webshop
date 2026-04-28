@@ -24,7 +24,11 @@ webshop.ProductGrid = class {
 			let title = item.web_item_name || item.item_name || item.item_code || "";
 			title =  title.length > 90 ? title.substr(0, 90) + "..." : title;
 
-			html += `<div class="col-sm-4 item-card"><a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class="card text-left">`;
+			html += `<div class="col-sm-4 item-card" style="position:relative;">`;
+			if (!item.has_variants && me.settings.enabled) {
+				html += me.get_cart_indicator(item);
+			}
+			html += `<a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class="card text-left">`;
 			html += me.get_image_html(item, title);
 			html += me.get_card_body_html(item, title, me.settings);
 			html += `</div></a></div>`;
@@ -61,13 +65,6 @@ webshop.ProductGrid = class {
 		`;
 		body_html += this.get_title(title);
 
-		// get floating elements
-		if (!item.has_variants) {
-			if (settings.enabled) {
-				body_html += this.get_cart_indicator(item);
-			}
-
-		}
 
 		body_html += `</div>`;
 		body_html += `<div class="product-category" itemprop="name">${ item.item_group || '' }</div>`;
@@ -92,7 +89,7 @@ webshop.ProductGrid = class {
 	}
 
 	get_wishlist_icon(item) {
-		let icon_class = item.wished ? "wished" : "not-wished";
+		let icon_class = item.wished ? "wished-green" : "not-wished-fp";
 		return `
 			<div class="like-action ${ item.wished ? "like-action-wished" : ''}"
 				data-item-code="${ item.item_code }">
@@ -105,8 +102,11 @@ webshop.ProductGrid = class {
 
 	get_cart_indicator(item) {
 		return `
-			<div class="cart-indicator ${item.in_cart ? '' : 'hidden'}" data-item-code="${ item.item_code }">
-				1
+			<div class="cart-indicator ${item.in_cart ? '' : 'hidden'}" data-item-code="${ item.item_code }"
+				style="position:absolute;top:8px;right:20px;z-index:10;background:#fff;border-radius:50px;padding:2px 8px;box-shadow:0 1px 4px rgba(0,0,0,0.15);display:flex;align-items:center;gap:4px;">
+				<span>1</span>
+				<span class="remove-from-cart-grid" data-item-code="${ item.item_code }"
+					style="cursor:pointer;font-weight:bold;color:#e74c3c;font-size:14px;line-height:1;" title="${ __('Remove from Quote') }">&times;</span>
 			</div>
 		`;
 	}

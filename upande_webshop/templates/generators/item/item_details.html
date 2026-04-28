@@ -5,232 +5,474 @@
 
 {% set stem_lengths = frappe.get_list('Stem Length',
     fields=['name', 'length'],
-    order_by='length asc'
+    order_by='length asc',
+    ignore_permissions=True
 ) %}
-
-<!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
-{% set all_uoms = frappe.get_list('UOM', 
-    fields=['name', 'uom_name', 'enabled'],
-    filters={'enabled': 1},
-    order_by='name asc'
-) %}
-
-<!-- Filter to only show UOMs that have "Bunch" in the name -->
-{% set bunch_uoms = [] %}
-{% for uom in all_uoms %}
-    {% if 'bunch' in uom.name|lower or 'bunch' in uom.uom_name|lower %}
-        {% set bunch_uoms = bunch_uoms.append(uom) %}
-    {% endif %}
-{% endfor %}
-
-{% set default_length = stem_lengths | first %}
-{% set default_length_value = default_length.length if default_length else '' %}
-
-<!-- Set first bunch UOM as default if available -->
-{% set default_bunch_value = bunch_uoms[0].name if bunch_uoms else '' %}
 
 <div id="product-meta"
-	data-item-code="{{ doc.item_code }}"
-	data-currency="{{ price_info.get('currency') or 'USD' }}"
-	data-price-list="{{ cart_settings.price_list }}">
+    data-item-code="{{ doc.item_code }}"
+    data-currency="{{ price_info.get('currency') or 'USD' }}"
+    data-price-list="{{ cart_settings.price_list }}">
 </div>
 
 <div class="col-md-7 product-details {{ width_class }}">
-	<div class="d-flex">
-		<!-- title -->
-		<div class="product-title col-11" itemprop="name">
-			{{ _(doc.web_item_name) }}
-		</div>
+    <div class="d-flex">
+        <div class="product-title col-11" itemprop="name">
+            {{ _(doc.web_item_name) }}
+        </div>
+        {% if shopping_cart.cart_settings.enabled %}
+        <div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2"
+            style="cursor:pointer;" title="{{ _('Go to Wishlist') }}"
+            data-item-code="{{ doc.item_code }}">
+            <svg class="icon icon-md">
+                <use class="wish-icon {% if wished %}wished-green{% else %}not-wished-fp{% endif %}" href="#icon-heart"></use>
+            </svg>
+        </div>
+        {% endif %}
+    </div>
 
-		<!-- Wishlist disabled -->
-	</div>
+    <!-- Stem Length -->
+    {% if not has_variants and stem_lengths %}
+    <div class="form-group mt-3 mb-2">
+        <label style="font-size:13px; font-weight:600; color:var(--text-muted);">{{ _("Stem Length") }}</label>
+        <select id="upande-stem-length" class="form-control" style="max-width:200px;">
+            <option value="">{{ _("Select length") }}</option>
+            {% for length in stem_lengths %}
+            <option value="{{ length.length }}" {% if loop.first %}selected{% endif %}>{{ length.length }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% endif %}
 
-	<div itemprop="aggregateRating" itemscope itemtype="https://schema.org/AggregateRating">
-	</div>
+    <!-- Box Type -->
+    {% if not has_variants %}
+    <div class="form-group mt-2 mb-1">
+        <label style="font-size:13px; font-weight:600; color:var(--text-muted);">{{ _("Box Type") }}</label>
+        <select id="upande-box-type" class="form-control" style="max-width:260px;">
+            <option value="">{{ _("Loading boxes...") }}</option>
+        </select>
+    </div>
 
-	<div itemprop="review" itemscope itemtype="https://schema.org/Review">
-	</div>
+    <!-- Pack Rate — revealed after box selection -->
+    <div id="pack-rate-row" class="form-group mt-2 mb-1" style="display:none;">
+        <label style="font-size:13px; font-weight:600; color:var(--text-muted);">
+            {{ _("Pack Rate") }}
+            <span style="font-weight:400; font-size:11px; color:var(--text-muted);"> — stems per box</span>
+        </label>
+        <select id="upande-pack-rate" class="form-control" style="max-width:200px;">
+            <option value="">{{ _("Select pack rate") }}</option>
+        </select>
+        <div id="pack-rate-hint" class="mt-1" style="min-height:16px; font-size:12px; color:var(--text-muted);"></div>
+    </div>
 
-	<!-- STEM LENGTH SELECTOR - DYNAMICALLY FROM DOCTYPE -->
-	{% if not has_variants and stem_lengths %}
-	<div class="stem-length-selector form-group mt-4 mb-4">
-		<select id="stem-length" class="form-control" name="stem_length" style="max-width: 200px;" required>
-			<option value="">{{ _("Stem Length") }}</option>
-			{% for length in stem_lengths %}
-				<option value="{{ length.length }}" {% if loop.first %}selected{% endif %}>
-					{{ length.length }}
-				</option>
-			{% endfor %}
-		</select>
-		
-		<!-- Price indicator based on length (optional) -->
-		<div class="mt-2 length-price-info" style="display: none;">
-			<small class="text-muted" id="length-price-message"></small>
-		</div>
-		
-	</div>
-	{% endif %}
+    <!-- No. of Boxes -->
+    <div id="num-boxes-row" class="form-group mt-2 mb-3" style="display:none;">
+        <label style="font-size:13px; font-weight:600; color:var(--text-muted);">
+            {{ _("No. of Boxes") }}
+            <span id="moq-label" style="font-weight:400; font-size:11px; color:var(--text-muted);"></span>
+        </label>
+        <input type="number" id="upande-num-boxes" class="form-control" min="1" value="1"
+            style="max-width:120px; font-size:15px; font-weight:500;">
+    </div>
 
-	<!-- BUNCH UOM SELECTOR - DYNAMICALLY FROM UOM DOCTYPE -->
-	{% if not has_variants and bunch_uoms %}
-	<div class="bunch-uom-selector form-group mt-4 mb-4">
-		<select id="bunch-uom" class="form-control" name="bunch_uom" style="max-width: 200px;" required>
-			<option value="">{{ _("Bunch Size") }}</option>
-			{% for uom in bunch_uoms %}
-				<option value="{{ uom.name }}" {% if loop.first %}selected{% endif %}>
-					{{ uom.uom_name or uom.name }}
-				</option>
-			{% endfor %}
-		</select>
-	</div>
-	{% endif %}
+    <!-- Calculation rows -->
+    <div id="calculation-rows" style="display:none;">
+        <!-- Row 1: Boxes × Pack Rate = Stems -->
+        <div class="d-flex mb-2" style="gap:10px; flex-wrap:wrap; align-items:flex-end;">
+            <div>
+                <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">{{ _("Boxes") }}</label>
+                <input type="number" id="calc-boxes" class="form-control" value="0" readonly
+                    style="max-width:90px; font-size:14px; font-weight:500; background:#f4f5f6;">
+            </div>
+            <div style="font-size:18px; font-weight:300; padding-bottom:4px;">×</div>
+            <div>
+                <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">{{ _("Pack Rate") }}</label>
+                <input type="number" id="calc-pack-rate" class="form-control" value="0" readonly
+                    style="max-width:90px; font-size:14px; font-weight:500; background:#f4f5f6;">
+            </div>
+            <div style="font-size:18px; font-weight:300; padding-bottom:4px;">=</div>
+            <div>
+                <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">{{ _("Stems") }}</label>
+                <input type="number" id="calc-stems" class="form-control" value="0" readonly
+                    style="max-width:90px; font-size:14px; font-weight:600; background:#f4f5f6;">
+            </div>
+        </div>
 
-	<!-- Filter based on available lengths from attributes -->
-	{% if doc.attributes and not has_variants and stem_lengths %}
-		{% set available_lengths = [] %}
-		{% for attr in doc.attributes %}
-			{% if attr.attribute == "Stem Length" or attr.attribute == "Length" %}
-				{% set available_lengths = available_lengths.append(attr.attribute_value) %}
-			{% endif %}
-		{% endfor %}
-		
-		{% if available_lengths %}
-		<script>
-			// Enable/disable options based on available lengths
-			$(document).ready(function() {
-				const availableLengths = {{ available_lengths | tojson }};
-				const $select = $('#stem-length');
-				
-				$select.find('option').each(function() {
-					const value = $(this).val();
-					if (value && !availableLengths.includes(value) && availableLengths.length > 0) {
-						$(this).prop('disabled', true);
-						$(this).text($(this).text() + ' ({{ _("Not available") }})');
-					}
-				});
-				
-				// Update stock message
-				if (availableLengths.length > 0) {
-					$('.stock-message').text('{{ _("Available in") }}: ' + availableLengths.join(', '));
-				}
-			});
-		</script>
-		{% endif %}
-	{% endif %}
+        <!-- Row 2: Bunch Size × Bunches = Total Stems -->
+        <div class="d-flex mb-2" style="gap:10px; flex-wrap:wrap; align-items:flex-end;">
+            <div>
+                <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">{{ _("Bunch Size") }}</label>
+                <input type="number" id="calc-bunch-size" class="form-control" value="10" min="1"
+                    style="max-width:90px; font-size:14px; font-weight:500;">
+            </div>
+            <div style="font-size:18px; font-weight:300; padding-bottom:4px;">×</div>
+            <div>
+                <label style="display:block; font-size:11px; color:var(--text-muted); margin-bottom:4px;">{{ _("Bunches") }}</label>
+                <input type="number" id="calc-bunches" class="form-control" value="0" readonly
+                    style="max-width:90px; font-size:14px; font-weight:500; background:#f4f5f6;">
+            </div>
+            <div style="font-size:18px; font-weight:300; padding-bottom:4px;">=</div>
+            <div>
+                <label style="display:block; font-size:13px; font-weight:600; color:var(--text-muted); margin-bottom:4px;">
+                    {{ _("Total Stems") }}
+                </label>
+                <input type="number" id="calc-total-stems" class="form-control" value="0" readonly
+                    style="max-width:110px; font-size:15px; font-weight:700; background:#f4f5f6;">
+            </div>
+        </div>
 
-	{% if has_variants %}
-		<!-- configure template -->
-		{% include "templates/generators/item/item_configure.html" %}
-	{% else %}
-		<!-- add variant to cart -->
-		{% include "templates/generators/item/item_add_to_cart.html" %}
-	{% endif %}
-	
+        <!-- MOQ warning -->
+        <div id="moq-warning" class="mb-2" style="min-height:18px;"></div>
+    </div>
+    {% endif %}
+
+    <!-- Price display -->
+    <div id="upande-price-display" class="mt-2 mb-3" style="min-height:32px;">
+        <span id="upande-price-value" style="font-size:1.4em; font-weight:600;">—</span>
+        <small id="upande-price-label" class="text-muted ml-2"></small>
+    </div>
+
+    {% if has_variants %}
+        {% include "templates/generators/item/item_configure.html" %}
+    {% else %}
+        {% include "templates/generators/item/item_add_to_cart.html" %}
+    {% endif %}
+
 </div>
 
-<!-- Hidden field to store stem length selection -->
-<input type="hidden" id="selected_stem_length" name="selected_stem_length" value="{{ default_length_value }}">
-
-<!-- Hidden field to store bunch UOM selection -->
-<input type="hidden" id="selected_bunch_uom" name="selected_bunch_uom" value="{{ default_bunch_value }}">
-
-{% block base_scripts %}
-<!-- js should be loaded in body! -->
-<script type="text/javascript" src="/assets/frappe/js/lib/jquery/jquery.min.js"></script>
-{% endblock %}
+<input type="hidden" id="selected_stem_length" value="">
 
 <script>
-	$('.page_content').on('click', '.like-action-item-fp', (e) => {
-			// Bind action on wishlist button
-			const $btn = $(e.currentTarget);
-			webshop.webshop.wishlist.wishlist_action($btn);
-		});
-	
-	// Live price calculation: per-stem price × stems per bunch
-	function updatePriceDisplay() {
-		const stemLength = $('#stem-length').val();
-		const bunchUOM = $('#bunch-uom').val();
-		if (!stemLength || !bunchUOM) return;
+(function() {
+    var BUNCH_SIZE = 10;  // stems per bunch — confirm with Kaitet
+    var BOX_PACK_RATES = {};  // { box_type: [rates...] }
+    var selectedPackRate = null;
+    var MIN_BOXES = 5;
+    var perStemRate = null;
+    var currency = 'USD';
 
-		const meta = document.getElementById('product-meta');
-		if (!meta) return;
-		const itemCode = meta.dataset.itemCode;
-		const currency = meta.dataset.currency;
-		const priceList = meta.dataset.priceList;
+    function waitAndInit() {
+        if (typeof $ === 'undefined' || typeof frappe === 'undefined' || typeof frappe.call === 'undefined') {
+            setTimeout(waitAndInit, 100);
+            return;
+        }
+        setTimeout(initProductPage, 600);
+    }
 
-		// Parse stems count from UOM name: "Bunch (25)" → 25
-		const uomText = $('#bunch-uom option:selected').text().trim();
-		const stemMatch = uomText.match(/\((\d+)\)/);
-		const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+    function initProductPage() {
+        var meta = document.getElementById('product-meta');
+        if (!meta) return;
+        currency = meta.getAttribute('data-currency') || 'USD';
 
-		frappe.call({
-			method: 'upande_webshop.api.item_price.get_item_length_price',
-			args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
-			callback(r) {
-				if (r.message && r.message.price_list_rate) {
-					const perStem = r.message.price_list_rate;
-					const formatted = format_currency(perStem, currency);
-					$('#dynamic-price-value').text(formatted + ' / stem');
-					$('#dynamic-price-uom-label').text('(' + stemsPerBunch + ' stems per bunch)');
-				} else {
-					$('#dynamic-price-value').text('—');
-				}
-			}
-		});
-	}
+        // 1. Set MOQ label — minimum 5 boxes
+        $('#moq-label').text(' — Minimum ' + MIN_BOXES + ' boxes');
 
-	// Handle stem length selection
-	$('.page_content').on('change', '#stem-length', function() {
-		const selectedLength = $(this).val();
-		$('#selected_stem_length').val(selectedLength);
-		updatePriceDisplay();
-	});
+        // 2. Fetch box types with dimensions and populate dropdown
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Box Type',
+                fields: ['name', 'length_cm', 'width_cm', 'height_cm'],
+                limit_page_length: 50,
+                order_by: 'name asc'
+            },
+            callback: function(r) {
+                var $sel = $('#upande-box-type');
+                $sel.html('<option value="">' + __('Select box type') + '</option>');
+                if (r.message) {
+                    r.message.forEach(function(b) {
+                        var label = b.name;
+                        if (b.length_cm && b.width_cm && b.height_cm) {
+                            label += ' (' + b.length_cm + '\u00d7' + b.width_cm + '\u00d7' + b.height_cm + ' cm)';
+                        }
+                        $sel.append($('<option>').val(b.name).text(label));
+                    });
+                }
+            }
+        });
 
-	// Handle bunch UOM selection
-	$('.page_content').on('change', '#bunch-uom', function() {
-		const selectedUOM = $(this).val();
-		$('#selected_bunch_uom').val(selectedUOM);
-		updatePriceDisplay();
-	});
-	
-	// Auto-trigger price display once frappe is ready (defaults may already be selected)
-	frappe.ready(function() {
-		if ($('#stem-length').val() && $('#bunch-uom').val()) {
-			updatePriceDisplay();
-		}
-	});
+        // 4. Fetch all pack rates grouped by box type
+        frappe.call({
+            method: 'frappe.client.get_list',
+            args: {
+                doctype: 'Packrate',
+                fields: ['packrate', 'box_type'],
+                limit_page_length: 500,
+                order_by: 'packrate asc'
+            },
+            callback: function(r) {
+                BOX_PACK_RATES = {};
+                if (r.message) {
+                    r.message.forEach(function(rec) {
+                        var box = rec.box_type;
+                        var rate = parseInt(rec.packrate);
+                        if (!BOX_PACK_RATES[box]) BOX_PACK_RATES[box] = [];
+                        if (BOX_PACK_RATES[box].indexOf(rate) === -1) {
+                            BOX_PACK_RATES[box].push(rate);
+                        }
+                    });
+                }
+            }
+        });
 
-	// Modify add to cart to include both selections
-	$('.page_content').on('click', '.add-to-cart', function(e) {
-		const stemLength = $('#stem-length').val();
-		const bunchUOM = $('#bunch-uom').val();
-		
-		if (!stemLength) {
-			e.preventDefault();
-			frappe.show_alert({
-				message: '{{ _("Please select a stem length") }}',
-				indicator: 'red'
-			}, 3);
-			return false;
-		}
-		
-		if (!bunchUOM) {
-			e.preventDefault();
-			frappe.show_alert({
-				message: '{{ _("Please select a pack size") }}',
-				indicator: 'red'
-			}, 3);
-			return false;
-		}
-		
-		// Add selections to the button data
-		$(this).data('stem-length', stemLength);
-		$(this).data('bunch-uom', bunchUOM);
-		
-		// Show confirmation
-		frappe.show_alert({
-			message: '{{ _("Stem length") }}: ' + stemLength + ', {{ _("Pack") }}: ' + bunchUOM,
-			indicator: 'green'
-		}, 3);
-	});
+        // 3. Stem length change → fetch price
+        $('#upande-stem-length').off('change.upande').on('change.upande', function() {
+            $('#selected_stem_length').val($(this).val());
+            fetchPrice();
+        });
+
+        // 4. Box type change → show pack rate dropdown
+        $('#upande-box-type').off('change.upande').on('change.upande', function() {
+            var box = $(this).val();
+            var $rateSelect = $('#upande-pack-rate');
+            var $rateRow = $('#pack-rate-row');
+            var $hint = $('#pack-rate-hint');
+
+            selectedPackRate = null;
+            $rateSelect.html('<option value="">' + __('Select pack rate') + '</option>');
+            $hint.html('');
+            resetCalculation();
+
+            if (!box) {
+                $rateRow.hide();
+                $('#num-boxes-row').hide();
+                $('#calculation-rows').hide();
+                return;
+            }
+
+            var rates = BOX_PACK_RATES[box] || [];
+            if (rates.length === 0) {
+                $rateSelect.append('<option disabled>No pack rates found for this box</option>');
+            } else {
+                rates.forEach(function(r) {
+                    $rateSelect.append($('<option>').val(r).text(r + ' stems'));
+                });
+            }
+            $rateRow.show();
+        });
+
+        // 5. Pack rate change → show capacity hint + show boxes input
+        $('#upande-pack-rate').off('change.upande').on('change.upande', function() {
+            var rate = parseInt($(this).val());
+            selectedPackRate = isNaN(rate) ? null : rate;
+            var $hint = $('#pack-rate-hint');
+
+            if (selectedPackRate) {
+                var bunches = Math.floor(selectedPackRate / BUNCH_SIZE);
+                $hint.html('Max capacity: <strong>' + selectedPackRate + ' stems</strong> per box &nbsp;·&nbsp; ' +
+                    bunches + ' bunches × ' + BUNCH_SIZE + ' stems');
+                $('#num-boxes-row').show();
+                $('#calculation-rows').show();
+                recalculate();
+            } else {
+                $hint.html('');
+                $('#num-boxes-row').hide();
+                $('#calculation-rows').hide();
+                resetCalculation();
+            }
+        });
+
+        // 6. No. of boxes change → recalculate
+        $('#upande-num-boxes').off('input.upande').on('input.upande', function() {
+            recalculate();
+        });
+
+        // 7. Bunch size change → update bunches only (total stems unchanged)
+        $(document).off('input.upande-bunch').on('input.upande-bunch', '#calc-bunch-size', function() {
+            var bunchSize = parseInt($(this).val()) || 1;
+            var totalStems = parseInt($('#calc-total-stems').val()) || 0;
+            if (totalStems > 0 && bunchSize > 0) {
+                $('#calc-bunches').val(Math.floor(totalStems / bunchSize));
+            }
+        });
+
+        // 7. Wishlist
+        $('.like-action-item-fp').off('click.upande').on('click.upande', function() {
+            var item_code = $(this).data('item-code');
+            if (frappe.session.user === 'Guest') {
+                if (localStorage) localStorage.setItem('last_visited', window.location.pathname);
+                frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then(function(res) {
+                    window.location.href = res.message || '/login';
+                });
+                return;
+            }
+            frappe.call({
+                type: 'POST',
+                method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist',
+                args: { item_code: item_code },
+                callback: function() { window.location.href = '/wishlist'; }
+            });
+        });
+
+        // 8. Override Add to Cart button to include qty = total stems
+        overrideAddToCart();
+
+        // Trigger initial price fetch if length already selected
+        if ($('#upande-stem-length').val()) {
+            fetchPrice();
+        }
+    }
+
+    function recalculate() {
+        if (!selectedPackRate) {
+            resetCalculation();
+            return;
+        }
+        var numBoxes = parseInt($('#upande-num-boxes').val()) || 1;
+        var totalStems = numBoxes * selectedPackRate;
+        var bunchSize = parseInt($('#calc-bunch-size').val()) || BUNCH_SIZE;
+        var numBunches = Math.floor(totalStems / bunchSize);
+
+        $('#calc-boxes').val(numBoxes);
+        $('#calc-pack-rate').val(selectedPackRate);
+        $('#calc-stems').val(totalStems);
+        // bunch size left as-is (user may have set it)
+        $('#calc-bunches').val(numBunches);
+        $('#calc-total-stems').val(totalStems);
+
+        validateMOQ(numBoxes);
+        updatePriceTotal(totalStems);
+    }
+
+    function resetCalculation() {
+        $('#calc-boxes, #calc-pack-rate, #calc-stems, #calc-bunches, #calc-total-stems').val(0);
+        // bunch size left as-is (user may have set it)
+        $('#moq-warning').html('');
+        updatePriceTotal(0);
+    }
+
+    function validateMOQ(numBoxes) {
+        var $msg = $('#moq-warning');
+        if (numBoxes > 0 && numBoxes < MIN_BOXES) {
+            $msg.html('<small style="color:#e8a000; font-weight:500;">⚠️ Minimum order is <strong>' +
+                MIN_BOXES + ' boxes</strong>. You currently have ' + numBoxes + '.</small>');
+        } else {
+            $msg.html('');
+        }
+    }
+
+    function fetchPrice() {
+        var stemLength = $('#upande-stem-length').val();
+        if (!stemLength) {
+            $('#upande-price-value').text('—');
+            $('#upande-price-label').text('');
+            perStemRate = null;
+            return;
+        }
+        var meta = document.getElementById('product-meta');
+        if (!meta) return;
+        var itemCode = meta.getAttribute('data-item-code');
+        var priceList = meta.getAttribute('data-price-list');
+
+        $('#upande-price-value').text('...');
+        $('#upande-price-label').text('');
+
+        frappe.call({
+            method: 'upande_webshop.api.item_price.get_item_length_price',
+            args: {
+                item_code: itemCode,
+                length: stemLength,
+                currency: currency,
+                price_list: priceList
+            },
+            callback: function(r) {
+                if (r && r.message && r.message.price_list_rate) {
+                    perStemRate = parseFloat(r.message.price_list_rate);
+                    $('#upande-price-value').text(currency + ' ' + perStemRate.toFixed(3) + ' / stem');
+                    $('#upande-price-label').text('(' + BUNCH_SIZE + ' stems per bunch)');
+                    // Recalculate total price if stems already selected
+                    var totalStems = parseInt($('#calc-total-stems').val()) || 0;
+                    updatePriceTotal(totalStems);
+                } else {
+                    perStemRate = null;
+                    $('#upande-price-value').text('—');
+                    $('#upande-price-label').text('No price for this length');
+                }
+            }
+        });
+    }
+
+    function updatePriceTotal(totalStems) {
+        if (perStemRate && totalStems > 0) {
+            var total = (perStemRate * totalStems).toFixed(2);
+            $('#upande-price-value').text(currency + ' ' + perStemRate.toFixed(3) + ' / stem');
+            $('#upande-price-label').text('× ' + totalStems + ' stems = ' + currency + ' ' + total);
+        } else if (perStemRate) {
+            $('#upande-price-value').text(currency + ' ' + perStemRate.toFixed(3) + ' / stem');
+            $('#upande-price-label').text('');
+        }
+    }
+
+    function overrideAddToCart() {
+        // Run after item_add_to_cart.html binds at 700ms — wait 900ms to ensure we're last
+        setTimeout(function() {
+            $('.btn-add-to-cart').off('click.upande-cart').on('click.upande-cart', function(e) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+
+                var $btn = $(this);
+                var meta = document.getElementById('product-meta');
+                if (!meta) return;
+                var itemCode = meta.getAttribute('data-item-code');
+
+                var stemLength = $('#upande-stem-length').val();
+                var boxType = $('#upande-box-type').val();
+                var packRate = selectedPackRate;
+                var numBoxes = parseInt($('#upande-num-boxes').val()) || 1;
+                var totalStems = parseInt($('#calc-total-stems').val()) || 0;
+                var numBunches = parseInt($('#calc-bunches').val()) || 0;
+
+                // Validations
+                if (!stemLength) {
+                    frappe.show_alert({ message: __('Please select a stem length.'), indicator: 'red' }, 4);
+                    $('#upande-stem-length').focus();
+                    return false;
+                }
+                if (!boxType) {
+                    frappe.show_alert({ message: __('Please select a box type.'), indicator: 'red' }, 4);
+                    $('#upande-box-type').focus();
+                    return false;
+                }
+                if (!packRate) {
+                    frappe.show_alert({ message: __('Please select a pack rate.'), indicator: 'red' }, 4);
+                    $('#upande-pack-rate').focus();
+                    return false;
+                }
+                if (numBoxes < MIN_BOXES) {
+                    frappe.show_alert({
+                        message: __('Minimum order is {0} boxes. Please add {1} more box(es).', [MIN_BOXES, MIN_BOXES - numBoxes]),
+                        indicator: 'orange'
+                    }, 5);
+                    return false;
+                }
+
+                var additionalNotes = [
+                    'Box: ' + boxType,
+                    'Pack rate: ' + packRate + ' stems/box',
+                    'Boxes: ' + numBoxes,
+                    'Total Stems: ' + totalStems + ' (' + numBunches + ' bunches × ' + BUNCH_SIZE + ')'
+                ].join(' | ');
+
+                $btn.prop('disabled', true);
+
+                upande_webshop.upande_webshop.shopping_cart.update_cart({
+                    item_code: itemCode,
+                    qty: totalStems,
+                    custom_length: stemLength,
+                    custom_box_type: boxType,
+                    additional_notes: additionalNotes,
+                    callback: function(r) {
+                        $btn.prop('disabled', false);
+                        if (r && r.message) {
+                            $('.btn-view-in-cart').removeClass('hidden');
+                            frappe.show_alert({ message: __('Added to cart'), indicator: 'green' }, 3);
+                        }
+                    }
+                });
+            });
+        }, 900);
+    }
+
+    waitAndInit();
+})();
 </script>

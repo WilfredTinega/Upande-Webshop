@@ -78,6 +78,22 @@
 		<!-- Right section -->
 		<div class="col-md-4">
 			<div class="cart-payment-addresses">
+
+				<!-- Drop-off Point -->
+				<div class="mb-3 frappe-card p-5">
+					<div class="drop-off-section">
+						<h6 class="mb-3" style="font-weight: 600;">{{ _('Drop-off Point') }}</h6>
+						<div class="mb-3">
+							<label for="drop-off-point" class="form-label" style="font-size: 13px; color: var(--text-muted); margin-bottom: 4px; display: block;">
+								{{ _('Drop-off Location') }}
+							</label>
+							<select id="drop-off-point" class="form-control font-md" data-current="{{ doc.custom_drop_off_point or '' }}">
+								<option value="">Loading...</option>
+							</select>
+						</div>
+					</div>
+				</div>
+
 				<!-- Apply Coupon Code  -->
 				{% set show_coupon_code = cart_settings.show_apply_coupon_code_in_website and cart_settings.enable_checkout %}
 				{% set coupon_code = doc.coupon_code if doc.coupon_code else "" %}
@@ -88,10 +104,10 @@
 					{% else %}
 					<div class="mb-3">
 						<div class="d-flex w-100">
-							<input type="text" class="txtcoupon form-control mr-3 flex-grow-1 font-md" placeholder="{{ _("Enter coupon code") }}" name="txtcouponcode"  ></input>
+							<input type="text" class="txtcoupon form-control mr-3 flex-grow-1 font-md" placeholder="{{ _("Enter coupon code") }}" name="txtcouponcode"></input>
 							<button class="btn btn-secondary btn-sm bt-coupon font-md flex-shrink-0">{{ _("Apply") }}</button>
-							<input type="hidden" class="txtreferral_sales_partner font-md" placeholder="Enter Sales Partner" name="txtreferral_sales_partner" type="text"></input>
-							</div>
+							<input type="hidden" class="txtreferral_sales_partner font-md" placeholder="Enter Sales Partner" name="txtreferral_sales_partner"></input>
+						</div>
 					</div>
 					{% endif %}
 				{% endif %}
@@ -117,7 +133,7 @@
 	<div class="cart-empty-state">
 		<img src="/assets/upande_webshop/images/cart-empty-state.png" alt="Empty State">
 	</div>
-	<div class="cart-empty-message mt-4">{{ _('Your cart is Empty') }}</p>
+	<div class="cart-empty-message mt-4">{{ _('Your cart is Empty') }}</div>
 	{% if cart_settings.enable_checkout %}
 		<a class="btn btn-outline-primary" href="/orders" style="font-size: 16px;">
 			{{ _('See past orders') }}

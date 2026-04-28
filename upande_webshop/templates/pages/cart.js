@@ -3,7 +3,7 @@
 
 // JS exclusive to /cart page
 frappe.provide("upande_webshop.upande_webshop.shopping_cart");
-var shopping_cart = webshop.webshop.shopping_cart;
+var shopping_cart = upande_webshop.upande_webshop.shopping_cart;
 
 $.extend(shopping_cart, {
 	show_error: function(title, text) {
@@ -18,6 +18,7 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_remove_cart_item();
 		shopping_cart.bind_coupon_code();
 		shopping_cart.bind_remove_coupon_code();
+		shopping_cart.bind_drop_off_point();
 	},
 
 	bind_place_order: function() {
@@ -28,7 +29,6 @@ $.extend(shopping_cart, {
 
 	bind_request_quotation: function() {
 		$('.btn-request-for-quotation').on('click', function() {
-			// Clear any dirty-form flags so Frappe doesn't block navigation
 			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
 			window.onbeforeunload = null;
 			shopping_cart.request_quotation(this);
@@ -36,7 +36,6 @@ $.extend(shopping_cart, {
 	},
 
 	bind_change_qty: function() {
-		// qty sent to server is in bunches; use child_docname to target the exact row.
 		$(".cart-items").on("change", ".cart-qty", function() {
 			var input = $(this);
 			var item_code = input.attr("data-item-code");
@@ -93,6 +92,40 @@ $.extend(shopping_cart, {
 			});
 		});
 	},
+
+	// ---- Drop-off Point ----
+	bind_drop_off_point: function() {
+		$("#drop-off-point").on("change", function() {
+			var drop_off_point = $(this).val();
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_drop_off_point",
+				args: { drop_off_point: drop_off_point }
+			});
+		});
+	},
+
+	load_drop_off_points: function() {
+		frappe.call({
+			method: 'frappe.client.get_list',
+			args: {
+				doctype: 'Delivery Point',
+				fields: ['name', 'delivery_point'],
+				limit_page_length: 100,
+				order_by: 'name asc'
+			},
+			callback: function(r) {
+				var current = $("#drop-off-point").data("current");
+				var $select = $("#drop-off-point");
+				$select.empty().append('<option value="">-- Select Drop-off Point --</option>');
+				(r.message || []).forEach(function(p) {
+					var label = p.delivery_point || p.name;
+					var selected = p.name === current ? 'selected' : '';
+					$select.append('<option value="' + p.name + '" ' + selected + '>' + label + '</option>');
+				});
+			}
+		});
+	},
+	// ---- End Drop-off Point ----
 
 	render_tax_row: function($cart_taxes, doc, shipping_rules) {
 		var shipping_selector;
@@ -223,6 +256,7 @@ $.extend(shopping_cart, {
 			shopping_cart.remove_coupon_code(this);
 		});
 	},
+
 	remove_coupon_code: function(btn) {
 		return frappe.call({
 			type: "POST",
@@ -240,11 +274,11 @@ $.extend(shopping_cart, {
 frappe.ready(function() {
 	if (window.location.pathname === "/cart") {
 		$(".cart-icon").hide();
-		// Prevent Frappe's "unsaved changes" warning on the cart page
 		window.onbeforeunload = null;
 	}
 	shopping_cart.parent = $(".cart-container");
 	shopping_cart.bind_events();
+	shopping_cart.load_drop_off_points();
 });
 
 function show_terms() {
