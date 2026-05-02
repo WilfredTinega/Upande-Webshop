@@ -216,6 +216,12 @@ override_doctype_class = {
 # before_request = ["upande_webshop.utils.before_request"]
 after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
 
+# Restore Floriday Settings-driven scheduled jobs after every migrate (Frappe's
+# scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
+# any app's scheduler_events — our jobs are user-configured per Floriday Settings,
+# so we re-upsert them here).
+after_migrate = ["upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs"]
+
 # Job Events
 # ----------
 # before_job = ["upande_webshop.utils.before_job"]

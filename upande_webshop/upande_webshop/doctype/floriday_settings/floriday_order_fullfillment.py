@@ -32,30 +32,20 @@ def safe_log(message, title=None, log_type="info"):
 # =========================================================
 
 def get_delivery_gln_from_sales_order(sales_order):
-    """Get delivery GLN from Sales Order by looking up the Delivery Point."""
+    """
+    Get the Floriday delivery GLN for a Sales Order from its
+    custom_floriday_delivery_id field. Returns None if missing.
+    """
     try:
-        delivery_point_name = sales_order.get('custom_delivery_point')
-        
-        if delivery_point_name:
-            delivery_point = frappe.get_doc("Delivery Point", delivery_point_name)
-            floriday_gln = delivery_point.get('custom_floriday_delivery_id')
-            
-            if floriday_gln:
-                safe_log(f"Found GLN {floriday_gln} from Delivery Point {delivery_point_name}", 
-                        "Delivery Point GLN Lookup", "info")
-                return floriday_gln
-            else:
-                safe_log(f"Delivery Point {delivery_point_name} has no custom_floriday_delivery_id set", 
-                        "Missing GLN Warning", "warning")
-                return None
-        else:
-            safe_log(f"Sales Order {sales_order.name} has no delivery point set", 
-                    "No Delivery Point", "debug")
-            return None
-            
+        gln = sales_order.get('custom_floriday_delivery_id')
+        if gln:
+            return gln
+        safe_log(f"Sales Order {sales_order.name} has no custom_floriday_delivery_id",
+                 "Missing GLN", "warning")
+        return None
     except Exception as e:
-        safe_log(f"Error getting GLN from delivery point: {str(e)}", 
-                "Delivery Point GLN Error", "error")
+        safe_log(f"Error getting GLN for sales order: {str(e)}",
+                 "GLN Lookup Error", "error")
         return None
 
 def get_default_gln():
@@ -209,24 +199,44 @@ def order_fullment():
         }
 
         # ── Query Sales Orders (Last 1 hour) ────────────────────────────────
-        sales_orders = frappe.get_all(
-            "Sales Order",
-            filters={
-                "docstatus": 1,
-                "customer_group": "Floriday",
-                "po_no": ["!=", ""],
-                "creation": [">=", start_time]
-            },
-            fields=["name", "po_no", "customer", "delivery_date", "status", "creation", "custom_delivery_point"]
-        )
+        # Identify Floriday-sourced orders by the customer having a custom_floriday_id.
+        # Every customer created or matched by create_sales_order_from_floriday has this set.
+        # Pull the Sales Order's own custom_floriday_delivery_id if the column exists,
+        # so fulfillment can use the buyer GLN without relying on the Delivery Point.
+        has_so_gln = frappe.db.has_column("Sales Order", "custom_floriday_delivery_id")
+        gln_select = "so.custom_floriday_delivery_id" if has_so_gln else "NULL"
+        sales_orders = frappe.db.sql(f"""
+            SELECT so.name, so.po_no, so.customer, so.delivery_date, so.status,
+                   so.creation, so.custom_delivery_point,
+                   {gln_select} AS custom_floriday_delivery_id
+            FROM `tabSales Order` so
+            INNER JOIN `tabCustomer` c ON c.name = so.customer
+            WHERE so.docstatus = 1
+              AND so.po_no != ''
+              AND so.creation >= %(start_time)s
+              AND c.custom_floriday_id IS NOT NULL
+              AND c.custom_floriday_id != ''
+            ORDER BY so.creation DESC
+        """, {"start_time": start_time}, as_dict=True)
         step(f"STEP 3: Orders in last 1 hour: {len(sales_orders)}")
 
         if not sales_orders:
             step("STEP 3: No orders in last 1 hour — nothing to fulfill")
             return {
                 "status": "success",
-                "message": "No Floriday Sales Orders found in the last 1 hour",
-                "results": []
+                "message": (
+                    "No Floriday Sales Orders found in the last 1 hour. "
+                    "Tip: only orders submitted within the past hour, with a customer "
+                    "tagged with custom_floriday_id, are eligible."
+                ),
+                "results": [],
+                "summary": {
+                    "total": 0,
+                    "successful": 0,
+                    "errors": 0,
+                    "fulfilled_orders": [],
+                    "failed_orders": [],
+                },
             }
 
         # ── Process Each Order ──────────────────────────────────────────────
@@ -254,8 +264,13 @@ def order_fullment():
                     })
                     continue
 
-                # Calculate total stems and packages
-                total_stems = sum(float(item.qty or 0) for item in sales_order.items)
+                # Calculate total stems and packages.
+                # item.qty is in the selling UOM (bunches); stems = qty * conversion_factor.
+                # stock_qty already holds this product, so prefer it when present.
+                total_stems = sum(
+                    float(item.stock_qty or (item.qty or 0) * (item.conversion_factor or 1))
+                    for item in sales_order.items
+                )
                 
                 if total_stems <= 0:
                     step(f"  STEP 4b ERROR: Total stems is 0 for {sales_order_name}")
@@ -402,14 +417,28 @@ def order_fullment():
 
         step(f"STEP 5 DONE: total={len(sales_orders)} success={success_count} errors={error_count}")
 
+        # Build a short message: just the Sales Order name and a short status word.
+        fulfilled = [r.get("sales_order") for r in results if r.get("status") == "success"]
+        failed = [r.get("sales_order") for r in results if r.get("status") == "error"]
+
+        parts = []
+        for name in fulfilled:
+            parts.append(f"{name} fulfilled")
+        for name in failed:
+            parts.append(f"{name} failed")
+
+        message = ", ".join(parts) if parts else "No orders processed"
+
         return {
             "status": "success",
-            "results": results,
+            "message": message,
             "summary": {
                 "total": len(sales_orders),
                 "successful": success_count,
-                "errors": error_count
-            }
+                "errors": error_count,
+                "fulfilled_orders": fulfilled,
+                "failed_orders": failed,
+            },
         }
 
     except Exception as e:

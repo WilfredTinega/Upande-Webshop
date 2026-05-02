@@ -1,6 +1,26 @@
-// Pack rate is now fetched from the Variety Pack Rate / Item Group Pack Rate
-// DocTypes via upande_webshop.api.pack_rate.get_pack_rate.
-// Edit rates in: Desk → Variety Pack Rate / Item Group Pack Rate / Box Type
+// Pack rates are loaded from the Pack Rate doctype on first dialog open.
+// Shape: { variety_lowercase: { box_key: { length_cm: stems_per_box } } }
+// Box keys: 'zim' covers ZIM, WAFEX, TFH HUB, FDT, JUMBO; 'std' covers STANDARD BOXES.
+let PACK_RATES = {};
+let PACK_RATES_LOADED = null;
+
+function load_pack_rates() {
+	if (PACK_RATES_LOADED) return PACK_RATES_LOADED;
+	PACK_RATES_LOADED = new Promise((resolve) => {
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.api.get_pack_rates_map',
+			callback: (r) => {
+				PACK_RATES = r.message || {};
+				resolve(PACK_RATES);
+			},
+			error: () => {
+				PACK_RATES = {};
+				resolve(PACK_RATES);
+			},
+		});
+	});
+	return PACK_RATES_LOADED;
+}
 
 const BUNCH_SIZE = 10;
 
@@ -53,6 +73,8 @@ class ItemConfigure {
 		this._moq = 10;
 		this._pack_rate = null;
 		this._template_item_code = null;  // resolved on first lookup
+
+		load_pack_rates();
 
 		frappe.call({
 			method: 'frappe.client.get_value',
