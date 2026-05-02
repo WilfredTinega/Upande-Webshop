@@ -13,9 +13,9 @@ IGNORE_TEST_RECORD_DEPENDENCIES = []  # eg. ["User"]
 
 
 
-class IntegrationTestFloridayItemMapping(IntegrationTestCase):
+class IntegrationTestFloridayItems(IntegrationTestCase):
 	"""
-	Integration tests for FloridayItemMapping.
+	Integration tests for FloridayItems.
 	Use this class for testing interactions between multiple components.
 	"""
 
