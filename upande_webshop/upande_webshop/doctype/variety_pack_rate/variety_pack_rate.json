@@ -1,0 +1,102 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "field:variety",
+ "creation": "2026-05-02 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "variety",
+  "variety_name",
+  "item_group",
+  "is_active",
+  "section_break_rates",
+  "pack_rates",
+  "section_break_notes",
+  "notes"
+ ],
+ "fields": [
+  {
+   "fieldname": "variety",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Variety (Item Template)",
+   "options": "Item",
+   "reqd": 1,
+   "unique": 1,
+   "description": "Link to the Item template (e.g. Ever-Red, Paloma). Variants like EVER-RED-50CM inherit this rate."
+  },
+  {
+   "fetch_from": "variety.item_name",
+   "fieldname": "variety_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Variety Name",
+   "read_only": 1
+  },
+  {
+   "fetch_from": "variety.item_group",
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "read_only": 1
+  },
+  {
+   "default": "1",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "Is Active"
+  },
+  {
+   "fieldname": "section_break_rates",
+   "fieldtype": "Section Break",
+   "label": "Pack Rates"
+  },
+  {
+   "fieldname": "pack_rates",
+   "fieldtype": "Table",
+   "label": "Pack Rates",
+   "options": "Variety Pack Rate Detail",
+   "reqd": 1,
+   "description": "One row per (Box Type, Length) combination. e.g. ZIM + 50cm = 350 stems"
+  },
+  {
+   "fieldname": "section_break_notes",
+   "fieldtype": "Section Break",
+   "label": "Notes",
+   "collapsible": 1
+  },
+  {
+   "fieldname": "notes",
+   "fieldtype": "Small Text",
+   "label": "Notes"
+  }
+ ],
+ "links": [
+  {"link_doctype": "Item", "link_fieldname": "variant_of"}
+ ],
+ "modified": "2026-05-02 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Upande Webshop",
+ "name": "Variety Pack Rate",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "share": 1},
+  {"role": "Sales Manager", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1},
+  {"role": "Stock Manager", "read": 1, "write": 1, "create": 1, "report": 1, "export": 1},
+  {"role": "Sales User", "read": 1, "report": 1},
+  {"role": "Customer", "read": 1}
+ ],
+ "sort_field": "variety_name",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}
