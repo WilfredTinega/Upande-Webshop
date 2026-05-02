@@ -1,40 +1,26 @@
-// Pack rates lookup: variety_name_lowercase -> box_key -> length_cm -> stems_per_box
-// Box keys: 'zim' covers ZIM, WAFEX, TFH HUB, FDT, JUMBO (same capacity per Yvonne)
-//           'std' covers STANDARD BOXES 100x33x20
-const PACK_RATES = {
-	'ever red':                 { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 220, 60: 180, 70: 140 } },
-	'everred':                  { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 220, 60: 180, 70: 140 } },
-	'proud':                    { zim: { 40: 500, 50: 300, 60: 300, 70: 250 }, std: { 50: 200, 60: 160, 70: 140 } },
-	'athena':                   { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 220, 60: 180, 70: 140 } },
-	'revival':                  { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 200, 60: 180, 70: 140 } },
-	'sweet revival':            { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 200, 60: 180, 70: 140 } },
-	'confidential':             { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 240, 60: 180, 70: 140 } },
-	'madam cerise':             { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 240, 60: 180, 70: 140 } },
-	'paloma':                   { zim: { 40: 400, 50: 300, 60: 250, 70: 200 }, std: { 50: 200, 60: 160, 70: 140 } },
-	'gold finch':               { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 200, 60: 160, 70: 140 } },
-	'goldfinch':                { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 200, 60: 160, 70: 140 } },
-	'madam red':                { zim: { 40: 500, 50: 350, 60: 300, 70: 250 }, std: { 50: 220, 60: 180, 70: 140 } },
-	'mayfair':                  { std: { 50: 240, 60: 180, 70: 140 } },
-	'goodtimes':                { std: { 50: 220, 60: 180, 70: 140 } },
-	'everpink':                 { std: { 50: 220, 60: 180, 70: 140 } },
-	'ever pink':                { std: { 50: 220, 60: 180, 70: 140 } },
-	'deep purple':              { std: { 50: 220, 60: 180, 70: 140 } },
-	'eucalyptus parvifolia':    { zim: { 40: 1000, 50: 800, 60: 600, 70: 400, 80: 200 } },
-	'eucalyptus silver dollar': { zim: { 40: 1000, 50: 800, 60: 600, 70: 400, 80: 200 } },
-	'eucalyptus baby blue':     { zim: { 40: 1000, 50: 800, 60: 600, 70: 400, 80: 200 } },
-	'spray roses':              { zim: { 50: 300, 60: 220, 70: 180, 80: 150 } },
-	'fireworks':                { std: { 50: 200, 60: 180, 70: 120 } },
-	'snowflakes':               { std: { 50: 200, 60: 180, 70: 120 } },
-	'sweet sara':               { std: { 50: 200, 60: 180, 70: 120 } },
-	'dinara':                   { std: { 50: 180, 60: 160, 70: 120 } },
-	'mirabel':                  { std: { 50: 200, 60: 180, 70: 120 } },
-	'leila':                    { std: { 50: 200, 60: 180, 70: 120 } },
-	'reflex':                   { std: { 50: 200, 60: 180, 70: 120 } },
-	'tralala':                  { std: { 50: 180, 60: 160, 70: 120 } },
-	'odilia':                   { std: { 50: 200, 60: 180, 70: 120 } },
-	'salinero':                 { std: { 50: 200, 60: 180, 70: 120 } },
-	'alicia':                   { std: { 50: 200, 60: 180, 70: 120 } },
-};
+// Pack rates are loaded from the Pack Rate doctype on first dialog open.
+// Shape: { variety_lowercase: { box_key: { length_cm: stems_per_box } } }
+// Box keys: 'zim' covers ZIM, WAFEX, TFH HUB, FDT, JUMBO; 'std' covers STANDARD BOXES.
+let PACK_RATES = {};
+let PACK_RATES_LOADED = null;
+
+function load_pack_rates() {
+	if (PACK_RATES_LOADED) return PACK_RATES_LOADED;
+	PACK_RATES_LOADED = new Promise((resolve) => {
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.api.get_pack_rates_map',
+			callback: (r) => {
+				PACK_RATES = r.message || {};
+				resolve(PACK_RATES);
+			},
+			error: () => {
+				PACK_RATES = {};
+				resolve(PACK_RATES);
+			},
+		});
+	});
+	return PACK_RATES_LOADED;
+}
 
 const BUNCH_SIZE = 10;
 
@@ -65,6 +51,8 @@ class ItemConfigure {
 		this._flower_type = null;
 		this._moq = 10;
 		this._pack_rate = null;
+
+		load_pack_rates();
 
 		frappe.call({
 			method: 'frappe.client.get_value',

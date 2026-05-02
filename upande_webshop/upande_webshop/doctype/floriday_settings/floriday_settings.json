@@ -5,20 +5,229 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "floriday_items_tab",
+  "fi_event_frequency",
+  "fi_cron_format",
+  "column_break_dluu",
+  "fi_enabled",
+  "add_items",
+  "sync_item_id",
+  "fi_scheduler_section",
+  "fi_last_run",
+  "fi_column_break_runtime",
+  "fi_next_run",
+  "batch_tab",
+  "batch_event_frequency",
+  "batch_cron_format",
+  "column_break_mevq",
+  "batch_enabled",
+  "create_batch",
+  "batch_scheduler_section",
+  "batch_last_run",
+  "batch_column_break_runtime",
+  "batch_next_run",
+  "supplyline_tab",
+  "supplyline_event_frequency",
+  "supplyline_cron_format",
+  "column_break_wtpy",
+  "supplyline_enabled",
+  "create_supplyine",
+  "supplyline_scheduler_section",
+  "supplyline_last_run",
+  "supplyline_column_break_runtime",
+  "supplyline_next_run",
+  "sales_order_tab",
+  "so_event_frequency",
+  "so_cron_format",
+  "column_break_iqki",
+  "so_enabled",
+  "sales_order",
+  "so_scheduler_section",
+  "so_last_run",
+  "so_column_break_runtime",
+  "so_next_run",
+  "order_fullfillment_tab",
+  "of_event_frequency",
+  "of_cron_format",
+  "column_break_hdny",
+  "of_enabled",
+  "order_fullfilment",
+  "of_scheduler_section",
+  "of_last_run",
+  "of_column_break_runtime",
+  "of_next_run",
+  "floriday_setting_tab",
+  "section_break_tupy",
   "client_id",
   "grant_type",
   "api_key",
   "warehouse_id",
   "organization_supplier_id",
   "base_url",
-  "column_break_jwdk",
-  "client_secret",
-  "scope",
   "warehouse",
-  "section_break_qzct",
-  "access_token"
+  "client_secret",
+  "column_break_woir",
+  "scope",
+  "access_token",
+  "settings_tab",
+  "column_break_jwll",
+  "at_event_frequency",
+  "at_cron_format",
+  "column_break_rebh",
+  "at_enabled",
+  "update_access_token",
+  "at_scheduler_section",
+  "at_last_run",
+  "at_column_break_runtime",
+  "at_next_run",
+  "section_break_fvbp",
+  "token_url"
  ],
  "fields": [
+  {
+   "fieldname": "sales_order_tab",
+   "fieldtype": "Tab Break",
+   "label": "Sales Order"
+  },
+  {
+   "fieldname": "sales_order",
+   "fieldtype": "Button",
+   "label": "Sales Order"
+  },
+  {
+   "fieldname": "so_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.so_event_frequency == \"Cron\"",
+   "fieldname": "so_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "so_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "batch_tab",
+   "fieldtype": "Tab Break",
+   "label": "Batch"
+  },
+  {
+   "fieldname": "create_batch",
+   "fieldtype": "Button",
+   "label": "Create Batch"
+  },
+  {
+   "fieldname": "batch_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.batch_event_frequency == \"Cron\"",
+   "fieldname": "batch_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "batch_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "supplyline_tab",
+   "fieldtype": "Tab Break",
+   "label": "Supplyline"
+  },
+  {
+   "fieldname": "create_supplyine",
+   "fieldtype": "Button",
+   "label": "Create Supplyine"
+  },
+  {
+   "fieldname": "supplyline_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.supplyline_event_frequency == \"Cron\"",
+   "fieldname": "supplyline_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "supplyline_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "order_fullfillment_tab",
+   "fieldtype": "Tab Break",
+   "label": "Order Fullfillment"
+  },
+  {
+   "fieldname": "order_fullfilment",
+   "fieldtype": "Button",
+   "label": "Order Fullfilment"
+  },
+  {
+   "fieldname": "of_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.of_event_frequency == \"Cron\"",
+   "fieldname": "of_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "of_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "floriday_items_tab",
+   "fieldtype": "Tab Break",
+   "label": "Trade Items"
+  },
+  {
+   "fieldname": "fi_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.fi_event_frequency == \"Cron\"",
+   "fieldname": "fi_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "fi_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "floriday_setting_tab",
+   "fieldtype": "Tab Break",
+   "label": "Floriday Setting"
+  },
+  {
+   "fieldname": "section_break_tupy",
+   "fieldtype": "Section Break"
+  },
   {
    "fieldname": "client_id",
    "fieldtype": "Data",
@@ -50,8 +259,10 @@
    "label": "Base URL"
   },
   {
-   "fieldname": "column_break_jwdk",
-   "fieldtype": "Column Break"
+   "fieldname": "warehouse",
+   "fieldtype": "Link",
+   "label": "Warehouse",
+   "options": "Warehouse"
   },
   {
    "fieldname": "client_secret",
@@ -59,30 +270,227 @@
    "label": "Client Secret"
   },
   {
+   "fieldname": "column_break_woir",
+   "fieldtype": "Column Break"
+  },
+  {
    "fieldname": "scope",
    "fieldtype": "Small Text",
    "label": "Scope"
   },
   {
-   "fieldname": "warehouse",
-   "fieldtype": "Link",
-   "label": "Warehouse",
-   "options": "Warehouse"
-  },
-  {
-   "fieldname": "section_break_qzct",
-   "fieldtype": "Section Break"
-  },
-  {
    "fieldname": "access_token",
    "fieldtype": "Long Text",
    "label": "Access Token"
+  },
+  {
+   "fieldname": "settings_tab",
+   "fieldtype": "Tab Break",
+   "label": "Settings"
+  },
+  {
+   "fieldname": "token_url",
+   "fieldtype": "Data",
+   "label": "Token URL"
+  },
+  {
+   "fieldname": "update_access_token",
+   "fieldtype": "Button",
+   "label": "Update Access Token"
+  },
+  {
+   "fieldname": "at_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.at_event_frequency == \"Cron\"",
+   "fieldname": "at_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "default": "0",
+   "fieldname": "at_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_mevq",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_wtpy",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_iqki",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_hdny",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_dluu",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_rebh",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "add_items",
+   "fieldtype": "Button",
+   "label": "Add Items"
+  },
+  {
+   "fieldname": "sync_item_id",
+   "fieldtype": "Button",
+   "label": "Sync Items ID"
+  },
+  {
+   "fieldname": "column_break_jwll",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fi_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "fi_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "fi_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "fi_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "batch_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "batch_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "batch_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplyline_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "supplyline_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "supplyline_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "supplyline_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "so_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "so_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "so_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "so_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "of_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "of_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "of_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "of_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "at_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "at_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "at_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "at_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_fvbp",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
+ "issingle": 1,
  "links": [],
- "modified": "2026-02-02 00:43:03.126722",
+ "modified": "2026-05-03 02:13:22.224427",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Floriday Settings",
@@ -92,10 +500,8 @@
    "create": 1,
    "delete": 1,
    "email": 1,
-   "export": 1,
    "print": 1,
    "read": 1,
-   "report": 1,
    "role": "System Manager",
    "share": 1,
    "write": 1

@@ -1,0 +1,83 @@
+{
+ "actions": [],
+ "allow_rename": 0,
+ "autoname": "format:{variety}-{box_group}-{length_cm}",
+ "creation": "2026-04-28 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "variety",
+  "box_group",
+  "length_cm",
+  "stems_per_box"
+ ],
+ "fields": [
+  {
+   "fieldname": "variety",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Variety",
+   "reqd": 1,
+   "description": "Flower variety name (e.g. Ever Red). Matched against item name, case-insensitive."
+  },
+  {
+   "fieldname": "box_group",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Box Group",
+   "options": "Standard\nZim",
+   "reqd": 1,
+   "description": "Standard = STANDARD BOXES 100x33x20. Zim = ZIM, WAFEX, TFH HUB, FDT, JUMBO."
+  },
+  {
+   "fieldname": "length_cm",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Length (cm)",
+   "reqd": 1
+  },
+  {
+   "fieldname": "stems_per_box",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Stems per Box",
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-04-28 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Upande Webshop",
+ "name": "Pack Rate",
+ "naming_rule": "Expression",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Item Manager"
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "variety",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 1
+}

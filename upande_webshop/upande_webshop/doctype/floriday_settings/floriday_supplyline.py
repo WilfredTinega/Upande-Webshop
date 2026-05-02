@@ -4,14 +4,16 @@ import uuid
 import json
 from datetime import datetime, timezone, timedelta
 
-# Currency configuration - Set this to either "EUR" or "USD"
-SUPPLY_LINE_CURRENCY = "EUR"  # Change to "USD" if you want to use US Dollars
+SUPPLY_LINE_CURRENCY = "EUR" 
 
-# East Africa Time (EAT) is UTC+3
 EAT_OFFSET = timedelta(hours=3)
 
 # Maximum log message length to prevent truncation errors
 MAX_LOG_LENGTH = 100
+
+# Process only the latest N batches (sorted by batchDate desc) — older batches are typically depleted.
+# Set generous enough to cover today + a few days of future-dated stock.
+LATEST_BATCH_LIMIT = 1000
 
 def safe_log(message, title="Floriday Log"):
     """
@@ -37,23 +39,17 @@ def safe_log(message, title="Floriday Log"):
 
 def get_item_mapping():
     """
-    Fetch item mappings from Floriday Item Mapping doctype
+    Fetch item mappings from Floriday Items / Stem Length Price.
+    Returns {item_code: trade_item_id} (first non-empty trade_item_id per item).
     """
     try:
-        mappings = frappe.get_all(
-            "Floriday Item Mapping",
-            fields=["item_code", "trade_item_id"]
+        from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+            get_item_mapping as _get_item_mapping,
         )
-        
-        # Create mapping dictionary from doctype records
-        ITEM_MAPPING = {}
-        for mapping in mappings:
-            ITEM_MAPPING[mapping.item_code] = mapping.trade_item_id
-        
-        safe_log(f"Loaded {len(ITEM_MAPPING)} item mappings", "Floriday Item Mapping")
-        return ITEM_MAPPING
-        
-    except Exception as e:
+        mapping = _get_item_mapping()
+        safe_log(f"Loaded {len(mapping)} item mappings", "Floriday Item Mapping")
+        return mapping
+    except Exception:
         safe_log("Error fetching item mappings", "Floriday Item Mapping Error")
         return {}
 
@@ -105,44 +101,48 @@ def create_supply_lines_only_from_batches():
         # Get current date for filtering (in EAT timezone)
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
         safe_log(f"Filtering for EAT date: {current_date}", "Floriday Date")
-        
-        # Get ALL batches first
-        all_batches = get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID)
-        
+
+        # Fetch all batches. Floriday paginates oldest-first by sequenceNumber, but for
+        # today's stock we filter by EAT date below — order of arrival doesn't matter.
+        all_batches, fetch_error = get_your_floriday_batches(
+            BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID, return_error=True
+        )
+
         if not all_batches:
-            error_msg = "No batches found for your organization"
+            error_msg = fetch_error or "No batches found for your organization"
             safe_log(error_msg, "Floriday Batches")
-            return {"status": "failed", "message": error_msg}
+            return {
+                "status": "failed",
+                "message": error_msg,
+                "date_applied": current_date,
+            }
 
         safe_log(f"Retrieved {len(all_batches)} total batches", "Floriday Batches")
 
-        # Filter batches for current date - USING EAT TIMEZONE VERSION
-        your_batches = filter_batches_by_date_eat(all_batches, current_date)
-        safe_log(f"Found {len(your_batches)} batches for EAT today", "Floriday Today's Batches")
+        # Drop soft-deleted batches
+        active_batches = [b for b in all_batches if not b.get("isDeleted")]
+        safe_log(f"{len(active_batches)} active (non-deleted) of {len(all_batches)}", "Floriday Batches")
 
-        if not your_batches:
-            result_msg = {
-                "status": "failed",
-                "message": f"No batches found for EAT today ({current_date})", 
-                "total_batches": len(all_batches),
-                "todays_batches": 0,
-                "date_applied": current_date
-            }
-            return result_msg
+        # Filter to today's EAT batches first (mirror UI's get_available_batches logic)
+        todays_batches = filter_batches_by_date_eat(active_batches, current_date)
+        safe_log(f"{len(todays_batches)} batches dated EAT today", "Floriday Batches")
 
-        safe_log("Filtering batches with available pieces", "Floriday Availability")
-        available_batches = filter_available_batches_fixed(your_batches)
-        
+        # Sort newest-first within today's set
+        todays_batches = sort_batches_newest_first(todays_batches)
+
+        # Keep batches with available stock
+        available_batches = filter_available_batches_fixed(todays_batches)
         safe_log(f"Found {len(available_batches)} batches with available pieces", "Floriday Available")
 
         if not available_batches:
             result_msg = {
                 "status": "failed",
-                "message": f"No batches with available pieces found for EAT today ({current_date})", 
+                "message": f"No batches with available pieces dated {current_date} (EAT)",
                 "total_batches": len(all_batches),
-                "todays_batches": len(your_batches),
+                "active_batches": len(active_batches),
+                "todays_batches": len(todays_batches),
                 "available_batches": 0,
-                "date_applied": current_date
+                "date_applied": current_date,
             }
             return result_msg
 
@@ -166,15 +166,15 @@ def create_supply_lines_only_from_batches():
 
         success_result = {
             "status": "success",
-            "message": f"Created {len(successful_supply_lines)} supply lines from {len(available_batches)} available batches for EAT {current_date}",
-            "supply_lines_created": successful_supply_lines,
+            "message": f"Created {len(successful_supply_lines)} supply lines from {len(available_batches)} available batches",
             "failed_supply_lines": failed_supply_lines,
             "total_processed": len(results),
             "total_batches": len(all_batches),
-            "todays_batches": len(your_batches),
+            "active_batches": len(active_batches),
+            "todays_batches": len(todays_batches),
+            "available_batches": len(available_batches),
             "date_applied": current_date,
             "currency_used": SUPPLY_LINE_CURRENCY,
-            "note": "SUPPLY LINES ONLY - No customer offers created - EAT CURRENT DATE BATCHES ONLY"
         }
         
         return success_result
@@ -270,26 +270,50 @@ def filter_batches_by_date_utc(batches, target_date):
 
 def filter_available_batches_fixed(batches):
     """
-    FIXED: Filter batches that have available pieces
-    Uses numberOfPieces field from your batch structure
+    Keep only batches with live stock to offer.
+
+    `numberOfPieces` is the current remaining stock (decremented as orders fill).
+    Batches with 0 remaining are skipped — we don't fall back to
+    `initialNumberOfPieces` because that's the original batch size, not what's
+    actually in the warehouse.
     """
     try:
         available_batches = []
-        
         for batch in batches:
-            batch_id = batch.get("batchId", "unknown")
-            
-            # Use numberOfPieces field from your batch structure
-            available_pieces = batch.get("numberOfPieces", 0)
-            
-            if available_pieces > 0:
-                batch['available_pieces'] = available_pieces
+            pieces = batch.get("numberOfPieces") or 0
+            if pieces > 0:
+                batch["available_pieces"] = pieces
                 available_batches.append(batch)
-        
         return available_batches
-        
-    except Exception as e:
+    except Exception:
         return []
+
+def sort_batches_newest_first(batches):
+    """
+    Sort batches by batchDate descending (newest first), falling back to
+    sequenceNumber when batchDate is missing or unparseable.
+    """
+    def sort_key(batch):
+        batch_date_str = batch.get("batchDate")
+        parsed = None
+        if batch_date_str:
+            try:
+                if batch_date_str.endswith("Z"):
+                    parsed = datetime.fromisoformat(batch_date_str.replace("Z", "+00:00"))
+                else:
+                    parsed = datetime.fromisoformat(batch_date_str)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+            except Exception:
+                parsed = None
+        primary = parsed.timestamp() if parsed else float("-inf")
+        secondary = batch.get("sequenceNumber") or 0
+        return (primary, secondary)
+
+    try:
+        return sorted(batches, key=sort_key, reverse=True)
+    except Exception:
+        return batches
 
 # Replace the old functions with the fixed versions
 def filter_batches_by_date(batches, target_date):
@@ -341,10 +365,14 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
         if not warehouse_id:
             return {"status": "failed", "message": "No warehouse", "batch_id": batch_id}
 
-        # Get price from ERPNext Item based on trade_item_id
+        # Per-stem rate from Floriday Items > Stem Length Price (by trade_item_id)
         offer_price = get_item_price_from_erpnext(trade_item_id)
         if not offer_price:
-            offer_price = 0.40  # Default price
+            return {
+                "status": "skipped",
+                "message": f"No Stem Length Price for trade_item_id {trade_item_id}",
+                "batch_id": batch_id,
+            }
             
         now = datetime.now(timezone.utc)
         order_end = now + timedelta(days=7)
@@ -421,153 +449,118 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
 
 def get_item_price_from_erpnext(trade_item_id):
     """
-    Get item price from ERPNext based on trade_item_id using the ITEM_MAPPING
+    Look up the per-stem rate from Floriday Items > Stem Length Price by trade_item_id.
     """
+    if not trade_item_id:
+        return None
     try:
-        # Get dynamic item mapping
-        ITEM_MAPPING = get_item_mapping()
-        
-        # Reverse lookup: find ERPNext item code from Floriday trade_item_id
-        erpnext_item_code = None
-        for erp_code, floriday_id in ITEM_MAPPING.items():
-            if floriday_id == trade_item_id:
-                erpnext_item_code = erp_code
+        row = frappe.db.sql(
+            """
+            select rate
+            from `tabStem Length Price`
+            where trade_item_id = %s and ifnull(rate, 0) > 0
+            limit 1
+            """,
+            (trade_item_id,),
+            as_dict=True,
+        )
+        if row and row[0].rate:
+            return float(row[0].rate)
+        return None
+    except Exception:
+        return None
+
+def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID, tail_only=False, tail_size=1500, return_error=False):
+    """
+    Get batches via Floriday's documented sync endpoint:
+      GET /batches/sync/{sequenceNumber}?limitResult=1000
+      -> { maximumSequenceNumber, results: [Batch, ...] }
+
+    Walk by passing the highest seen sequenceNumber as the next path segment until
+    we catch up to maximumSequenceNumber. Org is inferred from the JWT/X-Api-Key —
+    do NOT add ?supplierOrganizationId= (it's silently ignored on /batches and
+    not a parameter on /batches/sync/).
+
+    tail_only=True: skip ahead by first reading /batches/current-max-sequence and
+    jumping to (max - tail_size) so we only fetch recent batches, not 30k stale ones.
+    """
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "X-Api-Key": API_KEY,
+        "Accept": "application/json",
+    }
+    base_url_clean = BASE_URL.rstrip("/")
+    page_limit = 1000  # max documented
+    max_pages = 1000   # safety cap (≤ 1M batches)
+    last_error = {"msg": None}
+
+    def _result(batches, error=None):
+        if return_error:
+            return batches, error
+        return batches
+
+    def fetch_sync_page(seq_from):
+        url = f"{base_url_clean}/batches/sync/{seq_from}?limitResult={page_limit}"
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code != 200:
+            err = f"HTTP {response.status_code}: {response.text[:200]}"
+            last_error["msg"] = err
+            safe_log(f"Batches sync {err[:80]}", "Floriday Batches Error")
+            return None
+        body = response.json() if response.content else {}
+        if not isinstance(body, dict):
+            return None
+        return body  # { maximumSequenceNumber, results: [...] }
+
+    def fetch_current_max():
+        url = f"{base_url_clean}/batches/current-max-sequence"
+        response = requests.get(url, headers=headers, timeout=30)
+        if response.status_code != 200:
+            err = f"HTTP {response.status_code}: {response.text[:200]}"
+            last_error["msg"] = err
+            return None
+        try:
+            return int(response.text.strip())
+        except Exception:
+            return None
+
+    try:
+        # Decide starting sequence number
+        sequence_from = 0
+        if tail_only:
+            current_max = fetch_current_max()
+            if current_max is None:
+                return _result([], last_error["msg"] or "Could not read current-max-sequence")
+            sequence_from = max(0, current_max - tail_size)
+            safe_log(
+                f"Tail mode: starting at seq {sequence_from} (max={current_max}, size={tail_size})",
+                "Floriday Batches Tail",
+            )
+
+        all_batches = []
+        for _ in range(max_pages):
+            body = fetch_sync_page(sequence_from)
+            if body is None:
                 break
-        
-        if not erpnext_item_code:
-            return get_fallback_price(trade_item_id)
-        
-        # 1. Try to get price from Item Price list first
-        price_list_price = get_price_from_price_list(erpnext_item_code)
-        if price_list_price:
-            return price_list_price
-        
-        # 2. Try to get price from Item master
-        item_details = frappe.get_all("Item",
-            filters={"name": erpnext_item_code},
-            fields=["selling_rate", "valuation_rate"],
-            limit=1
-        )
-        
-        if item_details:
-            # Try selling_rate from Item master
-            if item_details[0].selling_rate:
-                return float(item_details[0].selling_rate)
-            
-            # Try valuation_rate from Item master
-            if item_details[0].valuation_rate:
-                return float(item_details[0].valuation_rate)
-        
-        # 3. Fallback pricing
-        fallback_price = get_fallback_price(trade_item_id)
-        if fallback_price:
-            return fallback_price
-        
-        return None
-        
-    except Exception as e:
-        # Final emergency fallback
-        return 0.40
+            results = body.get("results") or []
+            if not results:
+                break  # no more records ahead
+            all_batches.extend(results)
+            page_max = max(b.get("sequenceNumber") or 0 for b in results)
+            if page_max <= sequence_from:
+                break  # no progress, avoid infinite loop
+            sequence_from = page_max  # advance cursor to highest seen
 
-def get_price_from_price_list(item_code, price_list="Standard Selling"):
-    """
-    Get price from Item Price doctype for the given item code and price list
-    """
-    try:
-        item_prices = frappe.get_all("Item Price",
-            filters={
-                "item_code": item_code,
-                "price_list": price_list,
-                "selling": 1
-            },
-            fields=["price_list_rate"],
-            order_by="valid_from desc, creation desc",
-            limit=1
+        safe_log(
+            f"Sync fetched {len(all_batches)} batches (last seq={sequence_from})",
+            "Floriday Batches Pages",
         )
-        
-        if item_prices and item_prices[0].price_list_rate:
-            return float(item_prices[0].price_list_rate)
-        
-        # Try other price lists if Standard Selling not found
-        other_price_lists = frappe.get_all("Price List", 
-            filters={"selling": 1, "enabled": 1},
-            fields=["name"]
-        )
-        
-        for pl in other_price_lists:
-            if pl.name != price_list:
-                item_prices = frappe.get_all("Item Price",
-                    filters={
-                        "item_code": item_code,
-                        "price_list": pl.name,
-                        "selling": 1
-                    },
-                    fields=["price_list_rate"],
-                    limit=1
-                )
-                if item_prices and item_prices[0].price_list_rate:
-                    return float(item_prices[0].price_list_rate)
-        
-        return None
-        
-    except Exception as e:
-        return None
-
-def get_fallback_price(trade_item_id):
-    """
-    Fallback pricing when no direct price is found
-    """
-    try:
-        # Method 1: Get average price from all Item Price records
-        all_prices = frappe.get_all("Item Price",
-            filters={"selling": 1, "price_list_rate": [">", 0]},
-            fields=["price_list_rate"],
-            limit=50
-        )
-        
-        if all_prices:
-            prices = [float(ip.price_list_rate) for ip in all_prices if ip.price_list_rate]
-            if prices:
-                avg_price = sum(prices) / len(prices)
-                return round(avg_price, 2)
-        
-        # Method 2: Use hash-based consistent pricing
-        import hashlib
-        hash_val = int(hashlib.md5(trade_item_id.encode()).hexdigest()[:8], 16)
-        base_price = 0.40 + (hash_val % 1000) / 1000 * 1.60  # Range: 0.40 to 2.00
-        price = round(base_price, 2)
-        return price
-        
-    except Exception as e:
-        return 0.40  # Absolute fallback
-
-def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID):
-    """
-    Get ALL batches from Floriday (no date filtering in API call)
-    """
-    try:
-        headers = {
-            "Authorization": f"Bearer {ACCESS_TOKEN}",
-            "X-Api-Key": API_KEY,
-            "Accept": "application/json"
-        }
-        
-        base_url_clean = BASE_URL.rstrip('/')
-        endpoint = f"{base_url_clean}/batches?supplierOrganizationId={SUPPLIER_ORG_ID}"
-        
-        response = requests.get(endpoint, headers=headers, timeout=30)
-        
-        if response.status_code == 200:
-            batches = response.json()
-            if isinstance(batches, list):
-                return batches
-            else:
-                return []
-        else:
-            return []
+        return _result(all_batches, last_error["msg"] if not all_batches else None)
 
     except Exception as e:
-        return []
+        err = f"{type(e).__name__}: {str(e)[:200]}"
+        safe_log(f"Batches sync error: {err[:80]}", "Floriday Batches Error")
+        return _result([], err)
 
 def get_default_packing_config():
     return {
@@ -624,7 +617,8 @@ def get_available_batches():
                 "message": f"No batches found for EAT today ({current_date})"
             } 
         
-        # Filter available batches - USING FIXED VERSION
+        # Sort newest-first then filter for available pieces
+        todays_batches = sort_batches_newest_first(todays_batches)
         available_batches = filter_available_batches_fixed(todays_batches)
         
         batch_options = []
@@ -652,3 +646,127 @@ def get_available_batches():
 
     except Exception as e:
         return {"status": "error", "message": "Error fetching batches"}
+
+
+@frappe.whitelist()
+def diagnose_floriday_batches():
+    """
+    Diagnostic: dump raw shape of /batches responses + sample of newest batches
+    so we can see why live stock isn't showing up.
+    """
+    try:
+        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
+        if not settings_list:
+            return {"status": "error", "message": "Floriday Settings not configured"}
+
+        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        API_KEY = settings.api_key
+        BASE_URL = settings.base_url
+        ACCESS_TOKEN = settings.access_token
+        SUPPLIER_ORG_ID = settings.organization_supplier_id
+
+        headers = {
+            "Authorization": f"Bearer {ACCESS_TOKEN}",
+            "X-Api-Key": API_KEY,
+            "Accept": "application/json",
+        }
+        base_url_clean = BASE_URL.rstrip("/")
+
+        # Walk via the documented sync endpoint: /batches/sync/{seq}?limitResult=1000
+        all_batches = []
+        page_meta = []
+        sequence_from = 0
+        for page_num in range(1, 2001):
+            endpoint = f"{base_url_clean}/batches/sync/{sequence_from}?limitResult=1000"
+            response = requests.get(endpoint, headers=headers, timeout=30)
+            page_info = {
+                "page": page_num,
+                "sequence_from": sequence_from,
+                "http_status": response.status_code,
+                "items_in_page": 0,
+                "max_seq": None,
+                "min_seq": None,
+                "server_max_seq": None,
+            }
+            if response.status_code != 200:
+                page_info["body_preview"] = response.text[:300]
+                page_meta.append(page_info)
+                break
+
+            body = response.json() if response.content else {}
+            items = body.get("results") or [] if isinstance(body, dict) else []
+            server_max = body.get("maximumSequenceNumber") if isinstance(body, dict) else None
+            page_info["server_max_seq"] = server_max
+            page_info["items_in_page"] = len(items)
+            if items:
+                seqs = [b.get("sequenceNumber") or 0 for b in items]
+                page_info["max_seq"] = max(seqs)
+                page_info["min_seq"] = min(seqs)
+                all_batches.extend(items)
+
+            page_meta.append(page_info)
+
+            if not items:
+                break
+            new_max = max(b.get("sequenceNumber") or 0 for b in items)
+            if new_max <= sequence_from:
+                break  # no progress
+            sequence_from = new_max
+
+        # Pick the newest batches by batchDate to inspect their shape
+        newest = sort_batches_newest_first(all_batches)[:5]
+        sample = []
+        for b in newest:
+            sample.append({
+                "all_keys": sorted(b.keys()),
+                "batchId": b.get("batchId"),
+                "batchDate": b.get("batchDate"),
+                "harvestDate": b.get("harvestDate"),
+                "deliveryDate": b.get("deliveryDate"),
+                "availableFromDate": b.get("availableFromDate"),
+                "expectedAvailableDate": b.get("expectedAvailableDate"),
+                "sequenceNumber": b.get("sequenceNumber"),
+                "isDeleted": b.get("isDeleted"),
+                "tradeItemId": b.get("tradeItemId"),
+                "tradeItemName": b.get("tradeItemName"),
+                "numberOfPieces": b.get("numberOfPieces"),
+                "initialNumberOfPieces": b.get("initialNumberOfPieces"),
+                "availableNumberOfPieces": b.get("availableNumberOfPieces"),
+                "numberOfPiecesAvailable": b.get("numberOfPiecesAvailable"),
+            })
+
+        # Field-presence histogram across ALL fetched batches (not just newest 200)
+        field_counts = {}
+        for b in all_batches:
+            for k in b.keys():
+                field_counts[k] = field_counts.get(k, 0) + 1
+
+        # Distinct batchDate values across ALL fetched (top 20 most recent strings)
+        date_strings = sorted(
+            {b.get("batchDate") for b in all_batches if b.get("batchDate")},
+            reverse=True,
+        )[:20]
+
+        # Today (EAT) — and how many batches match it under various date fields
+        current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
+        date_field_match_today = {}
+        for field in ("batchDate", "harvestDate", "deliveryDate", "availableFromDate", "expectedAvailableDate"):
+            count = sum(
+                1 for b in all_batches
+                if b.get(field) and current_date in str(b.get(field))
+            )
+            date_field_match_today[field] = count
+
+        return {
+            "status": "ok",
+            "total_fetched": len(all_batches),
+            "pages": page_meta,
+            "current_eat_date": current_date,
+            "newest_5_sample": sample,
+            "field_presence_in_all_batches": field_counts,
+            "top_20_distinct_batchDates": date_strings,
+            "today_match_count_by_field": date_field_match_today,
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"{type(e).__name__}: {str(e)[:300]}"}

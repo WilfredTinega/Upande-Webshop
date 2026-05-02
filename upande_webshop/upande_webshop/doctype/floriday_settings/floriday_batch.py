@@ -31,19 +31,11 @@ def create_batches_on_floriday():
     if not SOURCE_WAREHOUSE:
         frappe.throw("Warehouse not configured in Floriday Settings")
 
-    # Fetch item mappings from Floriday Item Mapping doctype
-    mappings = frappe.get_all(
-        "Floriday Item Mapping",
-        fields=["item_code", "trade_item_id"]
-    )
-    
-    # Create mapping dictionary from doctype records
-    ITEM_MAPPING = {}
-    for mapping in mappings:
-        ITEM_MAPPING[mapping.item_code] = mapping.trade_item_id
+    from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import get_item_mapping
+    ITEM_MAPPING = get_item_mapping()
 
     if not ITEM_MAPPING:
-        frappe.throw("No item mappings found in Floriday Item Mapping doctype")
+        frappe.throw("No trade item IDs found in Floriday Items. Run the Floriday Items sync first.")
 
     bins = frappe.get_all(
         "Bin",
