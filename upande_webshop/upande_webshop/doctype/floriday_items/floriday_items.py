@@ -8,7 +8,6 @@ import requests
 from frappe.model.document import Document
 
 ROSE_ITEM_GROUPS = ("Spray Roses", "Standard Roses")
-ALLOWED_SITE = "kaitet.local"
 
 
 _NAME_PREFIXES = (
@@ -254,9 +253,6 @@ def get_item_code_from_trade_item_id(trade_item_id):
 
 @frappe.whitelist()
 def sync_system_items(force=False):
-	if frappe.local.site != ALLOWED_SITE:
-		return {"skipped": True, "reason": f"sync_system_items only runs on {ALLOWED_SITE}"}
-
 	if not force and not frappe.db.get_single_value("Floriday Settings", "fi_enabled"):
 		return {"skipped": True, "reason": "Floriday Items sync is disabled (fi_enabled = 0)"}
 
@@ -293,9 +289,6 @@ def sync_system_items(force=False):
 
 @frappe.whitelist()
 def update_trade_item_ids(force=False):
-	if frappe.local.site != ALLOWED_SITE:
-		return {"skipped": True, "reason": f"update_trade_item_ids only runs on {ALLOWED_SITE}"}
-
 	if not force and not frappe.db.get_single_value("Floriday Settings", "fi_enabled"):
 		return {"skipped": True, "reason": "Floriday Items sync is disabled (fi_enabled = 0)"}
 

@@ -5,10 +5,6 @@ import frappe
 from frappe.integrations.utils import make_post_request
 from frappe.model.document import Document
 
-
-# Scheduler tasks driven by Floriday Settings fields.
-# Each entry: (field_prefix, dotted method path, human label).
-# Scheduled Job Type rows are upserted on save, keyed by method.
 SCHEDULER_TASKS = [
 	("at",         "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.refresh_access_token",    "Floriday: Refresh Access Token"),
 	("fi",         "upande_webshop.upande_webshop.doctype.floriday_items.floriday_items.sync_floriday_items",            "Floriday: Sync Items"),
