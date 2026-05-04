@@ -9,8 +9,13 @@ import json
 @frappe.whitelist()
 def create_batches_on_floriday():
     """
-    Sends all bins from the warehouse with stock to Floriday as batches.
-    Payload aligned to Floriday API expectations.
+    Post one batch per (item, stem_length) row from `get_floriday_stock` against
+    the Floriday warehouse (Online Available for Sale). Each batch carries the
+    stem-length-specific tradeItemId and the SLE-aggregated numberOfPieces.
+
+    Replaces the old Bin-driven flow which collapsed all stem lengths into one
+    qty against a single tradeItemId — that overstated availability and lost
+    the per-grade dimension.
     """
 
     settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
@@ -31,32 +36,49 @@ def create_batches_on_floriday():
     if not SOURCE_WAREHOUSE:
         frappe.throw("Warehouse not configured in Floriday Settings")
 
-    from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import get_item_mapping
-    ITEM_MAPPING = get_item_mapping()
+    from upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings import get_floriday_stock
 
-    if not ITEM_MAPPING:
-        frappe.throw("No trade item IDs found in Floriday Items. Run the Floriday Items sync first.")
-
-    bins = frappe.get_all(
-        "Bin",
-        fields=["item_code", "actual_qty"],
-        filters={"warehouse": SOURCE_WAREHOUSE, "actual_qty": [">", 0]}
-    )
-
-    if not bins:
-        frappe.log_error("No products in the warehouse with stock", "Floriday Batch Creation")
+    stock_rows = get_floriday_stock(SOURCE_WAREHOUSE)
+    if not stock_rows:
+        frappe.log_error(
+            f"No graded stock with Floriday mappings in {SOURCE_WAREHOUSE}",
+            "Floriday Batch Creation",
+        )
         return {"message": "No stock to create batches."}
 
     results = []
 
-    for b in bins:
-        item_code = b.item_code
-        qty = int(b.actual_qty)
-        trade_item_id = ITEM_MAPPING.get(item_code)
+    BATCH_MULTIPLE = 200
+
+    for row in stock_rows:
+        item_code = row.get("item_code")
+        stem_length = row.get("stem_length") or ""
+        trade_item_id = row.get("trade_item_id")
+        raw_qty = int(row.get("qty") or 0)
 
         if not trade_item_id:
-            frappe.log_error(f"No mapping for ERPNext item {item_code}", "Floriday Batch Creation - No Mapping")
-            results.append({"item_code": item_code, "status": "no_mapping"})
+            frappe.log_error(
+                f"No trade_item_id for {item_code} {stem_length}",
+                "Floriday Batch Creation - No Mapping",
+            )
+            results.append({
+                "item_code": item_code,
+                "stem_length": stem_length,
+                "status": "no_mapping",
+            })
+            continue
+
+        # Floriday batches must be multiples of 200; rows below 200 are skipped.
+        qty = (raw_qty // BATCH_MULTIPLE) * BATCH_MULTIPLE
+        if qty < BATCH_MULTIPLE:
+            results.append({
+                "item_code": item_code,
+                "stem_length": stem_length,
+                "status": "skipped_below_minimum",
+                "available_qty": raw_qty,
+            })
+            continue
+        if qty <= 0:
             continue
 
         batch_id = str(uuid.uuid4())
@@ -138,21 +160,22 @@ def create_batches_on_floriday():
                 timeout=30
             )
 
+            label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
             if response.status_code in (200, 201):
-                # Log successful batch creation with payload
                 success_message = (
-                    f"SUCCESS: Batch created for item {item_code} "
+                    f"SUCCESS: Batch created for {label} "
                     f"(Batch ID: {batch_id}, Quantity: {qty}, Status: {response.status_code})\n"
                     f"Payload: {json.dumps(payload, indent=2)}"
                 )
                 frappe.log_error(success_message, "Floriday Batch Creation - Success")
-                
+
                 results.append({
-                    "item_code": item_code, 
-                    "status": "success", 
+                    "item_code": item_code,
+                    "stem_length": stem_length,
+                    "status": "success",
                     "batch_id": batch_id,
                     "quantity": qty,
-                    "status_code": response.status_code
+                    "status_code": response.status_code,
                 })
             else:
                 resp_text = response.text
@@ -162,9 +185,8 @@ def create_batches_on_floriday():
                 except Exception:
                     resp_json = None
 
-                # Log failed batch creation with payload and error details
                 error_message = (
-                    f"FAILED: Batch creation for item {item_code} "
+                    f"FAILED: Batch creation for {label} "
                     f"(Status: {response.status_code}, Error: {str(resp_json or resp_text)[:500]})\n"
                     f"Payload: {json.dumps(payload, indent=2)}"
                 )
@@ -172,25 +194,27 @@ def create_batches_on_floriday():
 
                 results.append({
                     "item_code": item_code,
+                    "stem_length": stem_length,
                     "status": "failed",
                     "status_code": response.status_code,
                     "response": resp_json or resp_text,
-                    "batch_id": batch_id
+                    "batch_id": batch_id,
                 })
 
         except Exception as e:
-            # Log exception with payload
+            label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
             exception_message = (
-                f"ERROR: Exception occurred for item {item_code}: {str(e)}\n"
+                f"ERROR: Exception occurred for {label}: {str(e)}\n"
                 f"Payload: {json.dumps(payload, indent=2)}"
             )
             frappe.log_error(exception_message, "Floriday Batch Creation - Exception")
-            
+
             results.append({
-                "item_code": item_code, 
-                "status": "error", 
+                "item_code": item_code,
+                "stem_length": stem_length,
+                "status": "error",
                 "error": str(e),
-                "batch_id": batch_id
+                "batch_id": batch_id,
             })
 
     # Log summary of batch creation results

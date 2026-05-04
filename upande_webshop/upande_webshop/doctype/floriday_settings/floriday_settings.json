@@ -16,6 +16,27 @@
   "fi_last_run",
   "fi_column_break_runtime",
   "fi_next_run",
+  "stock_tab",
+  "stock_event_frequency",
+  "stock_cron_format",
+  "column_break_stck",
+  "stock_enabled",
+  "stock_warehouse_section",
+  "stock_warehouse",
+  "column_break_bvuf",
+  "refresh_stock",
+  "column_break_bdrj",
+  "add_stock",
+  "column_break_fwyp",
+  "move_stock",
+  "stock_items_section",
+  "stock_items",
+  "section_break_nvgy",
+  "table_wtkz",
+  "stock_scheduler_section",
+  "stock_last_run",
+  "stock_column_break_runtime",
+  "stock_next_run",
   "batch_tab",
   "batch_event_frequency",
   "batch_cron_format",
@@ -484,13 +505,125 @@
    "collapsible": 1,
    "fieldname": "section_break_fvbp",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "stock_tab",
+   "fieldtype": "Tab Break",
+   "label": "Stock"
+  },
+  {
+   "fieldname": "stock_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.stock_event_frequency == \"Cron\"",
+   "fieldname": "stock_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "fieldname": "column_break_stck",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "stock_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "refresh_stock",
+   "fieldtype": "Button",
+   "label": "Refresh Stock"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "stock_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "stock_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stock_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stock_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "stock_warehouse_section",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fetch_from": "warehouse.warehouse_name",
+   "fetch_if_empty": 1,
+   "fieldname": "stock_warehouse",
+   "fieldtype": "Data",
+   "label": "Stock Warehouse",
+   "read_only": 1
+  },
+  {
+   "fieldname": "add_stock",
+   "fieldtype": "Button",
+   "label": "Add Stock"
+  },
+  {
+   "fieldname": "move_stock",
+   "fieldtype": "Button",
+   "label": "Move Stock"
+  },
+  {
+   "fieldname": "stock_items_section",
+   "fieldtype": "Section Break",
+   "label": "Stock In Online Available for Sale"
+  },
+  {
+   "fieldname": "stock_items",
+   "fieldtype": "Table",
+   "label": "Stock Items",
+   "options": "Floriday Stock View",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_bvuf",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_bdrj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_nvgy",
+   "fieldtype": "Section Break",
+   "label": "System Available for Sale"
+  },
+  {
+   "fieldname": "table_wtkz",
+   "fieldtype": "Table",
+   "label": "System Stock Items",
+   "options": "Floriday Stock View",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_fwyp",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-03 02:13:22.224427",
+ "modified": "2026-05-04 17:46:26.656403",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Floriday Settings",

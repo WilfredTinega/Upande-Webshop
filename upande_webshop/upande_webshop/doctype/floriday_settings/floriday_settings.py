@@ -12,6 +12,7 @@ SCHEDULER_TASKS = [
 	("supplyline", "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.run_supplyline",           "Floriday: Create Supply Lines"),
 	("so",         "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.run_sales_order",          "Floriday: Sync Sales Orders"),
 	("of",         "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.run_order_fullfilment",    "Floriday: Order Fulfillment"),
+	("stock",      "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.run_refresh_stock",        "Floriday: Refresh Stock"),
 ]
 
 
@@ -66,6 +67,14 @@ class FloridaySettings(Document):
 		from upande_webshop.upande_webshop.doctype.floriday_settings.floriday_order_fullfillment import order_fullment
 		return order_fullment()
 
+	@frappe.whitelist()
+	def load_stock_items(self):
+		rows = get_floriday_stock(self.warehouse)
+		self.set("stock_items", [])
+		for r in rows:
+			self.append("stock_items", r)
+		return {"count": len(rows)}
+
 	def on_update(self):
 		self._sync_scheduled_jobs()
 
@@ -103,6 +112,12 @@ class FloridaySettings(Document):
 		if frequency == "Cron" and not cron_format:
 			stopped = 1
 
+		# Frappe's `next_execution` getter parses cron_format unconditionally, even
+		# for stopped rows. A Cron-frequency row with empty cron_format makes that
+		# getter crash (NoneType.lower in croniter), which then breaks sync_jobs.
+		# Downgrade to Daily placeholder when there's no usable cron string.
+		effective_frequency = "Daily" if (frequency == "Cron" and not cron_format) else frequency
+
 		job_name = frappe.db.get_value("Scheduled Job Type", {"method": method})
 
 		if not job_name:
@@ -111,17 +126,17 @@ class FloridaySettings(Document):
 				return
 			job = frappe.new_doc("Scheduled Job Type")
 			job.method = method
-			job.create_log = frequency not in ("All", "Cron")
-			job.frequency = frequency
-			job.cron_format = cron_format if frequency == "Cron" else ""
+			job.create_log = effective_frequency not in ("All", "Cron")
+			job.frequency = effective_frequency
+			job.cron_format = cron_format if effective_frequency == "Cron" else ""
 			job.stopped = 0
 			job.insert(ignore_permissions=True)
 			return
 
 		# Existing row — only write fields that actually differ. Avoids touching
 		# last_execution / modified when the schedule didn't really change.
-		new_frequency = frequency or "Daily"  # placeholder for stopped jobs (required field)
-		new_cron = cron_format if frequency == "Cron" else ""
+		new_frequency = effective_frequency or "Daily"  # placeholder for stopped jobs (required field)
+		new_cron = cron_format if effective_frequency == "Cron" else ""
 
 		current = frappe.db.get_value(
 			"Scheduled Job Type",
@@ -220,6 +235,17 @@ def run_order_fullfilment():
 
 
 @frappe.whitelist()
+def run_refresh_stock():
+	if not frappe.db.get_single_value("Floriday Settings", "stock_enabled"):
+		return {"skipped": True, "reason": "Refresh Stock is disabled (stock_enabled = 0)"}
+	# Stock View is recomputed from SLE on every form open; the cron just
+	# returns the count for monitoring. Don't persist back to the doc — that
+	# creates stale rows users see until they next Refresh.
+	rows = get_floriday_stock()
+	return {"status": "success", "count": len(rows)}
+
+
+@frappe.whitelist()
 def resync_scheduled_jobs():
 	"""Re-upsert ALL Floriday-driven scheduled jobs from current settings.
 
@@ -237,6 +263,634 @@ def resync_scheduled_jobs():
 			order_by="method",
 		)
 	}
+
+
+def _get_floriday_item_index():
+	"""Build a lookup of (item_code, stem_length) -> trade_item_id from Floriday Items.
+
+	Only rows with a trade_item_id set are included — those are the ones actually
+	offered to Floriday and the ones the Stock tab cares about.
+	"""
+	rows = frappe.db.sql(
+		"""
+		SELECT fi.item_code, fi.item_name, slp.stem_length, slp.trade_item_id
+		FROM `tabFloriday Items` fi
+		INNER JOIN `tabStem Length Price` slp ON slp.parent = fi.name
+		WHERE slp.trade_item_id IS NOT NULL AND slp.trade_item_id != ''
+		""",
+		as_dict=True,
+	)
+	by_code_length = {}
+	by_code = {}
+	for r in rows:
+		key = (r.item_code, (r.stem_length or "").strip())
+		by_code_length[key] = r
+		by_code.setdefault(r.item_code, []).append(r)
+	return by_code_length, by_code
+
+
+# Variant-attribute name varies between sites: kaitet uses "Length", mona uses
+# "Stem Length". We try both and pick whichever a given template uses.
+_STEM_LENGTH_ATTR_CANDIDATES = ("Stem Length", "Length")
+
+
+def _resolve_variant_item(template_code, stem_length):
+	"""Given a template item_code + stem_length, return the variant item_code.
+
+	If the template has no variants, returns template_code itself.
+	If the template has variants under a `Stem Length` (or `Length`) attribute,
+	matches the variant whose attribute_value normalizes to the same stem_length.
+	"""
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import _normalize_stem_length
+
+	target = _normalize_stem_length(stem_length)
+	if not target:
+		return template_code
+
+	variants = frappe.db.sql(
+		"""
+		SELECT i.name AS item_code, iva.attribute, iva.attribute_value
+		FROM `tabItem` i
+		INNER JOIN `tabItem Variant Attribute` iva ON iva.parent = i.name
+		WHERE i.variant_of = %s AND iva.attribute IN %s
+		""",
+		(template_code, _STEM_LENGTH_ATTR_CANDIDATES),
+		as_dict=True,
+	)
+	if not variants:
+		return template_code
+
+	for v in variants:
+		if _normalize_stem_length(v.attribute_value) == target:
+			return v.item_code
+	return template_code
+
+
+def _site_has_sle_stem_length():
+	"""Detect whether `tabStock Ledger Entry` has the `custom_stem_length` column.
+
+	Cached per request. On kaitet this is True (stem length is captured in a
+	custom field on SLE). On mona this is False — stem length is encoded in
+	variant item codes instead.
+	"""
+	if frappe.local.flags.get("_floriday_sle_stem_length_present") is not None:
+		return frappe.local.flags["_floriday_sle_stem_length_present"]
+	cols = frappe.db.sql(
+		"SHOW COLUMNS FROM `tabStock Ledger Entry` LIKE 'custom_stem_length'"
+	)
+	present = bool(cols)
+	frappe.local.flags["_floriday_sle_stem_length_present"] = present
+	return present
+
+
+def _site_has_se_detail_stem_length():
+	"""Detect whether `tabStock Entry Detail` has `custom_stem_length`."""
+	if frappe.local.flags.get("_floriday_sed_stem_length_present") is not None:
+		return frappe.local.flags["_floriday_sed_stem_length_present"]
+	cols = frappe.db.sql(
+		"SHOW COLUMNS FROM `tabStock Entry Detail` LIKE 'custom_stem_length'"
+	)
+	present = bool(cols)
+	frappe.local.flags["_floriday_sed_stem_length_present"] = present
+	return present
+
+
+def _variant_to_template_index():
+	"""Map every variant item_code → (template_code, stem_length_attr_value).
+
+	Used on variant-driven sites (e.g. mona) so we can attribute warehouse stock
+	to a template + stem length. Returns {} on sites that don't use variants.
+	"""
+	rows = frappe.db.sql(
+		"""
+		SELECT i.name AS variant, i.variant_of AS template, iva.attribute_value AS stem_length
+		FROM `tabItem` i
+		INNER JOIN `tabItem Variant Attribute` iva ON iva.parent = i.name
+		WHERE i.variant_of IS NOT NULL AND i.variant_of != ''
+		AND iva.attribute IN %s
+		""",
+		(_STEM_LENGTH_ATTR_CANDIDATES,),
+		as_dict=True,
+	)
+	return {r.variant: (r.template, r.stem_length) for r in rows}
+
+
+def _available_for_sale_warehouses(company=None):
+	"""Return names of all warehouses whose name contains 'Available for Sale',
+	optionally restricted to a company."""
+	filters = {"warehouse_name": ["like", "%Available for Sale%"]}
+	if company:
+		filters["company"] = company
+	rows = frappe.get_all("Warehouse", filters=filters, pluck="name")
+	return rows
+
+
+def _aggregate_floriday_stock(warehouses):
+	"""SLE-aggregated per-(warehouse, item, stem_length) balances joined to
+	Floriday Items. Handles two data models transparently:
+
+	- Custom-field model (kaitet): stem length lives in
+	  `tabStock Ledger Entry.custom_stem_length`; aggregation groups by it.
+	- Variant model (mona): each stem length is its own variant item_code (e.g.
+	  Alicia-50cm). Aggregation groups by item_code only; stem length is read
+	  from the variant attribute and the template's Floriday mapping.
+	"""
+	by_code_length, by_code = _get_floriday_item_index()
+	if not by_code_length or not warehouses:
+		return []
+
+	floriday_templates = list(by_code.keys())
+	if not floriday_templates:
+		return []
+
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import _normalize_stem_length
+
+	use_sle_stem = _site_has_sle_stem_length()
+
+	# Resolve the set of item codes to query SLE for. Custom-field sites query
+	# the template (or whatever item_code is on Floriday Items). Variant sites
+	# also need every variant of those templates.
+	candidate_items = set(floriday_templates)
+	variant_to_template = {}
+	if not use_sle_stem:
+		variant_to_template = _variant_to_template_index()
+		for variant, (template, _sl) in variant_to_template.items():
+			if template in by_code:
+				candidate_items.add(variant)
+
+	if not candidate_items:
+		return []
+
+	if use_sle_stem:
+		sle_rows = frappe.db.sql(
+			"""
+			SELECT sle.warehouse,
+			       sle.item_code,
+			       COALESCE(NULLIF(TRIM(sle.custom_stem_length), ''), '') AS stem_length,
+			       SUM(sle.actual_qty) AS qty,
+			       MAX(sle.stock_uom) AS uom,
+			       MAX(i.item_name) AS item_name
+			FROM `tabStock Ledger Entry` sle
+			INNER JOIN `tabItem` i ON i.name = sle.item_code
+			WHERE sle.warehouse IN %(warehouses)s
+			  AND sle.is_cancelled = 0
+			  AND sle.item_code IN %(codes)s
+			GROUP BY sle.warehouse, sle.item_code, COALESCE(NULLIF(TRIM(sle.custom_stem_length), ''), '')
+			HAVING SUM(sle.actual_qty) > 0
+			""",
+			{"warehouses": tuple(warehouses), "codes": tuple(candidate_items)},
+			as_dict=True,
+		)
+	else:
+		sle_rows = frappe.db.sql(
+			"""
+			SELECT sle.warehouse,
+			       sle.item_code,
+			       '' AS stem_length,
+			       SUM(sle.actual_qty) AS qty,
+			       MAX(sle.stock_uom) AS uom,
+			       MAX(i.item_name) AS item_name
+			FROM `tabStock Ledger Entry` sle
+			INNER JOIN `tabItem` i ON i.name = sle.item_code
+			WHERE sle.warehouse IN %(warehouses)s
+			  AND sle.is_cancelled = 0
+			  AND sle.item_code IN %(codes)s
+			GROUP BY sle.warehouse, sle.item_code
+			HAVING SUM(sle.actual_qty) > 0
+			""",
+			{"warehouses": tuple(warehouses), "codes": tuple(candidate_items)},
+			as_dict=True,
+		)
+
+	results = []
+	for row in sle_rows:
+		# Resolve template + stem_length for this SLE row.
+		if row.item_code in by_code:
+			# SLE keyed on the same code as Floriday Items (custom-field model)
+			template_code = row.item_code
+			row_stem = row.stem_length
+		elif row.item_code in variant_to_template:
+			# Variant model: SLE is the variant; lift to template + variant's stem length
+			template_code, row_stem = variant_to_template[row.item_code]
+		else:
+			continue
+
+		mapping = by_code.get(template_code, [])
+		norm_target = _normalize_stem_length(row_stem)
+
+		match = None
+		if norm_target:
+			for r in mapping:
+				if _normalize_stem_length(r.stem_length) == norm_target:
+					match = r
+					break
+		if not match:
+			continue
+
+		results.append({
+			"warehouse": row.warehouse,
+			"item_code": row.item_code,
+			"item_name": row.item_name,
+			"stem_length": row_stem or match.stem_length,
+			"trade_item_id": match.trade_item_id,
+			"qty": float(row.qty),
+			"uom": row.uom,
+		})
+
+	results.sort(key=lambda x: (x["warehouse"] or "", x["item_name"] or "", x["stem_length"] or ""))
+	return results
+
+
+@frappe.whitelist()
+def get_floriday_stock(warehouse=None):
+	"""Per-(item, stem_length) balances in the configured Floriday warehouse
+	(Online Available for Sale), computed from Stock Ledger Entry and joined to
+	Floriday trade items.
+
+	`warehouse` defaults to Floriday Settings.warehouse. Only rows with positive
+	qty AND a Floriday trade_item_id mapping are returned.
+	"""
+	if not warehouse:
+		warehouse = _get_settings_doc().warehouse
+	if not warehouse:
+		return []
+	return _aggregate_floriday_stock([warehouse])
+
+
+@frappe.whitelist()
+def get_system_floriday_stock():
+	"""Per-(warehouse, item, stem_length) balances across all 'Available for
+	Sale' warehouses EXCEPT the configured Floriday warehouse.
+
+	Filtered to rows with qty > 1000 (small balances aren't worth tracking
+	here) and sorted by qty descending.
+	"""
+	settings = _get_settings_doc()
+	floriday_warehouse = settings.warehouse
+	company = _pick_floriday_company()
+	all_afs = _available_for_sale_warehouses(company=company)
+	system_warehouses = [w for w in all_afs if w != floriday_warehouse]
+	if not system_warehouses:
+		return []
+	rows = _aggregate_floriday_stock(system_warehouses)
+	rows = [r for r in rows if (r.get("qty") or 0) > 1000]
+	rows.sort(key=lambda r: -(r.get("qty") or 0))
+	return rows
+
+
+@frappe.whitelist()
+@frappe.validate_and_sanitize_search_inputs
+def item_query_with_stock(doctype, txt, searchfield, start, page_len, filters):
+	"""Link query: return Items with positive bin balance in `filters.warehouse`.
+
+	Used by the Add/Move dialog so the Item picker only shows items actually
+	present at the selected Source Warehouse — preventing typos from selecting
+	near-duplicate Items (e.g. 'Belalinda' vs 'Bellalinda').
+	"""
+	warehouse = (filters or {}).get("warehouse")
+	if not warehouse:
+		return []
+	txt = f"%{(txt or '').strip()}%"
+	rows = frappe.db.sql(
+		"""
+		SELECT i.name, i.item_name, i.item_group
+		FROM `tabBin` b
+		INNER JOIN `tabItem` i ON i.name = b.item_code
+		WHERE b.warehouse = %(wh)s
+		  AND b.actual_qty > 0
+		  AND (i.name LIKE %(txt)s OR i.item_name LIKE %(txt)s)
+		ORDER BY i.item_name
+		LIMIT %(start)s, %(page_len)s
+		""",
+		{"wh": warehouse, "txt": txt, "start": start or 0, "page_len": page_len or 20},
+	)
+	return rows
+
+
+@frappe.whitelist()
+def get_warehouse_stock_items(warehouse=None):
+	"""Return items with positive bin balance in the given warehouse.
+
+	Used by the Move Stock dialog to filter the Item Link to items actually present
+	in the Floriday warehouse. Defaults to Floriday Settings.warehouse.
+	"""
+	if not warehouse:
+		warehouse = _get_settings_doc().warehouse
+	if not warehouse:
+		return []
+
+	rows = frappe.db.sql(
+		"""
+		SELECT b.item_code, b.actual_qty, b.stock_uom, i.item_name
+		FROM `tabBin` b
+		INNER JOIN `tabItem` i ON i.name = b.item_code
+		WHERE b.warehouse = %s AND b.actual_qty > 0
+		ORDER BY i.item_name
+		""",
+		(warehouse,),
+		as_dict=True,
+	)
+	return rows
+
+
+@frappe.whitelist()
+def get_item_floriday_meta(item_code):
+	"""Given a Stock-level item_code (could be variant or template), return any
+	matching Floriday stem_length + trade_item_id mapping plus stock UOM.
+
+	Returns {item_name, stock_uom, stem_length, trade_item_id} where stem_length /
+	trade_item_id may be empty when the item isn't mapped.
+	"""
+	if not item_code:
+		return {}
+
+	item = frappe.db.get_value(
+		"Item", item_code, ["item_name", "stock_uom", "variant_of"], as_dict=True
+	)
+	if not item:
+		return {}
+
+	out = {
+		"item_name": item.item_name,
+		"stock_uom": item.stock_uom,
+		"stem_length": "",
+		"trade_item_id": "",
+	}
+
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import _normalize_stem_length
+
+	# If item is a variant, its template is the Floriday Items key; resolve length from variant attribute.
+	template = item.variant_of or item_code
+	length_value = ""
+	if item.variant_of:
+		length_attr = frappe.db.get_value(
+			"Item Variant Attribute",
+			{"parent": item_code, "attribute": "Length"},
+			"attribute_value",
+		)
+		length_value = length_attr or ""
+
+	# Pull Floriday Items rows for the template
+	rows = frappe.db.sql(
+		"""
+		SELECT slp.stem_length, slp.trade_item_id
+		FROM `tabFloriday Items` fi
+		INNER JOIN `tabStem Length Price` slp ON slp.parent = fi.name
+		WHERE fi.item_code = %s
+		AND slp.trade_item_id IS NOT NULL AND slp.trade_item_id != ''
+		ORDER BY slp.stem_length
+		""",
+		(template,),
+		as_dict=True,
+	)
+	out["stem_length_options"] = [
+		{"stem_length": r.stem_length, "trade_item_id": r.trade_item_id}
+		for r in rows
+	]
+	if not rows:
+		return out
+
+	if length_value:
+		norm_target = _normalize_stem_length(length_value)
+		for r in rows:
+			if _normalize_stem_length(r.stem_length) == norm_target:
+				out["stem_length"] = r.stem_length
+				out["trade_item_id"] = r.trade_item_id
+				return out
+	# Non-variant or no match yet — if there is exactly one mapping, use it
+	if len(rows) == 1:
+		out["stem_length"] = rows[0].stem_length
+		out["trade_item_id"] = rows[0].trade_item_id
+
+	return out
+
+
+@frappe.whitelist()
+def get_floriday_company():
+	"""Return the company that Floriday stock entries should use."""
+	return _pick_floriday_company()
+
+
+@frappe.whitelist()
+def get_floriday_item_options():
+	"""Return Floriday Items with their stem_length / trade_item_id rows for the Add Stock dialog."""
+	by_code_length, by_code = _get_floriday_item_index()
+	out = []
+	for item_code, rows in by_code.items():
+		out.append({
+			"item_code": item_code,
+			"item_name": rows[0].item_name,
+			"stem_lengths": [
+				{"stem_length": r.stem_length, "trade_item_id": r.trade_item_id}
+				for r in rows
+			],
+		})
+	out.sort(key=lambda x: x["item_name"] or "")
+	return out
+
+
+def _pick_floriday_company():
+	"""Pick the company to use for Floriday Stock Entries.
+
+	Rule (per user): always prefer a company with 'roses' or 'flower' in its name.
+	If exactly one company exists, use it. If multiple, pick the first whose name
+	contains 'roses' or 'flower' (case-insensitive); otherwise fall back to the
+	default company on Global Defaults.
+	"""
+	companies = frappe.get_all("Company", fields=["name"], order_by="name")
+	if not companies:
+		frappe.throw("No Company found")
+	if len(companies) == 1:
+		return companies[0].name
+	for c in companies:
+		nm = (c.name or "").lower()
+		if "rose" in nm or "flower" in nm:
+			return c.name
+	default = frappe.db.get_single_value("Global Defaults", "default_company")
+	if default:
+		return default
+	return companies[0].name
+
+
+def _available_qty_at(warehouse, item_code, stem_length):
+	"""Return SLE-summed actual_qty for (item, warehouse, stem_length).
+
+	On variant sites the variant item_code already carries the stem-length
+	dimension, so we sum SLE for that item without filtering on
+	`custom_stem_length` (which doesn't exist).
+	"""
+	if _site_has_sle_stem_length():
+		row = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(actual_qty), 0) AS qty
+			FROM `tabStock Ledger Entry`
+			WHERE warehouse = %(wh)s
+			  AND item_code = %(ic)s
+			  AND is_cancelled = 0
+			  AND COALESCE(NULLIF(TRIM(custom_stem_length), ''), '') = %(sl)s
+			""",
+			{"wh": warehouse, "ic": item_code, "sl": (stem_length or "").strip()},
+			as_dict=True,
+		)
+	else:
+		row = frappe.db.sql(
+			"""
+			SELECT COALESCE(SUM(actual_qty), 0) AS qty
+			FROM `tabStock Ledger Entry`
+			WHERE warehouse = %(wh)s
+			  AND item_code = %(ic)s
+			  AND is_cancelled = 0
+			""",
+			{"wh": warehouse, "ic": item_code},
+			as_dict=True,
+		)
+	return float(row[0].qty) if row else 0.0
+
+
+def _build_stock_transfer(items, *, direction):
+	"""Create and submit a single Material Transfer Stock Entry.
+
+	`custom_stem_length` is set per child row (Stock Entry Detail), so one
+	entry can hold rows with different stem lengths. Per-row qty is validated
+	against current SLE-aggregated availability at the source warehouse.
+
+	direction="in":  source picked per row, target = Floriday warehouse (default)
+	direction="out": source = Floriday warehouse (default), target picked per row
+	"""
+	import json
+
+	if isinstance(items, str):
+		items = json.loads(items)
+	if not items:
+		frappe.throw("No items provided")
+
+	settings = _get_settings_doc()
+	floriday_warehouse = settings.warehouse
+	if not floriday_warehouse:
+		frappe.throw("Floriday Settings.warehouse is not set")
+
+	company = _pick_floriday_company()
+
+	floriday_wh_company = frappe.db.get_value("Warehouse", floriday_warehouse, "company")
+	if floriday_wh_company and floriday_wh_company != company:
+		frappe.throw(
+			f"Floriday warehouse {floriday_warehouse} belongs to {floriday_wh_company}, "
+			f"but the configured Floriday company is {company}. Re-assign the warehouse to {company}."
+		)
+
+	se = frappe.new_doc("Stock Entry")
+	se.company = company
+	se.stock_entry_type = "Material Transfer"
+	se.purpose = "Material Transfer"
+	# Stem length is per child row (can be mixed: 52cm, 62cm, …) — never set on
+	# parent. Skip on sites where the parent doesn't have the field at all.
+	if frappe.get_meta("Stock Entry").has_field("custom_stem_length"):
+		se.custom_stem_length = None
+
+	for row in items:
+		item_code = (row.get("item_code") or "").strip()
+		stem_length = (row.get("stem_length") or "").strip()
+		qty = float(row.get("qty") or 0)
+
+		if direction == "in":
+			s_wh = (row.get("source_warehouse") or "").strip()
+			t_wh = (row.get("target_warehouse") or "").strip() or floriday_warehouse
+		else:
+			s_wh = (row.get("source_warehouse") or "").strip() or floriday_warehouse
+			t_wh = (row.get("target_warehouse") or "").strip()
+
+		if not (item_code and s_wh and t_wh and qty > 0):
+			frappe.throw(f"Invalid row: {row}")
+		if s_wh == t_wh:
+			frappe.throw(f"Source and target warehouse must differ for {item_code}")
+
+		for wh in (s_wh, t_wh):
+			wh_company = frappe.db.get_value("Warehouse", wh, "company")
+			if wh_company and wh_company != company:
+				frappe.throw(
+					f"Warehouse {wh} belongs to {wh_company}, not {company}. "
+					f"Pick a warehouse owned by {company}."
+				)
+
+		variant_code = _resolve_variant_item(item_code, stem_length) if stem_length else item_code
+
+		# Validate the requested qty against actual SLE-aggregated availability
+		# at the source warehouse for this (item, stem_length).
+		available = _available_qty_at(s_wh, variant_code, stem_length)
+		if available <= 0:
+			label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
+			frappe.throw(
+				f"No {label} stock at {s_wh} (graded SLE balance is 0). "
+				f"Pick a different source warehouse."
+			)
+		if qty > available:
+			label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
+			frappe.throw(
+				f"Can't have qty more than {available:g} for {label} at {s_wh}"
+			)
+
+		row_payload = {
+			"item_code": variant_code,
+			"qty": qty,
+			"s_warehouse": s_wh,
+			"t_warehouse": t_wh,
+		}
+		# On variant sites the stem length is already encoded in variant_code; on
+		# custom-field sites we additionally stamp the SED row.
+		if _site_has_se_detail_stem_length():
+			row_payload["custom_stem_length"] = stem_length or None
+		se.append("items", row_payload)
+
+	se.insert(ignore_permissions=True)
+	se.submit()
+
+	# Propagate `custom_stem_length` from Stock Entry Detail rows onto the SLEs
+	# this Stock Entry just generated. ERPNext's stock posting only auto-copies
+	# custom fields when they're registered as an Inventory Dimension; this
+	# bench has none, so we stamp it manually so the Stock View aggregation
+	# (which groups SLE by custom_stem_length) sees the right value.
+	if _site_has_sle_stem_length() and _site_has_se_detail_stem_length():
+		_propagate_stem_length_to_sle(se)
+
+	frappe.db.commit()
+	return {"name": se.name, "items_count": len(se.items)}
+
+
+def _propagate_stem_length_to_sle(stock_entry):
+	"""Copy each SED row's custom_stem_length onto its matching SLE rows."""
+	for sed in stock_entry.items:
+		stem_length = (sed.get("custom_stem_length") or "").strip()
+		if not stem_length:
+			continue
+		# Match SLEs by voucher + voucher_detail_no (the SED row's name).
+		frappe.db.sql(
+			"""
+			UPDATE `tabStock Ledger Entry`
+			SET custom_stem_length = %(sl)s
+			WHERE voucher_type = 'Stock Entry'
+			  AND voucher_no = %(vn)s
+			  AND voucher_detail_no = %(vdn)s
+			""",
+			{"sl": stem_length, "vn": stock_entry.name, "vdn": sed.name},
+		)
+
+
+@frappe.whitelist()
+def create_stock_transfer(items):
+	"""Material Transfer INTO the Floriday warehouse.
+
+	`items`: JSON list of {item_code, stem_length, source_warehouse, qty}.
+	"""
+	return _build_stock_transfer(items, direction="in")
+
+
+@frappe.whitelist()
+def create_stock_move(items):
+	"""Material Transfer OUT OF the Floriday warehouse.
+
+	`items`: JSON list of {item_code, stem_length, target_warehouse, qty}.
+	"""
+	return _build_stock_transfer(items, direction="out")
 
 
 @frappe.whitelist()
