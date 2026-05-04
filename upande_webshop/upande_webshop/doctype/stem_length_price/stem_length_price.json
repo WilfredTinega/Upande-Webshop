@@ -13,9 +13,8 @@
  "fields": [
   {
    "fieldname": "stem_length",
-   "fieldtype": "Link",
-   "label": "Stem Length",
-   "options": "Stem Length"
+   "fieldtype": "Data",
+   "label": "Stem Length"
   },
   {
    "fieldname": "rate",
