@@ -216,7 +216,10 @@ after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_cus
 # scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
 # any app's scheduler_events — our jobs are user-configured per Floriday Settings,
 # so we re-upsert them here).
-after_migrate = ["upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs"]
+after_migrate = [
+	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs",
+	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.resync_scheduled_jobs",
+]
 
 # Job Events
 # ----------

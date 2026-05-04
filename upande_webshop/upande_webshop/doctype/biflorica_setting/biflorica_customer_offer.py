@@ -11,7 +11,7 @@ def post_all_items_to_biflorica():
     Returns the payload of each offer to be created
     """
     try:
-        # Get Biflorica Setting - using Single DocType approach
+        
         if not frappe.db.exists("Biflorica Setting", "Biflorica Setting"):
             frappe.throw("Biflorica Setting not found. Please create the document first.")
         
