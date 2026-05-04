@@ -842,36 +842,47 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
 
 def get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code):
     """
-    Get farm, business unit, and company from the latest Stock Entry
+    Resolve farm + business_unit + company for a Floriday Sales Order line.
+
+    Rule: walk the most recent submitted Stock Entry for this item where the
+    target warehouse is the configured Floriday warehouse (Online Available
+    for Sale). Take that transfer's source warehouse and read
+    `Warehouse.custom_farm` — that's the farm the stock physically came from.
+    Business Unit is always "Roses".
     """
     try:
-        farm = None
-        business_unit = None
-        company = None
+        floriday_warehouse = frappe.db.get_single_value("Floriday Settings", "warehouse")
+        if not floriday_warehouse:
+            return None, "Roses", None
 
-        stock_entry_details = frappe.get_all(
-            "Stock Entry Detail",
-            fields=["parent"],
-            filters={
-                "item_code": item_code,
-                "docstatus": 1
-            },
-            order_by="creation DESC",
-            limit_page_length=1
+        rows = frappe.db.sql(
+            """
+            SELECT sed.s_warehouse, se.company
+            FROM `tabStock Entry Detail` sed
+            INNER JOIN `tabStock Entry` se ON se.name = sed.parent
+            WHERE sed.item_code = %(item_code)s
+              AND sed.docstatus = 1
+              AND sed.t_warehouse = %(t_wh)s
+              AND sed.s_warehouse IS NOT NULL
+              AND sed.s_warehouse != ''
+            ORDER BY se.creation DESC
+            LIMIT 1
+            """,
+            {"item_code": item_code, "t_wh": floriday_warehouse},
+            as_dict=True,
         )
 
-        if stock_entry_details:
-            stock_entry_name = stock_entry_details[0].parent
-            stock_entry = frappe.get_doc("Stock Entry", stock_entry_name)
+        farm = None
+        company = None
+        if rows:
+            s_warehouse = rows[0].s_warehouse
+            company = rows[0].company
+            farm = frappe.db.get_value("Warehouse", s_warehouse, "custom_farm") or None
 
-            farm = stock_entry.get('custom_farm')
-            business_unit = stock_entry.get('custom_business_unit')
-            company = stock_entry.company
-
-        return farm, business_unit, company
+        return farm, "Roses", company
 
     except Exception:
-        return None, None, None
+        return None, "Roses", None
 
 
 def get_exchange_rate(from_currency, to_currency, date):

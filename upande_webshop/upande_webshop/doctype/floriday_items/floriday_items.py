@@ -7,7 +7,7 @@ import frappe
 import requests
 from frappe.model.document import Document
 
-ROSE_ITEM_GROUPS = ("Spray Roses", "Standard Roses")
+_ITEM_GROUP_REGEXP = r"(^|[^[:alnum:]])(rose|roses|herb|herbs)([^[:alnum:]]|$)"
 
 
 _NAME_PREFIXES = (
@@ -22,30 +22,22 @@ _NAME_PREFIXES = (
 
 
 def _strip_floriday_prefixes(text):
-	"""Remove botanical/category prefixes from Floriday tradeItemName.nl."""
 	t = (text or "").lower()
 	for p in _NAME_PREFIXES:
 		if t.startswith(p + " "):
 			t = t[len(p) + 1 :]
 			break
-	# Strip trailing " - Length 70" pattern -> "70"
 	t = re.sub(r"\s*-\s*length\s+", " ", t)
 	return t
 
 
 def _normalize_name(text):
-	"""Lowercase, strip non-alphanumeric. Used for cultivar names only."""
 	if not text:
 		return ""
 	return re.sub(r"[^a-z0-9]+", "", str(text).lower())
 
 
 def _split_name_and_length(text):
-	"""
-	Split a Floriday name like 'Miss Bombastic 60' or 'Sofie 70cm'
-	into (normalized_cultivar_name, length_int).
-	Length pattern: trailing digits, optionally followed by 'cm'.
-	"""
 	stripped = _strip_floriday_prefixes(text)
 	m = re.search(r"^(.*?)(\d+)\s*(?:cm)?\s*$", stripped)
 	if not m:
@@ -56,10 +48,7 @@ def _split_name_and_length(text):
 
 
 def _floriday_length_for(stem_length):
-	"""
-	Map an ERPNext stem length to Floriday's grading.
-	Floriday rounds down to nearest 10: 52 -> 50, 62 -> 60, 72 -> 70, etc.
-	"""
+	# Floriday grades stem lengths by rounding down to the nearest 10.
 	m = re.search(r"\d+", str(stem_length or ""))
 	if not m:
 		return None
@@ -70,6 +59,90 @@ def _alert(message, indicator="orange"):
 	frappe.msgprint(message, alert=True, indicator=indicator)
 
 
+def _normalize_stem_length(value):
+	if value is None:
+		return None
+	m = re.search(r"\d+", str(value))
+	if not m:
+		return None
+	return f"{int(m.group(0))}cm"
+
+
+def _stem_length_rates_from_item_prices(item_code, price_list):
+	filters = {"item_code": item_code}
+	if price_list:
+		filters["price_list"] = price_list
+
+	rows = frappe.get_all(
+		"Item Price",
+		filters=filters,
+		fields=["custom_length", "price_list_rate"],
+	)
+	latest_rate = {}
+	for row in rows:
+		stem_length = _normalize_stem_length(row.custom_length)
+		if not stem_length:
+			continue
+		latest_rate[stem_length] = row.price_list_rate
+	return latest_rate
+
+
+def _stem_length_rates_from_variants(template_item_code, price_list):
+	master_lengths = frappe.get_all(
+		"Item Attribute Value",
+		filters={"parent": "Stem Length"},
+		fields=["attribute_value"],
+		order_by="idx",
+	)
+	if not master_lengths:
+		return {}
+
+	variants = frappe.get_all(
+		"Item",
+		filters={"variant_of": template_item_code, "disabled": 0},
+		pluck="name",
+	)
+	if not variants:
+		return {}
+
+	attr_rows = frappe.get_all(
+		"Item Variant Attribute",
+		filters={"parent": ["in", variants], "attribute": "Stem Length"},
+		fields=["parent", "attribute_value"],
+	)
+	variant_by_norm_length = {}
+	for r in attr_rows:
+		norm = _normalize_stem_length(r.attribute_value)
+		if norm:
+			variant_by_norm_length[norm] = r.parent
+
+	if not variant_by_norm_length:
+		return {}
+
+	variant_codes = list(variant_by_norm_length.values())
+	price_filters = {"item_code": ["in", variant_codes]}
+	if price_list:
+		price_filters["price_list"] = price_list
+	price_rows = frappe.get_all(
+		"Item Price",
+		filters=price_filters,
+		fields=["item_code", "price_list_rate"],
+	)
+	rate_by_variant = {r.item_code: r.price_list_rate for r in price_rows}
+
+	latest_rate = {}
+	for ml in master_lengths:
+		canonical = ml.attribute_value
+		variant_code = variant_by_norm_length.get(_normalize_stem_length(canonical))
+		if not variant_code:
+			continue
+		rate = rate_by_variant.get(variant_code)
+		if rate is None:
+			continue
+		latest_rate[canonical] = rate
+	return latest_rate
+
+
 class FloridayItems(Document):
 	@frappe.whitelist()
 	def fetch_stem_length_prices(self):
@@ -77,22 +150,13 @@ class FloridayItems(Document):
 			_alert("Item Code is required to fetch prices.", "red")
 			return 0
 
-		filters = {"item_code": self.item_code}
 		price_list = frappe.db.get_value("Floriday Settings", None, "price_list")
-		if price_list:
-			filters["price_list"] = price_list
 
-		item_prices = frappe.get_all(
-			"Item Price",
-			filters=filters,
-			fields=["custom_length", "price_list_rate"],
-		)
-
-		latest_rate = {}
-		for row in item_prices:
-			if not row.custom_length:
-				continue
-			latest_rate[row.custom_length] = row.price_list_rate
+		has_variants = frappe.db.get_value("Item", self.item_code, "has_variants")
+		if has_variants:
+			latest_rate = _stem_length_rates_from_variants(self.item_code, price_list)
+		else:
+			latest_rate = _stem_length_rates_from_item_prices(self.item_code, price_list)
 
 		existing = {row.stem_length: row for row in self.table_ppvq if row.stem_length}
 
@@ -256,10 +320,16 @@ def sync_system_items(force=False):
 	if not force and not frappe.db.get_single_value("Floriday Settings", "fi_enabled"):
 		return {"skipped": True, "reason": "Floriday Items sync is disabled (fi_enabled = 0)"}
 
-	items = frappe.get_all(
-		"Item",
-		filters={"item_group": ["in", ROSE_ITEM_GROUPS], "disabled": 0},
-		fields=["item_code", "item_name", "item_group"],
+	items = frappe.db.sql(
+		"""
+		SELECT i.name AS item_code, i.item_name, i.item_group
+		FROM tabItem i
+		WHERE i.disabled = 0
+		  AND (i.variant_of IS NULL OR i.variant_of = '')
+		  AND i.item_group REGEXP %s
+		""",
+		(_ITEM_GROUP_REGEXP,),
+		as_dict=True,
 	)
 
 	created = 0
@@ -305,7 +375,7 @@ def update_trade_item_ids(force=False):
 	floriday_docs = frappe.get_all("Floriday Items", pluck="name")
 	total_matched = 0
 	total_rows = 0
-	unmatched = []  # {item_code, item_name, stem_length}
+	unmatched = []
 	docs_processed = 0
 	docs_with_no_table = 0
 	for name in floriday_docs:
