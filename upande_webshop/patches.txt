@@ -5,3 +5,4 @@
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
 upande_webshop.patches.seed_pack_rates
+upande_webshop.patches.convert_floriday_settings_to_single
