@@ -33,7 +33,7 @@
 	{%- set bunches = d.qty | int -%}
 	{%- set total_stems = (bunches * ns.stems_per_bunch) -%}
 
-	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}">
+	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}" data-custom-box-type="{{ d.custom_box_type or '' }}">
 		<td style="width: 60%;">
 			<div class="d-flex">
 				<div class="cart-item-image mr-4">
@@ -61,15 +61,16 @@
 						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
 					</span>
 					{% endif %}
-					{% if d.custom_box_type %}
+					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') if d.custom_box_type else 0 -%}
+					{%- set box_min_qty_int = (box_min_qty | int) if box_min_qty else 0 -%}
 					<span class="item-subtitle mr-2">
-						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>
+						{{ _('Box Type') }}: <strong>{{ d.custom_box_type or '—' }}</strong>
+						{% if d.custom_box_type and box_min_qty_int > 0 %}
+							<span class="text-muted" style="font-size:0.85em;">
+								({{ _('min') }} {{ box_min_qty_int }} {{ _('bunches') }})
+							</span>
+						{% endif %}
 					</span>
-					{% endif %}
-					<span class="item-subtitle mr-2">
-						{{ _('Box') }}: <strong>{{ ns.box_val }}</strong>
-					</span>
-					{% endif %}
 					<span class="item-subtitle mr-2">
 						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>

@@ -6,6 +6,8 @@
  "engine": "InnoDB",
  "field_order": [
   "products_per_page",
+  "column_break_wkjy",
+  "sync_prices",
   "filter_categories_section",
   "enable_field_filters",
   "filter_fields",
@@ -382,12 +384,21 @@
    "fieldtype": "Check",
    "in_list_view": 1,
    "label": "Allow Non Website Items in Cart Quotation"
+  },
+  {
+   "fieldname": "sync_prices",
+   "fieldtype": "Button",
+   "label": "Sync Prices"
+  },
+  {
+   "fieldname": "column_break_wkjy",
+   "fieldtype": "Column Break"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2025-03-22 13:01:51.906319",
+ "modified": "2026-05-11 23:38:22.312266",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",
@@ -408,6 +419,7 @@
    "role": "All"
   }
  ],
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
  "states": [],

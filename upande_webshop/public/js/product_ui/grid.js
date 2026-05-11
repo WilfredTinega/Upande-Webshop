@@ -69,9 +69,8 @@ webshop.ProductGrid = class {
 		body_html += `</div>`;
 		body_html += `<div class="product-category" itemprop="name">${ item.item_group || '' }</div>`;
 
-		if (item.formatted_price) {
-			body_html += this.get_price_html(item);
-		}
+		// Price is intentionally hidden on the listing — shown only on the detail
+		// page once a stem length is selected.
 
 		body_html += this.get_stock_availability(item, settings);
 		body_html += `</div>`; // close div on line 49

@@ -6,11 +6,11 @@
 <div class="item-cart row mt-2" data-variant-item-code="{{ item_code }}">
 	<div class="col-md-12">
 		<!-- Price and Availability -->
-		<div id="dynamic-price-display" class="product-price mt-2 mb-2">
+		<div id="dynamic-price-display" class="product-price mt-2 mb-2" style="font-size: inherit;">
 			{% if cart_settings.show_price and product_info.price %}
-				<span id="dynamic-price-value" class="font-weight-bold" style="font-size: 1.4em;">{{ product_info.price.formatted_price }} / {{ _('stem') }}</span>
+				<span id="dynamic-price-value" class="font-weight-bold">{{ product_info.price.formatted_price }}</span>
 			{% else %}
-				<span id="dynamic-price-value" class="font-weight-bold" style="font-size: 1.4em;">—</span>
+				<span id="dynamic-price-value" class="font-weight-bold">—</span>
 			{% endif %}
 			<small class="text-muted ml-2" id="dynamic-price-uom-label"></small>
 		</div>
@@ -130,6 +130,15 @@
 					indicator: 'red'
 				}, 4);
 				$('#stem-length').focus();
+				return;
+			}
+
+			if (!custom_box_type) {
+				frappe.show_alert({
+					message: __('Please select a box type before adding to cart.'),
+					indicator: 'red'
+				}, 4);
+				$('#box-type').focus();
 				return;
 			}
 

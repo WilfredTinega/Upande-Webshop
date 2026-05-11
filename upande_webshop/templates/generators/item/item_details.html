@@ -3,11 +3,27 @@
 {% set product_info = shopping_cart.product_info %}
 {% set price_info = product_info.get('price') or {} %}
 
-{% set stem_lengths = frappe.get_list('Stem Length',
-    fields=['name', 'length'],
-    order_by='length asc',
-    ignore_permissions=True
-) %}
+{# Stem lengths come from Webshop Item Prices: only show lengths that have a
+   price configured for this item (or its template, for variants). #}
+{% set _priced_parent = frappe.db.get_value('Webshop Item Prices', {'item_code': doc.item_code}, 'name') %}
+{% if not _priced_parent and doc.variant_of %}
+    {% set _priced_parent = frappe.db.get_value('Webshop Item Prices', {'item_code': doc.variant_of}, 'name') %}
+{% endif %}
+{% set stem_lengths = [] %}
+{% if _priced_parent %}
+    {% set _priced_rows = frappe.db.sql("""
+        SELECT stem_length, rate
+        FROM `tabStem Length Price`
+        WHERE parent = %s
+          AND parenttype = 'Webshop Item Prices'
+          AND stem_length IS NOT NULL AND stem_length != ''
+          AND rate IS NOT NULL AND rate != ''
+        ORDER BY LENGTH(stem_length) ASC, stem_length ASC
+    """, (_priced_parent,), as_dict=True) %}
+    {% for _row in _priced_rows %}
+        {% set _ = stem_lengths.append({'name': _row.stem_length, 'length': _row.stem_length}) %}
+    {% endfor %}
+{% endif %}
 
 <!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
 {% set all_uoms = frappe.get_list('UOM', 
@@ -63,6 +79,7 @@
 	<!-- STEM LENGTH SELECTOR - DYNAMICALLY FROM DOCTYPE -->
 	{% if not has_variants and stem_lengths %}
 	<div class="stem-length-selector form-group mt-4 mb-4">
+		<label for="stem-length" class="d-block mb-2" style="font-weight:600; font-size:13px;">{{ _("Stem Length") }}</label>
 		<select id="stem-length" class="form-control" name="stem_length" style="max-width: 200px;" required>
 			<option value="">{{ _("Stem Length") }}</option>
 			{% for length in stem_lengths %}
@@ -71,18 +88,18 @@
 				</option>
 			{% endfor %}
 		</select>
-		
+
 		<!-- Price indicator based on length (optional) -->
 		<div class="mt-2 length-price-info" style="display: none;">
 			<small class="text-muted" id="length-price-message"></small>
 		</div>
-		
+
 	</div>
 	{% endif %}
 
 	<!-- BUNCH UOM SELECTOR - DYNAMICALLY FROM UOM DOCTYPE -->
 	{% if not has_variants and bunch_uoms %}
-	<div class="bunch-uom-selector form-group mt-4 mb-4">
+	<div class="bunch-uom-selector form-group mt-4 mb-4" style="display:none;">
 		<select id="bunch-uom" class="form-control" name="bunch_uom" style="max-width: 200px;" required>
 			<option value="">{{ _("Bunch Size") }}</option>
 			{% for uom in bunch_uoms %}
@@ -94,15 +111,12 @@
 	</div>
 	{% endif %}
 
-	<!-- BOX TYPE SELECTOR -->
+	<!-- BOX TYPE SELECTOR - DYNAMICALLY LOADED PER CUSTOMER -->
 	{% if not has_variants %}
 	<div class="box-type-selector form-group mt-4 mb-4">
-		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;">
-			<option value="">{{ _("Box Type") }}</option>
-			<option value="Small">{{ _("Small") }}</option>
-			<option value="Standard">{{ _("Standard") }}</option>
-			<option value="Large">{{ _("Large") }}</option>
-			<option value="Pro Flower Pack">{{ _("Pro Flower Pack") }}</option>
+		<label for="box-type" class="d-block mb-2" style="font-weight:600; font-size:13px;">{{ _("Box Type") }}</label>
+		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;" disabled>
+			<option value="">{{ _("Loading boxes...") }}</option>
 		</select>
 	</div>
 	{% endif %}
@@ -186,11 +200,10 @@
 		});
 	});
 	
-	// Live price calculation: per-stem price × stems per bunch
+	// Live price calculation: per-stem price for the selected length
 	function updatePriceDisplay() {
 		const stemLength = $('#stem-length').val();
-		const bunchUOM = $('#bunch-uom').val();
-		if (!stemLength || !bunchUOM) return;
+		if (!stemLength) return;
 
 		const meta = document.getElementById('product-meta');
 		if (!meta) return;
@@ -198,79 +211,93 @@
 		const currency = meta.dataset.currency;
 		const priceList = meta.dataset.priceList;
 
-		// Parse stems count from UOM name: "Bunch (25)" → 25
-		const uomText = $('#bunch-uom option:selected').text().trim();
-		const stemMatch = uomText.match(/\((\d+)\)/);
-		const stemsPerBunch = stemMatch ? parseInt(stemMatch[1]) : 1;
+		const $msg = $('#length-price-message');
+		$msg.removeClass('text-danger').addClass('text-muted').text('');
+		$('.length-price-info').hide();
+
+		const currencySymbols = { USD: '$', EUR: '€', GBP: '£', KES: 'KSh' };
+		const symbol = currencySymbols[currency] || (currency ? currency + ' ' : '');
 
 		frappe.call({
-			method: 'upande_webshop.api.item_price.get_item_length_price',
+			method: 'upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.get_item_length_price',
 			args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
 			callback(r) {
-				if (r.message && r.message.price_list_rate) {
-					const perStem = r.message.price_list_rate;
-					const formatted = format_currency(perStem, currency);
-					$('#dynamic-price-value').text(formatted + ' / stem');
-					$('#dynamic-price-uom-label').text('(' + stemsPerBunch + ' stems per bunch)');
+				const rate = r && r.message ? parseFloat(r.message.price_list_rate) : NaN;
+				if (!isNaN(rate) && rate > 0) {
+					const formatted = symbol + ' ' + rate.toFixed(2);
+					$('#dynamic-price-value').text(formatted);
+					$('#dynamic-price-uom-label').text('');
+					$msg.removeClass('text-danger').addClass('text-muted').text('');
+					$('.length-price-info').hide();
 				} else {
 					$('#dynamic-price-value').text('—');
+					$('#dynamic-price-uom-label').text('');
+					$msg.removeClass('text-muted').addClass('text-danger').text('{{ _("No price for this length") }}');
+					$('.length-price-info').show();
 				}
 			}
 		});
 	}
 
-	// Handle stem length selection
-	$('.page_content').on('change', '#stem-length', function() {
+	// Load Box Type options from the Box Type doctype (active only)
+	function loadBoxTypes() {
+		const $select = $('#box-type');
+		if (!$select.length) return;
+		frappe.call({
+			method: 'upande_webshop.api.pack_rate.get_box_types',
+			callback(r) {
+				$select.empty();
+				const rows = (r && r.message) || [];
+				if (!rows.length) {
+					$select.append($('<option>').val('').text('{{ _("No boxes configured") }}').prop('disabled', true));
+					$select.prop('disabled', true);
+					return;
+				}
+				rows.forEach((row, idx) => {
+					const label = row.box_type_name || row.name;
+					const $opt = $('<option>').val(label).text(label);
+					if (idx === 0) $opt.prop('selected', true);
+					$select.append($opt);
+				});
+				$select.prop('disabled', false);
+				$select.trigger('change');
+			},
+			error() {
+				$select.empty().append($('<option>').val('').text('{{ _("Failed to load boxes") }}')).prop('disabled', true);
+			}
+		});
+	}
+
+	// Handle stem length selection (delegate from document so the handler
+	// works regardless of whether #stem-length is inside .page_content)
+	$(document).on('change', '#stem-length', function() {
 		const selectedLength = $(this).val();
 		$('#selected_stem_length').val(selectedLength);
 		updatePriceDisplay();
 	});
 
-	// Handle bunch UOM selection
-	$('.page_content').on('change', '#bunch-uom', function() {
-		const selectedUOM = $(this).val();
-		$('#selected_bunch_uom').val(selectedUOM);
-		updatePriceDisplay();
-	});
-	
-	// Auto-trigger price display once frappe is ready (defaults may already be selected)
-	frappe.ready(function() {
-		if ($('#stem-length').val() && $('#bunch-uom').val()) {
-			updatePriceDisplay();
-		}
+	// Handle bunch UOM selection (selector is hidden by default; harmless if present)
+	$(document).on('change', '#bunch-uom', function() {
+		$('#selected_bunch_uom').val($(this).val());
 	});
 
-	// Modify add to cart to include both selections
-	$('.page_content').on('click', '.add-to-cart', function(e) {
-		const stemLength = $('#stem-length').val();
-		const bunchUOM = $('#bunch-uom').val();
-		
-		if (!stemLength) {
-			e.preventDefault();
-			frappe.show_alert({
-				message: '{{ _("Please select a stem length") }}',
-				indicator: 'red'
-			}, 3);
-			return false;
+	// Box-type change just stores the selection; pricing depends on length only
+	$(document).on('change', '#box-type', function() {
+		// No-op for now; downstream cart code reads #box-type directly
+	});
+
+	frappe.ready(function() {
+		loadBoxTypes();
+		const $sl = $('#stem-length');
+		if (!$sl.val()) {
+			const firstPriced = $sl.find('option').filter(function() { return $(this).val(); }).first().val();
+			if (firstPriced) {
+				$sl.val(firstPriced);
+				$('#selected_stem_length').val(firstPriced);
+			}
 		}
-		
-		if (!bunchUOM) {
-			e.preventDefault();
-			frappe.show_alert({
-				message: '{{ _("Please select a pack size") }}',
-				indicator: 'red'
-			}, 3);
-			return false;
+		if ($sl.val()) {
+			updatePriceDisplay();
 		}
-		
-		// Add selections to the button data
-		$(this).data('stem-length', stemLength);
-		$(this).data('bunch-uom', bunchUOM);
-		
-		// Show confirmation
-		frappe.show_alert({
-			message: '{{ _("Stem length") }}: ' + stemLength + ', {{ _("Pack") }}: ' + bunchUOM,
-			indicator: 'green'
-		}, 3);
 	});
 </script>

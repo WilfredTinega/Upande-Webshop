@@ -53,8 +53,9 @@ $.extend(shopping_cart, {
 			var row = input.closest("tr");
 			var uom = row.attr("data-uom") || undefined;
 			var custom_length = row.attr("data-custom-length") || undefined;
+			var custom_box_type = row.attr("data-custom-box-type") || undefined;
 			var child_docname = row.attr("data-name") || undefined;
-			shopping_cart.shopping_cart_update({item_code, qty: bunches, uom, custom_length, child_docname});
+			shopping_cart.shopping_cart_update({item_code, qty: bunches, uom, custom_length, custom_box_type, child_docname});
 		});
 
 		$(".cart-items").on('click', '.number-spinner button', function () {
@@ -78,12 +79,14 @@ $.extend(shopping_cart, {
 			var row = input.closest("tr");
 			var uom = row.attr("data-uom") || undefined;
 			var custom_length = row.attr("data-custom-length") || undefined;
+			var custom_box_type = row.attr("data-custom-box-type") || undefined;
 			var child_docname = row.attr("data-name") || undefined;
 			shopping_cart.shopping_cart_update({
 				item_code,
 				qty: newVal,
 				uom,
 				custom_length,
+				custom_box_type,
 				child_docname
 			});
 		});
@@ -109,7 +112,7 @@ $.extend(shopping_cart, {
 		if (!$deliveryInput.length) return;
 
 		// Set minimum date: today + transit_days
-		var transit_days = parseInt($("#transit-days-label").text()) || 2;
+		var transit_days = parseInt($(".delivery-date-section").data("transit-days")) || 2;
 		var min_date = new Date();
 		min_date.setDate(min_date.getDate() + transit_days);
 		$deliveryInput.attr("min", shopping_cart._format_date(min_date));
@@ -240,56 +243,60 @@ $.extend(shopping_cart, {
 		});
 	},
 
-	place_order: function(btn) {
-		shopping_cart.freeze();
+	_extract_server_message: function(r) {
+		var msg = "";
+		try {
+			if (r && r._server_messages) {
+				var parts = JSON.parse(r._server_messages) || [];
+				msg = parts.map(function(p) {
+					try { return (JSON.parse(p).message || "").replace(/<[^>]*>/g, ""); }
+					catch(e) { return (p || "").toString().replace(/<[^>]*>/g, ""); }
+				}).filter(Boolean).join(" ");
+			}
+		} catch (e) {}
+		return msg;
+	},
 
+	place_order: function(btn) {
 		return frappe.call({
 			type: "POST",
 			method: "upande_webshop.upande_webshop.shopping_cart.cart.place_order",
 			btn: btn,
 			callback: function(r) {
-				if(r.exc) {
-					shopping_cart.unfreeze();
-					var msg = "";
-					if(r._server_messages) {
-						msg = JSON.parse(r._server_messages || []).join("<br>");
-					}
-
-					$("#cart-error")
-						.empty()
-						.html(msg || frappe._("Something went wrong!"))
-						.toggle(true);
-				} else {
-					$(btn).hide();
-					window.location.href = '/orders/' + encodeURIComponent(r.message);
+				if (r.exc) {
+					var msg = shopping_cart._extract_server_message(r) || __("Something went wrong!");
+					r._server_messages = null;
+					frappe.show_alert({ message: msg, indicator: "red" }, 7);
+					return;
 				}
+				if (r.message && typeof r.message === "object" && r.message.error) {
+					frappe.show_alert({ message: r.message.error, indicator: "red" }, 7);
+					return;
+				}
+				$(btn).hide();
+				window.location.href = '/orders/' + encodeURIComponent(r.message);
 			}
 		});
 	},
 
 	request_quotation: function(btn) {
-		shopping_cart.freeze();
-
 		return frappe.call({
 			type: "POST",
 			method: "upande_webshop.upande_webshop.shopping_cart.cart.request_for_quotation",
 			btn: btn,
 			callback: function(r) {
-				if(r.exc) {
-					shopping_cart.unfreeze();
-					var msg = "";
-					if(r._server_messages) {
-						msg = JSON.parse(r._server_messages || []).join("<br>");
-					}
-
-					$("#cart-error")
-						.empty()
-						.html(msg || frappe._("Something went wrong!"))
-						.toggle(true);
-				} else {
-					$(btn).hide();
-					window.location.href = '/quotations/' + encodeURIComponent(r.message);
+				if (r.exc) {
+					var msg = shopping_cart._extract_server_message(r) || __("Something went wrong!");
+					r._server_messages = null;
+					frappe.show_alert({ message: msg, indicator: "red" }, 7);
+					return;
 				}
+				if (r.message && typeof r.message === "object" && r.message.error) {
+					frappe.show_alert({ message: r.message.error, indicator: "red" }, 7);
+					return;
+				}
+				$(btn).hide();
+				window.location.href = '/quotations/' + encodeURIComponent(r.message);
 			}
 		});
 	},
