@@ -57,8 +57,6 @@ def get_cart_quotation(doc=None):
 	if not doc.customer_address and addresses:
 		update_cart_address("billing", addresses[0].name)
 
-	transit_days = _get_transit_days_for_party(party)
-
 	return {
 		"doc": decorate_quotation_doc(doc),
 		"shipping_addresses": get_shipping_addresses(party),
@@ -101,9 +99,45 @@ def get_billing_addresses(party=None):
 	]
 
 
+def _fmt_qty(q):
+	q = flt(q)
+	return int(q) if q == int(q) else q
+
+
+def _check_box_type_min_order_qty(quotation):
+	"""Return error message (string) if any line fails the box-type minimum, else None."""
+	min_qty_cache = {}
+	for item in quotation.get("items") or []:
+		box_type = getattr(item, "custom_box_type", None)
+		if not box_type:
+			return _("{0} ({1}) has no Box Type selected. Please remove the line and re-add it with a Box Type.").format(
+				item.item_code, item.custom_length or _("no length")
+			)
+		if box_type not in min_qty_cache:
+			min_qty_cache[box_type] = flt(
+				frappe.db.get_value("Box Type", box_type, "min_order_qty") or 0
+			)
+		min_qty = min_qty_cache[box_type]
+		qty = flt(item.qty)
+		if min_qty and qty < min_qty:
+			deficit = min_qty - qty
+			return _("{0} ({1}, Box Type {2}) needs {3} more bunch(es) to request a quote. You have {4}, the minimum is {5}.").format(
+				item.item_code,
+				item.custom_length or _("no length"),
+				box_type,
+				_fmt_qty(deficit),
+				_fmt_qty(qty),
+				_fmt_qty(min_qty),
+			)
+	return None
+
+
 @frappe.whitelist()
 def place_order():
 	quotation = _get_cart_quotation()
+	box_err = _check_box_type_min_order_qty(quotation)
+	if box_err:
+		return {"error": box_err}
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
 	quotation.company = cart_settings.company
 
@@ -157,6 +191,9 @@ def place_order():
 @frappe.whitelist()
 def request_for_quotation():
 	quotation = _get_cart_quotation()
+	box_err = _check_box_type_min_order_qty(quotation)
+	if box_err:
+		return {"error": box_err}
 	quotation.flags.ignore_permissions = True
 	quotation.flags.ignore_validate = True
 	quotation.save()
@@ -286,6 +323,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			empty_card = True
 
 	else:
+
 		warehouse = frappe.get_cached_value(
 			"Website Item", {"item_code": item_code}, "website_warehouse"
 		)
@@ -322,7 +360,6 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 					"custom_length": custom_length,
 					"custom_box_type": custom_box_type,
 					"additional_notes": additional_notes,
-     				"custom_box_type": box_type,
 					"warehouse": warehouse,
 				},
 			)
@@ -333,8 +370,8 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 				item.uom = uom
 			if custom_length:
 				item.custom_length = custom_length
-			if box_type:
-				item.custom_box_type = box_type
+			if custom_box_type:
+				item.custom_box_type = custom_box_type
 			item.warehouse = warehouse
 			item.additional_notes = additional_notes
 			total_stems = qty * flt(item.conversion_factor or 1)

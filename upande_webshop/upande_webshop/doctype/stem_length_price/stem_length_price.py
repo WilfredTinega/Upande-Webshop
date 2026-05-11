@@ -11,7 +11,8 @@ class StemLengthPrice(Document):
 		if not (self.parent and self.stem_length):
 			return False
 
-		item_code = frappe.db.get_value("Floriday Items", self.parent, "item_code")
+		parent_doctype = self.parenttype or "Floriday Items"
+		item_code = frappe.db.get_value(parent_doctype, self.parent, "item_code")
 		if not item_code:
 			return False
 

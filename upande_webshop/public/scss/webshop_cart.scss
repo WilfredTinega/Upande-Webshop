@@ -644,7 +644,9 @@ body.hide-frappe-navbar {
 
 #page-cart {
 	.shopping-cart-header {
-		font-weight: bold;
+		font-size: 1rem;
+		font-weight: 600;
+		margin-bottom: 1rem;
 	}
 
 	.cart-container {
@@ -1599,6 +1601,22 @@ body.hide-frappe-navbar {
 		color: #fff;
 		background: var(--red-600, #dc2626);
 		border-radius: 9px;
+	}
+}
+
+.delivery-date-section {
+	.delivery-schedule-title {
+		font-weight: 600;
+	}
+	.delivery-field-label {
+		display: block;
+		margin-bottom: 4px;
+		font-size: 13px;
+		color: var(--text-muted);
+	}
+	.shipment-date-value {
+		padding: 6px 0;
+		font-weight: 500;
 	}
 }
 

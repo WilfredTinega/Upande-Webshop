@@ -217,8 +217,23 @@ after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_cus
 # any app's scheduler_events — our jobs are user-configured per Floriday Settings,
 # so we re-upsert them here).
 after_migrate = [
+	"upande_webshop.setup.install.add_custom_fields",
 	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs",
 	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.resync_scheduled_jobs",
+]
+
+scheduler_events = {
+	"cron": {
+		"0 0 * * *": [
+			"upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices._sync_webshop_item_prices",
+		],
+	},
+}
+
+# /webshop-item-prices is not a public storefront page — it's an admin doctype.
+# Bounce storefront visitors to the Desk list view (Frappe core then redirects /app -> /desk).
+website_redirects = [
+	{"source": "/webshop-item-prices", "target": "/app/webshop-item-prices"},
 ]
 
 # Job Events

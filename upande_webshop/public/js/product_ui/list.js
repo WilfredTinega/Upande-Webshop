@@ -82,6 +82,8 @@ webshop.ProductList = class {
 	}
 
 	get_item_details(item, settings) {
+		// Price is intentionally hidden on the listing — shown only on the detail
+		// page once a stem length is selected.
 		let details = `
 			<p class="product-code">
 				${ item.item_group } | ${ __('Item Code') } : ${ item.item_code }
@@ -89,20 +91,8 @@ webshop.ProductList = class {
 			<div class="mt-2" style="color: var(--gray-600) !important; font-size: 13px;">
 				${ item.short_description || '' }
 			</div>
-			<div class="product-price" itemprop="offers" itemscope itemtype="https://schema.org/AggregateOffer">
-				${ item.formatted_price || '' }
+			<div>
 		`;
-
-		if (item.formatted_mrp) {
-			details += `
-				<small class="striked-price">
-					<s>${ item.formatted_mrp ? item.formatted_mrp.replace(/ +/g, "") : "" }</s>
-				</small>
-				<small class="ml-1 product-info-green">
-					${ item.discount } ${ __("OFF") }
-				</small>
-			`;
-		}
 
 		details += this.get_stock_availability(item, settings);
 		details += `</div>`;

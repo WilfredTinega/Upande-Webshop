@@ -176,7 +176,17 @@ def add_custom_fields():
 				"options": "Website Attribute",
 				"insert_after": "filter_fields",
 			},
-		]
+		],
+		"Quotation Item": [
+			{
+				"fieldname": "custom_box_type",
+				"fieldtype": "Link",
+				"label": "Box Type",
+				"options": "Box Type",
+				"insert_after": "custom_total_stems",
+				"in_list_view": 1,
+			},
+		],
 	}
 
 	frappe.make_property_setter(
