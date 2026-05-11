@@ -24,21 +24,42 @@ function load_pack_rates() {
 
 const BUNCH_SIZE = 10;
 
-function get_box_key(box_name) {
-	const b = (box_name || '').toLowerCase();
-	if (b.includes('standard')) return 'std';
-	if (b.includes('zim') || b.includes('wafex') || b.includes('tfh') ||
-		b.includes('fdt') || b.includes('jumbo')) return 'zim';
-	return null;
+// In-memory cache: avoid re-hitting the server on every keystroke
+const _pack_rate_cache = {};
+
+function _cache_key(item_code, box_name, length_cm) {
+	return `${item_code}|${box_name}|${length_cm}`;
 }
 
-function get_pack_rate(variety_name, box_name, length_cm) {
-	const key = (variety_name || '').toLowerCase().trim();
-	const box_key = get_box_key(box_name);
-	if (!box_key || !length_cm) return null;
-	const rates = PACK_RATES[key];
-	if (!rates || !rates[box_key]) return null;
-	return rates[box_key][parseInt(length_cm)] || null;
+/**
+ * Resolve a pack rate via the server-side API.
+ * Returns a Promise that resolves to {pack_rate, source} or {pack_rate: null}.
+ */
+function fetch_pack_rate(item_code, variety_name, box_name, length_cm) {
+	if (!box_name || !length_cm) {
+		return Promise.resolve({ pack_rate: null });
+	}
+	const key = _cache_key(item_code || variety_name, box_name, length_cm);
+	if (_pack_rate_cache[key] !== undefined) {
+		return Promise.resolve(_pack_rate_cache[key]);
+	}
+	return new Promise((resolve) => {
+		frappe.call({
+			method: 'upande_webshop.api.pack_rate.get_pack_rate',
+			args: {
+				item_code: item_code || null,
+				variety_name: variety_name || null,
+				box_name,
+				length_cm,
+			},
+			callback: (r) => {
+				const result = (r && r.message) || { pack_rate: null };
+				_pack_rate_cache[key] = result;
+				resolve(result);
+			},
+			error: () => resolve({ pack_rate: null }),
+		});
+	});
 }
 
 class ItemConfigure {
@@ -51,6 +72,7 @@ class ItemConfigure {
 		this._flower_type = null;
 		this._moq = 10;
 		this._pack_rate = null;
+		this._template_item_code = null;  // resolved on first lookup
 
 		load_pack_rates();
 
@@ -155,33 +177,51 @@ class ItemConfigure {
 		return match ? parseInt(match[1]) : null;
 	}
 
+	/**
+	 * Async pack-rate lookup. Updates UI when the response arrives.
+	 * The server resolves variant → template → item_group fallback automatically.
+	 */
 	update_pack_rate_and_totals() {
 		const length = this.get_selected_length();
 		const box = this.selected_box_type;
-		const pack_rate = get_pack_rate(this.item_name, box, length);
-		this._pack_rate = pack_rate;
-
 		const $pack_rate_display = this.dialog.$wrapper.find('.pack-rate-display');
 
-		if (pack_rate) {
-			const bunches_per_box = Math.floor(pack_rate / BUNCH_SIZE);
-			$pack_rate_display.html(`
-				<small style="color:var(--gray-600);">
-					<strong>${pack_rate} stems/box</strong>
-					= ${bunches_per_box} bunches × ${BUNCH_SIZE} stems per bunch
-				</small>
-			`);
-		} else if (box && length) {
-			$pack_rate_display.html(`
-				<small style="color:var(--gray-500);">
-					No pack rate data for this combination
-				</small>
-			`);
+		// Show loading state immediately for responsiveness
+		if (box && length) {
+			$pack_rate_display.html(`<small style="color:var(--gray-500);">${__('Looking up pack rate...')}</small>`);
 		} else {
 			$pack_rate_display.html('');
 		}
 
-		this.recalculate_totals();
+		fetch_pack_rate(this.item_code, this.item_name, box, length).then((result) => {
+			// Guard: ensure inputs haven't changed since the request was fired
+			if (this.get_selected_length() !== length || this.selected_box_type !== box) {
+				return;
+			}
+
+			const pack_rate = result.pack_rate;
+			this._pack_rate = pack_rate;
+
+			if (pack_rate) {
+				const bunches_per_box = Math.floor(pack_rate / BUNCH_SIZE);
+				$pack_rate_display.html(`
+					<small style="color:var(--gray-600);">
+						<strong>${pack_rate} stems/box</strong>
+						= ${bunches_per_box} bunches × ${BUNCH_SIZE} stems per bunch
+					</small>
+				`);
+			} else if (box && length) {
+				$pack_rate_display.html(`
+					<small style="color:var(--gray-500);">
+						${__('No pack rate data for this combination')}
+					</small>
+				`);
+			} else {
+				$pack_rate_display.html('');
+			}
+
+			this.recalculate_totals();
+		});
 	}
 
 	recalculate_totals() {
