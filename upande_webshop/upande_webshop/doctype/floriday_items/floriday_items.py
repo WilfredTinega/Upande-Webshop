@@ -150,7 +150,10 @@ class FloridayItems(Document):
 			_alert("Item Code is required to fetch prices.", "red")
 			return 0
 
-		price_list = frappe.db.get_value("Floriday Settings", None, "price_list")
+		# Floriday Settings has no price_list field; reuse the Webshop Item Prices
+		# resolver (USD Price List → first USD Selling list → Webshop Settings).
+		from upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices import _resolve_price_list
+		price_list = _resolve_price_list()
 
 		has_variants = frappe.db.get_value("Item", self.item_code, "has_variants")
 		if has_variants:
@@ -205,10 +208,7 @@ class FloridayItems(Document):
 
 
 def _get_floriday_settings():
-	settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-	if not settings_list:
-		frappe.throw("Floriday Settings not configured")
-	settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+	settings = frappe.get_single("Floriday Settings")
 	if not (settings.base_url and settings.access_token and settings.api_key):
 		frappe.throw("Floriday Settings missing base_url, access_token, or api_key.")
 	return settings
@@ -287,7 +287,8 @@ def get_item_mapping():
 		select fi.item_code, slp.trade_item_id, slp.stem_length
 		from `tabFloriday Items` fi
 		join `tabStem Length Price` slp on slp.parent = fi.name
-		where ifnull(slp.trade_item_id, '') != ''
+		where slp.parenttype = 'Floriday Items'
+		and ifnull(slp.trade_item_id, '') != ''
 		""",
 		as_dict=True,
 	)
@@ -306,7 +307,8 @@ def get_item_code_from_trade_item_id(trade_item_id):
 		select fi.item_code
 		from `tabFloriday Items` fi
 		join `tabStem Length Price` slp on slp.parent = fi.name
-		where slp.trade_item_id = %s
+		where slp.parenttype = 'Floriday Items'
+		and slp.trade_item_id = %s
 		limit 1
 		""",
 		(trade_item_id,),

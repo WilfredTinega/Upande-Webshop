@@ -5,6 +5,9 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "floriday_warehouses_tab",
+  "fetch_warehouses",
+  "floriday_warehouses",
   "floriday_items_tab",
   "fi_event_frequency",
   "fi_cron_format",
@@ -105,6 +108,22 @@
   "token_url"
  ],
  "fields": [
+  {
+   "fieldname": "floriday_warehouses_tab",
+   "fieldtype": "Tab Break",
+   "label": "Warehouses"
+  },
+  {
+   "fieldname": "fetch_warehouses",
+   "fieldtype": "Button",
+   "label": "Fetch Warehouses"
+  },
+  {
+   "fieldname": "floriday_warehouses",
+   "fieldtype": "Table",
+   "label": "Floriday Warehouses",
+   "options": "Floriday Warehouse"
+  },
   {
    "fieldname": "sales_order_tab",
    "fieldtype": "Tab Break",
