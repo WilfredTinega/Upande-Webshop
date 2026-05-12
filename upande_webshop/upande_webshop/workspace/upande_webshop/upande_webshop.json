@@ -1,7 +1,7 @@
 {
  "app": "upande_webshop",
  "charts": [],
- "content": "[{\"id\":\"hQxbR1RYqz\",\"type\":\"card\",\"data\":{\"card_name\":\"Shortcuts\",\"col\":5}},{\"id\":\"QezGmPdrPg\",\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":5}},{\"id\":\"0ynahrwc1Y\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"_b1tCgi3Z3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop\",\"col\":3}},{\"id\":\"4msh4qyvP1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2-Z0G3AqQL\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Published Items\",\"col\":12}},{\"id\":\"8Z-deooKfk\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2kOIHfGTOH\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"a38S7G1sXR\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"9YC5xiD1dO\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
+ "content": "[{\"id\":\"hQxbR1RYqz\",\"type\":\"card\",\"data\":{\"card_name\":\"Shortcuts\",\"col\":3}},{\"id\":\"QezGmPdrPg\",\"type\":\"card\",\"data\":{\"card_name\":\"Quick Links\",\"col\":3}},{\"id\":\"_gklp_xVBk\",\"type\":\"card\",\"data\":{\"card_name\":\"Integrations\",\"col\":3}},{\"id\":\"0ynahrwc1Y\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"_b1tCgi3Z3\",\"type\":\"shortcut\",\"data\":{\"shortcut_name\":\"Webshop\",\"col\":3}},{\"id\":\"4msh4qyvP1\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2-Z0G3AqQL\",\"type\":\"quick_list\",\"data\":{\"quick_list_name\":\"Published Items\",\"col\":12}},{\"id\":\"8Z-deooKfk\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"2kOIHfGTOH\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"a38S7G1sXR\",\"type\":\"spacer\",\"data\":{\"col\":12}},{\"id\":\"9YC5xiD1dO\",\"type\":\"spacer\",\"data\":{\"col\":12}}]",
  "creation": "2025-11-20 20:43:34.240751",
  "custom_blocks": [],
  "docstatus": 0,
@@ -112,9 +112,48 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Integrations",
+   "link_count": 3,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Floriday Settings",
+   "link_count": 0,
+   "link_to": "Floriday Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Biflorica Settings",
+   "link_count": 0,
+   "link_to": "Biflorica Setting",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Floriday Item Prices",
+   "link_count": 0,
+   "link_to": "Floriday Items",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-02-24 17:36:49.648556",
+ "modified": "2026-05-12 03:16:16.386016",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",
@@ -134,7 +173,7 @@
    "role": "Sales Manager"
   }
  ],
- "sequence_id": 1.0,
+ "sequence_id": 47.0,
  "shortcuts": [
   {
    "color": "Grey",

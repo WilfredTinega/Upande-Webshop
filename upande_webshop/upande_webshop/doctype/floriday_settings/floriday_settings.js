@@ -11,6 +11,7 @@ const PRIMARY_BUTTONS = [
 	"add_stock",
 	"move_stock",
 	"refresh_stock",
+	"fetch_warehouses",
 ];
 const WARNING_BUTTONS = ["update_access_token"];
 
@@ -536,6 +537,28 @@ frappe.ui.form.on("Floriday Settings", {
 			load_stock_table(frm, { silent: true });
 			load_system_stock_table(frm);
 		}
+	},
+
+	fetch_warehouses(frm) {
+		const stop_progress = start_inline_progress(frm, "fetch_warehouses", "Fetching warehouses");
+		frm.call({
+			method: "fetch_warehouses",
+			doc: frm.doc,
+			callback(r) {
+				stop_progress();
+				const m = r.message || {};
+				if (m.status === "success") {
+					frappe.show_alert({
+						message: __("Loaded {0} warehouse(s)", [m.count || 0]),
+						indicator: (m.count || 0) ? "green" : "blue",
+					}, 7);
+					frm.reload_doc();
+				}
+			},
+			error() {
+				stop_progress();
+			},
+		});
 	},
 
 	update_access_token(frm) {

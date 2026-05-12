@@ -58,11 +58,7 @@ def get_source_warehouse():
     Fetch source warehouse from Floriday Settings
     """
     try:
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            frappe.throw("Floriday Settings not configured")
-
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
         source_warehouse = settings.warehouse
         
         if not source_warehouse:
@@ -84,14 +80,8 @@ def create_supply_lines_only_from_batches():
     """
     try:
         safe_log("Starting supply line creation", "Floriday Supply Lines")
-        
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            error_msg = "Floriday Settings not configured"
-            safe_log(error_msg, "Floriday Settings Error")
-            frappe.throw(error_msg)
 
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
 
         API_KEY = settings.api_key
         BASE_URL = settings.base_url
@@ -450,6 +440,10 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
 def get_item_price_from_erpnext(trade_item_id):
     """
     Look up the per-stem rate from Floriday Items > Stem Length Price by trade_item_id.
+
+    Note: the same `Stem Length Price` child table is also used by Webshop Item
+    Prices for pricing; only Floriday Items rows carry a trade_item_id, so
+    filtering on trade_item_id is sufficient to scope this query.
     """
     if not trade_item_id:
         return None
@@ -458,7 +452,9 @@ def get_item_price_from_erpnext(trade_item_id):
             """
             select rate
             from `tabStem Length Price`
-            where trade_item_id = %s and ifnull(rate, 0) > 0
+            where parenttype = 'Floriday Items'
+              and trade_item_id = %s
+              and ifnull(rate, 0) > 0
             limit 1
             """,
             (trade_item_id,),
@@ -580,12 +576,8 @@ def get_available_batches():
     try:
         # Get current date in EAT timezone
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
-        
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            return {"status": "error", "message": "Floriday Settings not configured"}
 
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
 
         API_KEY = settings.api_key
         BASE_URL = settings.base_url
@@ -655,11 +647,7 @@ def diagnose_floriday_batches():
     so we can see why live stock isn't showing up.
     """
     try:
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            return {"status": "error", "message": "Floriday Settings not configured"}
-
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
         API_KEY = settings.api_key
         BASE_URL = settings.base_url
         ACCESS_TOKEN = settings.access_token

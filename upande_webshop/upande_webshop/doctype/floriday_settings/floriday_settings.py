@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+import requests
 from frappe.integrations.utils import make_post_request
 from frappe.model.document import Document
 
@@ -20,6 +21,29 @@ class FloridaySettings(Document):
 	def onload(self):
 		"""Show last_run / next_run from each Scheduled Job Type when the form loads."""
 		self._populate_scheduler_run_times()
+
+	def validate(self):
+		self._apply_used_warehouse()
+
+	def _apply_used_warehouse(self):
+		"""Enforce at most one `used` row in the warehouses table and mirror its
+		warehouse_id / organization_id onto the parent settings fields, so the
+		rest of the integration (which reads settings.warehouse_id /
+		organization_supplier_id) picks up the user's choice without a separate
+		save step."""
+		rows = self.get("floriday_warehouses") or []
+		used = [r for r in rows if r.get("used")]
+		if len(used) > 1:
+			frappe.throw("Only one Floriday warehouse can be marked as Used.")
+		if used:
+			r = used[0]
+			self.warehouse_id = r.warehouse_id or self.warehouse_id
+			if r.get("organization_id"):
+				self.organization_supplier_id = r.organization_id
+
+	@frappe.whitelist()
+	def fetch_warehouses(self):
+		return _fetch_floriday_warehouses(self)
 
 	def _populate_scheduler_run_times(self):
 		for prefix, method, _label in SCHEDULER_TASKS:
@@ -276,7 +300,8 @@ def _get_floriday_item_index():
 		SELECT fi.item_code, fi.item_name, slp.stem_length, slp.trade_item_id
 		FROM `tabFloriday Items` fi
 		INNER JOIN `tabStem Length Price` slp ON slp.parent = fi.name
-		WHERE slp.trade_item_id IS NOT NULL AND slp.trade_item_id != ''
+		WHERE slp.parenttype = 'Floriday Items'
+		AND slp.trade_item_id IS NOT NULL AND slp.trade_item_id != ''
 		""",
 		as_dict=True,
 	)
@@ -636,7 +661,8 @@ def get_item_floriday_meta(item_code):
 		SELECT slp.stem_length, slp.trade_item_id
 		FROM `tabFloriday Items` fi
 		INNER JOIN `tabStem Length Price` slp ON slp.parent = fi.name
-		WHERE fi.item_code = %s
+		WHERE slp.parenttype = 'Floriday Items'
+		AND fi.item_code = %s
 		AND slp.trade_item_id IS NOT NULL AND slp.trade_item_id != ''
 		ORDER BY slp.stem_length
 		""",
@@ -906,5 +932,77 @@ def preview_scheduler_run_times():
 			"next_run": doc.get(f"{prefix}_next_run"),
 		}
 	return out
+
+
+def _fetch_floriday_warehouses(doc):
+	"""GET {base_url}/warehouses and replace the child table with the owned,
+	non-deleted warehouses. The first owned row's organization is mirrored
+	into organization_supplier_id so downstream code that already reads that
+	field keeps working.
+
+	Preserves any existing `used` selection: if the user had ticked a row for
+	warehouse X, and X comes back in the new response, X stays ticked.
+	"""
+	base_url = (doc.base_url or "").rstrip("/")
+	if not (base_url and doc.api_key and doc.access_token):
+		frappe.throw("base_url, api_key, and access_token are required on Floriday Settings.")
+
+	headers = {
+		"Authorization": f"Bearer {doc.access_token}",
+		"X-Api-Key": doc.api_key,
+		"Accept": "application/json",
+	}
+
+	url = f"{base_url}/warehouses"
+	try:
+		response = requests.get(url, headers=headers, timeout=30)
+	except requests.RequestException as e:
+		frappe.log_error(message=str(e), title="Floriday Fetch Warehouses Exception")
+		frappe.throw(f"Floriday warehouses request failed: {e}")
+
+	if response.status_code != 200:
+		frappe.log_error(
+			message=f"HTTP {response.status_code}: {response.text[:1000]}",
+			title="Floriday Fetch Warehouses HTTP Error",
+		)
+		frappe.throw(f"Floriday returned HTTP {response.status_code}. See error log.")
+
+	payload = response.json() or []
+	# API returns a list, but some endpoints wrap in {results: [...]}. Be defensive.
+	if isinstance(payload, dict):
+		items = payload.get("results") or payload.get("warehouses") or []
+	else:
+		items = payload
+
+	# Keep only warehouses the credentials own and that are live.
+	owned = [
+		w for w in items
+		if isinstance(w, dict)
+		and w.get("hasAccess")
+		and not w.get("isExternal")
+		and not w.get("isDeleted")
+	]
+
+	previously_used = {
+		r.warehouse_id for r in (doc.get("floriday_warehouses") or []) if r.get("used")
+	}
+
+	doc.set("floriday_warehouses", [])
+	for w in owned:
+		wid = w.get("warehouseId") or ""
+		doc.append("floriday_warehouses", {
+			"warehouse_id": wid,
+			"warehouse_name": w.get("name") or "",
+			"organization_id": w.get("organizationId") or "",
+			"used": 1 if wid in previously_used else 0,
+		})
+
+	if owned and not doc.organization_supplier_id:
+		doc.organization_supplier_id = owned[0].get("organizationId") or ""
+
+	doc.save(ignore_permissions=True)
+	frappe.db.commit()
+
+	return {"status": "success", "count": len(owned), "total": len(items)}
 
 

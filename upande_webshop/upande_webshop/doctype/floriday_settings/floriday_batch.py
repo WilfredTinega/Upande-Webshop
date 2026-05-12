@@ -18,11 +18,7 @@ def create_batches_on_floriday():
     the per-grade dimension.
     """
 
-    settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-    if not settings_list:
-        frappe.throw("Floriday Settings not configured")
-
-    settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+    settings = frappe.get_single("Floriday Settings")
 
     API_KEY = settings.api_key
     BASE_URL = settings.base_url

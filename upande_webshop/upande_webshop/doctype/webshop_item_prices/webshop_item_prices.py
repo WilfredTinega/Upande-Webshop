@@ -33,10 +33,7 @@ def _resolve_price_list():
 	)
 	if usd_lists:
 		return usd_lists[0].name
-	price_list = frappe.db.get_single_value("Webshop Settings", "price_list")
-	if price_list:
-		return price_list
-	return frappe.db.get_value("Floriday Settings", None, "price_list")
+	return frappe.db.get_single_value("Webshop Settings", "price_list")
 
 
 class WebshopItemPrices(Document):

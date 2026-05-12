@@ -452,11 +452,7 @@ def create_sales_orders_from_floriday():
     Only processes orders from the last 2 hours.
     """
     try:
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            frappe.throw("Floriday Settings not configured")
-
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
 
         API_KEY = settings.api_key
         BASE_URL = settings.base_url.rstrip('/')

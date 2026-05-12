@@ -49,16 +49,8 @@ def get_delivery_gln_from_sales_order(sales_order):
         return None
 
 def get_default_gln():
-    """Get default GLN from settings"""
-    try:
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if settings_list:
-            settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
-            if hasattr(settings, 'default_gln') and settings.default_gln:
-                return settings.default_gln
-    except:
-        pass
-    
+    """Get default GLN. Floriday Settings has no default_gln field, so this is
+    a fixed fallback; reintroduce a configurable field if multiple GLNs are needed."""
     return "8713783461136"
 
 def get_delivery_remarks(sales_order):
@@ -172,12 +164,7 @@ def order_fullment():
         step(f"STEP 1: Started. now={now}, looking back to {start_time}")
 
         # ── Settings ────────────────────────────────────────────────────────
-        settings_list = frappe.get_all("Floriday Settings", limit_page_length=1)
-        if not settings_list:
-            step("STEP 2 FAILED: Floriday Settings not configured")
-            return {"status": "error", "message": "Floriday Settings not configured"}
-
-        settings = frappe.get_doc("Floriday Settings", settings_list[0].name)
+        settings = frappe.get_single("Floriday Settings")
         API_KEY = settings.api_key
         BASE_URL = settings.base_url.rstrip('/')
         ACCESS_TOKEN = settings.access_token
