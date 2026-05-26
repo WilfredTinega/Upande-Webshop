@@ -113,41 +113,104 @@ class BulkPublishItems {
 
 	bind_progress() {
 		frappe.realtime.on("webshop_bulk_publish_progress", (data) => {
+			this.last_event_at = Date.now();
 			if (!this.progress_dialog) return;
 			const pct = Math.max(1, Math.min(100, Number(data.progress) || 0));
-			this.$progress_bar
-				.css("width", `${pct}%`)
-				.attr("aria-valuenow", pct)
-				.text(`${pct}%`);
-			this.$progress_msg.text(data.message || "");
+			this.set_progress(pct, data.message || "");
 		});
 
 		frappe.realtime.on("webshop_bulk_publish_done", (data) => {
-			this.in_progress = false;
-			if (this.progress_dialog) {
-				this.$progress_bar.css("width", "100%").text("100%");
-				this.$progress_msg.text(
-					__("Done. Published: {0}, Skipped: {1}, Failed: {2}", [
-						data.succeeded,
-						data.skipped,
-						data.failed,
-					])
-				);
-				this.progress_dialog.set_primary_action(__("Close"), () => {
-					this.progress_dialog.hide();
-					this.progress_dialog = null;
-					this.selected.clear();
-					this.reset_and_refresh();
-				});
-			}
-			if (data.errors && data.errors.length) {
-				frappe.msgprint({
-					title: __("Some items failed"),
-					message: data.errors.map(frappe.utils.escape_html).join("<br>"),
-					indicator: "orange",
-				});
-			}
+			this.last_event_at = Date.now();
+			this.finish_progress({
+				succeeded: data.succeeded,
+				skipped: data.skipped,
+				failed: data.failed,
+				errors: data.errors,
+			});
 		});
+	}
+
+	set_progress(pct, message) {
+		if (!this.progress_dialog) return;
+		this.$progress_bar
+			.css("width", `${pct}%`)
+			.attr("aria-valuenow", pct)
+			.text(`${pct}%`);
+		if (message) this.$progress_msg.text(message);
+	}
+
+	finish_progress({ succeeded, skipped, failed, errors }) {
+		this.in_progress = false;
+		this.stop_polling();
+		if (this.progress_dialog) {
+			this.set_progress(100, __("Done. Published: {0}, Skipped: {1}, Failed: {2}", [
+				succeeded || 0,
+				skipped || 0,
+				failed || 0,
+			]));
+			this.progress_dialog.set_primary_action(__("Close"), () => {
+				this.progress_dialog.hide();
+				this.progress_dialog = null;
+				this.selected.clear();
+				this.reset_and_refresh();
+			});
+		}
+		if (errors && errors.length) {
+			frappe.msgprint({
+				title: __("Some items failed"),
+				message: errors.map(frappe.utils.escape_html).join("<br>"),
+				indicator: "orange",
+			});
+		}
+	}
+
+	start_polling(codes) {
+		this.stop_polling();
+		this.poll_codes = codes;
+		this.poll_total = codes.length;
+		this.poll_started_at = Date.now();
+		this.last_event_at = Date.now();
+		this.poll_timer = setInterval(() => this.poll_status(), 4000);
+	}
+
+	stop_polling() {
+		if (this.poll_timer) {
+			clearInterval(this.poll_timer);
+			this.poll_timer = null;
+		}
+	}
+
+	async poll_status() {
+		if (!this.progress_dialog) {
+			this.stop_polling();
+			return;
+		}
+		try {
+			const r = await frappe.call({
+				method:
+					"upande_webshop.upande_webshop.page.bulk_publish_items.bulk_publish_items.get_publish_status",
+				args: { item_codes: this.poll_codes },
+			});
+			const total = (r.message && r.message.total) || this.poll_total || 1;
+			const published = (r.message && r.message.published) || 0;
+			const pct = Math.max(1, Math.min(99, Math.round((published / total) * 100)));
+			// Only nudge the bar forward if realtime hasn't updated it past this point.
+			const current = parseInt(this.$progress_bar.attr("aria-valuenow"), 10) || 0;
+			if (pct > current) {
+				this.set_progress(pct, __("Publishing {0} of {1}...", [published, total]));
+			}
+			const idle_ms = Date.now() - (this.last_event_at || this.poll_started_at);
+			if (published >= total && idle_ms > 5000) {
+				this.finish_progress({
+					succeeded: published,
+					skipped: 0,
+					failed: Math.max(0, total - published),
+					errors: [],
+				});
+			}
+		} catch (e) {
+			// transient errors are fine — keep polling
+		}
 	}
 
 	get_filters() {
@@ -300,8 +363,10 @@ class BulkPublishItems {
 					"upande_webshop.upande_webshop.page.bulk_publish_items.bulk_publish_items.publish_items",
 				args: { item_codes: codes },
 			});
+			this.start_polling(codes);
 		} catch (e) {
 			this.in_progress = false;
+			this.stop_polling();
 			this.update_publish_button();
 			if (this.progress_dialog) {
 				this.progress_dialog.hide();

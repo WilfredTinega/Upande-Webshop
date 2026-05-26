@@ -69,6 +69,23 @@ def get_items(item_group=None, brand=None, search=None, hide_published=1, start=
 
 
 @frappe.whitelist()
+def get_publish_status(item_codes):
+	"""Count how many of the given Item codes already have a Website Item.
+
+	Used by the page as a realtime-independent progress fallback.
+	"""
+	_check_permission()
+	if isinstance(item_codes, str):
+		item_codes = frappe.parse_json(item_codes)
+	item_codes = [c for c in (item_codes or []) if c]
+	if not item_codes:
+		return {"total": 0, "published": 0}
+
+	published = frappe.db.count("Website Item", filters={"item_code": ("in", item_codes)})
+	return {"total": len(item_codes), "published": published}
+
+
+@frappe.whitelist()
 def publish_items(item_codes):
 	"""Enqueue bulk publish for the given Item codes. Returns immediately."""
 	_check_permission()

@@ -1,4 +1,4 @@
-// Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
+// Copyright (c) 2026, Upande LTD and contributors
 // License: GNU General Public License v3. See license.txt
 
 // JS exclusive to /cart page
@@ -51,6 +51,16 @@ $.extend(shopping_cart, {
 			var input = $(this);
 			var item_code = input.attr("data-item-code");
 			var bunches = parseInt(input.val()) || 1;
+			// Clamp typed qty at the per-row stock cap (0 = no cap).
+			var maxBunches = parseInt(input.attr("data-max-bunches")) || 0;
+			if (maxBunches > 0 && bunches > maxBunches) {
+				bunches = maxBunches;
+				input.val(bunches);
+				frappe.show_alert({
+					message: __("Stock limit reached — capped at {0}.", [maxBunches]),
+					indicator: "orange"
+				}, 5);
+			}
 			var row = input.closest("tr");
 			var uom = row.attr("data-uom") || undefined;
 			var custom_length = row.attr("data-custom-length") || undefined;
@@ -66,6 +76,15 @@ $.extend(shopping_cart, {
 				newVal = 0;
 
 			if (btn.attr('data-dir') == 'up') {
+				// Honour the per-row stock cap (0 = no cap). At/over cap → no-op.
+				var maxBunches = parseInt(input.attr("data-max-bunches")) || 0;
+				if (maxBunches > 0 && oldValue >= maxBunches) {
+					frappe.show_alert({
+						message: __("Stock limit reached — only {0} bunch(es) available.", [maxBunches]),
+						indicator: "orange"
+					}, 5);
+					return;
+				}
 				newVal = oldValue + 1;
 			} else {
 				if (oldValue > 1) {
@@ -156,21 +175,23 @@ $.extend(shopping_cart, {
 			}, 50);
 		}
 
-		// Default to the next valid delivery date (today + transit_days) when the
-		// cart has no saved date, and persist it so the server-side quotation is
-		// consistent with what the picker shows.
+		// Default to the next valid delivery date when the cart has no saved
+		// date. The server-side _ensure_default_delivery_date already wrote
+		// tomorrow into the quotation on this request, so we only need to fill
+		// the picker — don't POST again or we race the existing save.
 		var default_value = shopping_cart._format_date(min_date);
-		if (initial_value) {
-			control.set_value(initial_value);
-		} else {
-			control.set_value(default_value);
-			frappe.call({
-				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
-				args: { delivery_date: default_value },
-			});
-		}
+		var prefill = initial_value || default_value;
 
+		// set_value schedules onchange via a microtask (Promise.then in
+		// base_control.js), so a synchronous `suppress_save = false` right after
+		// set_value runs BEFORE the change fires — the guard fails and we POST
+		// on every page load, racing the server's _ensure_default_delivery_date
+		// write and hitting `Record has changed since last read`. Release the
+		// guard in a microtask of our own so it runs strictly after onchange.
+		var suppress_save = true;
 		control.df.onchange = function() {
+			if (suppress_save) return;
+
 			var value = control.get_value();
 			if (!value) return;
 
@@ -186,7 +207,9 @@ $.extend(shopping_cart, {
 					message: __("Please select a date after today."),
 					indicator: "orange",
 				}, 5);
+				suppress_save = true;
 				control.set_value("");
+				Promise.resolve().then(function() { suppress_save = false; });
 				return;
 			}
 
@@ -195,6 +218,9 @@ $.extend(shopping_cart, {
 				args: { delivery_date: value },
 			});
 		};
+
+		control.set_value(prefill);
+		Promise.resolve().then(function() { suppress_save = false; });
 	},
 
 	// ---- Delivery Point ----
@@ -239,17 +265,23 @@ $.extend(shopping_cart, {
 			});
 		}
 
-		if (initial_value) {
-			control.set_value(initial_value);
-		}
-
+		// Wire onchange before set_value, with a suppress flag so the initial
+		// prefill doesn't race a save against the page-load _ensure_default_*
+		// path.
+		var suppress_save = true;
 		control.df.onchange = function() {
+			if (suppress_save) return;
 			var value = control.get_value() || "";
 			frappe.call({
 				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_point",
 				args: { delivery_point: value },
 			});
 		};
+
+		if (initial_value) {
+			control.set_value(initial_value);
+		}
+		suppress_save = false;
 	},
 
 	// Fallback if controls.bundle fails to load — keeps the form functional.
@@ -271,18 +303,13 @@ $.extend(shopping_cart, {
 	// Fallback if controls.bundle fails to load — keeps the form functional.
 	_render_native_date_input: function($wrapper, initial_value, min_date, min_offset) {
 		var min_iso = shopping_cart._format_date(min_date);
+		// _ensure_default_delivery_date already wrote tomorrow server-side, so
+		// just prefill the input without POSTing again.
 		var default_value = initial_value || min_iso;
 		var $input = $('<input type="date" class="form-control font-md" style="cursor:pointer;">')
 			.attr("min", min_iso)
 			.val(default_value);
 		$wrapper.empty().append($input);
-
-		if (!initial_value) {
-			frappe.call({
-				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
-				args: { delivery_date: default_value },
-			});
-		}
 
 		$input.on("click focus", function() {
 			if (typeof this.showPicker === "function") {

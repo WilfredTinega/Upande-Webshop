@@ -140,6 +140,15 @@ class InlineVariantSelector {
 
 		this.$root.on('input', '.bunches-display', () => {
 			this._user_edited_bunches = true;
+			// Clamp typed/pasted values at the stock cap before recalc, so total
+			// stems and validation messages reflect what the user can actually add.
+			const max_attr = parseInt(this.$bunches_display.attr('max'));
+			if (!isNaN(max_attr) && max_attr >= 0) {
+				const val = parseInt(this.$bunches_display.val()) || 0;
+				if (val > max_attr) {
+					this.$bunches_display.val(max_attr);
+				}
+			}
 			this.recalculate_totals();
 		});
 
@@ -314,6 +323,7 @@ class InlineVariantSelector {
 					this._in_stock = null;
 				}
 				this.set_item_found_status_with_stock();
+				this.apply_stock_cap_to_bunches();
 				this.update_addable_state();
 			},
 			error: () => {
@@ -322,6 +332,7 @@ class InlineVariantSelector {
 				this._stock_qty = null;
 				this._show_stock_qty = false;
 				this._on_backorder = false;
+				this.apply_stock_cap_to_bunches();
 				this.update_addable_state();
 			}
 		});
@@ -492,9 +503,30 @@ class InlineVariantSelector {
 		const total_stems = num_bunches * bunch_size;
 		this.$total_stems_display.val(total_stems);
 
+		this.apply_stock_cap_to_bunches();
 		this.validate_moq(total_stems, num_bunches);
 		this.update_price_display();
 		this.update_addable_state();
+	}
+
+	apply_stock_cap_to_bunches() {
+		// Cap the bunches input at floor(stock_qty / bunch_size). Setting `max`
+		// on a native <input type="number"> stops the up-arrow at the cap and
+		// prevents the spinner from exceeding stock. We also clamp typed values
+		// in the `input` handler below for keyboard entry.
+		const bunch_size = this.bunch_size || 1;
+		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
+		if (stock_qty == null || stock_qty < 0 || !this._in_stock) {
+			this.$bunches_display.removeAttr('max');
+			return;
+		}
+		const max_bunches = Math.floor(stock_qty / bunch_size);
+		this.$bunches_display.attr('max', max_bunches);
+		const current = parseInt(this.$bunches_display.val()) || 0;
+		if (max_bunches >= 0 && current > max_bunches) {
+			this.$bunches_display.val(max_bunches);
+			this.$total_stems_display.val(max_bunches * bunch_size);
+		}
 	}
 
 	validate_moq(total_stems, num_bunches) {
@@ -647,7 +679,6 @@ class InlineVariantSelector {
 		const total_stems = parseInt(this.$total_stems_display.val()) || 0;
 		const num_bunches = parseInt(this.$bunches_display.val()) || 0;
 		const bunch_size = this.bunch_size || 1;
-		const custom_length = this.selected_attributes['Length'] || this.selected_attributes['Stem Length'] || '';
 		const pack_rate = this._pack_rate || 0;
 
 		if (!total_stems) {
@@ -692,7 +723,6 @@ class InlineVariantSelector {
 			qty: num_bunches,
 			uom: this.bunch_uom || undefined,
 			additional_notes,
-			custom_length,
 			box_type,
 			callback: (r) => {
 				this.update_addable_state();

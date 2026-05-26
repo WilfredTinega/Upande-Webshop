@@ -945,6 +945,11 @@ body.hide-frappe-navbar {
 				font-size: 20px;
 				font-weight: 300;
 				color: var(--gray-700);
+
+				&:disabled {
+					opacity: 0.45;
+					cursor: not-allowed;
+				}
 			}
 
 			.cart-qty {

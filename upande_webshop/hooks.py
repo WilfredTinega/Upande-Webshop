@@ -250,12 +250,34 @@ before_migrate = [
 	"upande_webshop.setup.stem_length_guard.guard",
 ]
 
-# Restore Floriday Settings-driven scheduled jobs after every migrate (Frappe's
-# scheduler sync deletes Scheduled Job Type rows whose method isn't declared in
-# any app's scheduler_events — our jobs are user-configured per Floriday Settings,
-# so we re-upsert them here).
+# after_migrate runs in this order:
+#   1. resync_app_resources — force-reloads every JSON resource we ship
+#      (workspace, page/bulk-publish-items, doctypes, …). Frappe's normal sync
+#      skips files whose `modified` is older than the DB record, so once the
+#      workspace is edited in the UI new shortcuts in the JSON never reach the
+#      site. We bypass that with reload_doc(..., force=True).
+#   2. add_custom_fields — re-applies custom field definitions (Item Group,
+#      Item Price, Website Item, Quotation Item, …) so additions show up
+#      without reinstall.
+#   3. ensure_variant_attributes — create Stem Length / Box Type Item Attribute
+#      records if missing, so variant Items can be built against them.
+#   4. apply_webshop_settings_defaults — set storefront flags
+#      (enable_field_filters, enable_variants, show_stem_length, show_box_type,
+#      show_bunch) only where currently 0/null, never overwriting an explicit
+#      admin choice.
+#   5. cleanup_blocking_property_setters — remove Property Setters known to
+#      break checkout (e.g. Sales Order.shipping_address_name reqd=1, which
+#      blocks add-to-cart for guests before they reach the cart-page address
+#      step).
+#   6. Floriday + Biflorica resync_scheduled_jobs — restore Scheduled Job Type
+#      rows that Frappe's scheduler sync prunes (user-configured per Settings
+#      doc, not declared in scheduler_events).
 after_migrate = [
+	"upande_webshop.setup.install.resync_app_resources",
 	"upande_webshop.setup.install.add_custom_fields",
+	"upande_webshop.setup.install.ensure_variant_attributes",
+	"upande_webshop.setup.install.apply_webshop_settings_defaults",
+	"upande_webshop.setup.install.cleanup_blocking_property_setters",
 	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs",
 	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.resync_scheduled_jobs",
 ]

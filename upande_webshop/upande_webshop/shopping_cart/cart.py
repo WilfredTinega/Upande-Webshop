@@ -1,6 +1,3 @@
-# Copyright (c) 2015, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
-
 import frappe
 import frappe.defaults
 from frappe import _, throw
@@ -87,6 +84,7 @@ def get_cart_quotation(doc=None):
 		update_cart_address("billing", addresses[0].name)
 
 	_ensure_default_delivery_date(doc)
+	_decorate_items_with_stock_cap(doc)
 
 	return {
 		"doc": decorate_quotation_doc(doc),
@@ -193,6 +191,112 @@ def _check_box_type_min_order_qty(quotation):
 	return None
 
 
+def _decorate_items_with_stock_cap(doc):
+	"""Stamp each cart row with `_max_stock_bunches` so the template can
+	disable the qty `+` button when the row would exceed available stock.
+
+	Cap is computed per (item, length) and *excludes* other cart rows for
+	the same key — matching server-side enforcement in `update_cart`, where
+	`other_rows_stock_qty` reduces the remaining headroom. The result is
+	whole bunches: floor((available - other) / stems_per_bunch).
+
+	Non-stock items, free items, and carts with `allow_items_not_in_stock`
+	enabled are left at sentinel `0` (template treats 0 as "no cap").
+	"""
+	if not doc or not doc.get("items"):
+		return
+
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	if cint(cart_settings.get("allow_items_not_in_stock")):
+		return
+
+	avail_cache = {}
+	for item in doc.get("items"):
+		try:
+			item._max_stock_bunches = 0
+			if getattr(item, "is_free_item", 0):
+				continue
+			if not frappe.db.get_value("Item", item.item_code, "is_stock_item"):
+				continue
+
+			key = (item.item_code, item.get("custom_length") or "")
+			if key not in avail_cache:
+				avail_cache[key] = flt(
+					_stock_uom_qty_available(item.item_code, key[1] or None)
+				)
+			available = avail_cache[key]
+
+			other_rows_stock_qty = sum(
+				flt(i.stock_qty)
+				for i in doc.get("items")
+				if i.name != item.name
+				and i.item_code == item.item_code
+				and (i.get("custom_length") or "") == key[1]
+			)
+			remaining = max(0.0, available - other_rows_stock_qty)
+			stems_per_bunch = flt(_stems_per_bunch_from_uom(item.uom)) or 1
+			item._max_stock_bunches = int(remaining // stems_per_bunch)
+		except Exception:
+			item._max_stock_bunches = 0
+
+
+def _assign_sequential_box_ids(doc):
+	"""Stamp `custom_box_id` on each item row with a sequential integer (1..N)
+	in idx order, but only when the doctype actually has the field.
+
+	Tambuzi marks Sales Order Item.custom_box_id as reqd=1; the cart has no UI
+	to set it. Downstream pick-list automation re-derives box ids during
+	packing, so the values written here are just placeholders to clear the
+	mandatory validator.
+	"""
+	items = doc.get("items") or []
+	if not items:
+		return
+	child_meta = frappe.get_meta(items[0].doctype)
+	if not child_meta.has_field("custom_box_id"):
+		return
+	for idx, item in enumerate(items, start=1):
+		if not item.get("custom_box_id"):
+			item.custom_box_id = idx
+
+
+def _validate_cart_stock(doc):
+	"""Throw if the cart's total demand per (item, length) exceeds available stock.
+
+	Aggregates across all rows so that splitting one item across multiple cart
+	rows (different box types / UOMs but same item+length) cannot collectively
+	oversell. Skips items where `is_stock_item` is 0. No-op if the cart setting
+	`allow_items_not_in_stock` is enabled — that toggle is the caller's check.
+	"""
+	stock_qty_by_key = {}
+	for item in doc.get("items") or []:
+		if not frappe.db.get_value("Item", item.item_code, "is_stock_item"):
+			continue
+		key = (item.item_code, item.get("custom_length") or "")
+		stock_qty_by_key[key] = stock_qty_by_key.get(key, 0.0) + flt(item.stock_qty)
+
+	for (item_code, custom_length), requested in stock_qty_by_key.items():
+		item_stock = get_web_item_qty_in_stock(item_code, "website_warehouse")
+		if not cint(item_stock.in_stock):
+			throw(_("{0} Not in Stock").format(item_code))
+
+		available_stock_qty = flt(
+			_stock_uom_qty_available(item_code, custom_length or None)
+		)
+		if requested > available_stock_qty:
+			stock_uom = frappe.db.get_value("Item", item_code, "stock_uom") or ""
+			length_label = custom_length or _("any length")
+			throw(
+				_("Only {0} {1} of {2} ({3}) available in stock — your cart has {4} {1}.").format(
+					_fmt_qty(available_stock_qty),
+					stock_uom,
+					item_code,
+					length_label,
+					_fmt_qty(requested),
+				)
+			)
+
+
 @frappe.whitelist()
 def place_order():
 	quotation = _get_cart_quotation()
@@ -218,6 +322,7 @@ def place_order():
 		)
 	)
 	sales_order.payment_schedule = []
+	_assign_sequential_box_ids(sales_order)
 
 	# Ensure delivery_date is at least tomorrow (next day from today).
 	# Sales Order requires a future date; if the quotation didn't carry a fresh
@@ -229,33 +334,14 @@ def place_order():
 		if not so_item.delivery_date or getdate(so_item.delivery_date) < getdate(tomorrow):
 			so_item.delivery_date = tomorrow
 
-	if not cint(cart_settings.allow_items_not_in_stock):
+	if not cint(cart_settings.get("allow_items_not_in_stock")):
+		# Refresh warehouse pointers before validating; the cart UI doesn't always
+		# set them on append.
 		for item in sales_order.get("items"):
 			item.warehouse = frappe.db.get_value(
 				"Website Item", {"item_code": item.item_code}, "website_warehouse"
 			)
-			is_stock_item = frappe.db.get_value("Item", item.item_code, "is_stock_item")
-
-			if is_stock_item:
-				item_stock = get_web_item_qty_in_stock(
-					item.item_code, "website_warehouse"
-				)
-				if not cint(item_stock.in_stock):
-					throw(_("{0} Not in Stock").format(item.item_code))
-				# Compare in stock UOM (stems) using length-aware availability so a
-				# customer can't oversell a specific length even if the item has
-				# enough total stock across lengths.
-				available_stock_qty = flt(
-					_stock_uom_qty_available(item.item_code, item.get("custom_length"))
-				)
-				if flt(item.stock_qty) > available_stock_qty:
-					stock_uom = frappe.db.get_value("Item", item.item_code, "stock_uom") or ""
-					length_label = item.get("custom_length") or _("any length")
-					throw(
-						_("Only {0} {1} of {2} ({3}) available in stock").format(
-							available_stock_qty, stock_uom, item.item_code, length_label
-						)
-					)
+		_validate_cart_stock(sales_order)
 
 	sales_order.flags.ignore_permissions = True
 	sales_order.insert()
@@ -273,6 +359,16 @@ def request_for_quotation():
 	box_err = _check_box_type_min_order_qty(quotation)
 	if box_err:
 		return {"error": box_err}
+
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	if not cint(cart_settings.get("allow_items_not_in_stock")):
+		_validate_cart_stock(quotation)
+
+	# When the cart container is Sales Order, Tambuzi's reqd=1
+	# `custom_box_id` on Sales Order Item must be populated before save.
+	# Helper is a no-op when the field doesn't exist (Quotation, Kaitet, etc).
+	_assign_sequential_box_ids(quotation)
+
 	quotation.flags.ignore_permissions = True
 	quotation.flags.ignore_validate = True
 	quotation.save()
@@ -478,12 +574,18 @@ def _apply_length_price_db(quotation):
 def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=None, custom_box_type=None, with_items=False, child_docname=None):
 	quotation = _get_cart_quotation()
 
+	# Sites without the rose/length flow (mona, tambuzi) won't have custom_length /
+	# custom_box_type on Quotation/Sales Order Item — fall back to getattr/None.
+	child_dt = "Sales Order Item" if quotation.doctype == "Sales Order" else "Quotation Item"
+	has_custom_length = frappe.db.has_column(child_dt, "custom_length")
+	has_custom_box_type = frappe.db.has_column(child_dt, "custom_box_type")
+
 	empty_card = False
 	qty = flt(qty)
 
 	if qty > 0:
 		cart_settings = frappe.get_cached_doc("Webshop Settings")
-		if not cint(cart_settings.allow_items_not_in_stock):
+		if not cint(cart_settings.get("allow_items_not_in_stock")):
 			is_stock_item = frappe.db.get_value("Item", item_code, "is_stock_item")
 			if is_stock_item:
 				item_stock = get_web_item_qty_in_stock(item_code, "website_warehouse")
@@ -499,18 +601,19 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 				def _is_row_being_replaced(i):
 					if child_docname:
 						return i.name == child_docname
-					return (
-						i.item_code == item_code
-						and (i.custom_length or "") == (custom_length or "")
-						and (i.custom_box_type or "") == (custom_box_type or "")
-						and (i.uom or "") == (uom or "")
-					)
+					if i.item_code != item_code:
+						return False
+					if has_custom_length and (i.get("custom_length") or "") != (custom_length or ""):
+						return False
+					if has_custom_box_type and (i.get("custom_box_type") or "") != (custom_box_type or ""):
+						return False
+					return (i.uom or "") == (uom or "")
 
 				other_rows_stock_qty = sum(
 					flt(i.stock_qty)
 					for i in quotation.get("items", [])
 					if i.item_code == item_code
-					and (i.custom_length or "") == (custom_length or "")
+					and (not has_custom_length or (i.get("custom_length") or "") == (custom_length or ""))
 					and not _is_row_being_replaced(i)
 				)
 				available_stock_qty = flt(_stock_uom_qty_available(item_code, custom_length))
@@ -552,13 +655,18 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 		if child_docname:
 			matched = [i for i in quotation.get("items") if i.name == child_docname]
 		else:
-			matched = [
-				i for i in quotation.get("items")
-				if i.item_code == item_code
-				and (i.custom_length or "") == (custom_length or "")
-				and (i.custom_box_type or "") == (custom_box_type or "")
-				and (i.uom or "") == (uom or "")
-			]
+			def _matches(i):
+				if i.item_code != item_code:
+					return False
+				if has_custom_length and (i.get("custom_length") or "") != (custom_length or ""):
+					return False
+				if has_custom_box_type and (i.get("custom_box_type") or "") != (custom_box_type or ""):
+					return False
+				return (i.uom or "") == (uom or "")
+
+			matched = [i for i in quotation.get("items") if _matches(i)]
+
+		has_total_stems = frappe.db.has_column(child_dt, "custom_total_stems")
 
 		if not matched:
 			# New combination — append a new row
@@ -568,31 +676,31 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			# UOM Conversion Detail may be missing entries for custom bunch UOMs.
 			conversion_factor = flt(_stems_per_bunch_from_uom(uom))
 			total_stems = qty * conversion_factor
-			child_dt = "Sales Order Item" if quotation.doctype == "Sales Order" else "Quotation Item"
-			quotation.append(
-				"items",
-				{
-					"doctype": child_dt,
-					"item_code": item_code,
-					"qty": qty,
-					"uom": uom,
-					"conversion_factor": conversion_factor,
-					"stock_qty": total_stems,
-					"custom_total_stems": total_stems,
-					"custom_length": custom_length,
-					"custom_box_type": custom_box_type,
-					"additional_notes": additional_notes,
-					"warehouse": warehouse,
-				},
-			)
+			new_row = {
+				"doctype": child_dt,
+				"item_code": item_code,
+				"qty": qty,
+				"uom": uom,
+				"conversion_factor": conversion_factor,
+				"stock_qty": total_stems,
+				"additional_notes": additional_notes,
+				"warehouse": warehouse,
+			}
+			if has_total_stems:
+				new_row["custom_total_stems"] = total_stems
+			if has_custom_length:
+				new_row["custom_length"] = custom_length
+			if has_custom_box_type:
+				new_row["custom_box_type"] = custom_box_type
+			quotation.append("items", new_row)
 		else:
 			item = matched[0]
 			item.qty = qty
 			if uom:
 				item.uom = uom
-			if custom_length:
+			if has_custom_length and custom_length:
 				item.custom_length = custom_length
-			if custom_box_type:
+			if has_custom_box_type and custom_box_type:
 				item.custom_box_type = custom_box_type
 			item.warehouse = warehouse
 			item.additional_notes = additional_notes
@@ -605,7 +713,8 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			item.conversion_factor = cf
 			total_stems = qty * cf
 			item.stock_qty = total_stems
-			item.custom_total_stems = total_stems
+			if has_total_stems:
+				item.custom_total_stems = total_stems
 
 	# Row removal must always succeed, even if pricing/FX is misconfigured.
 	# On qty==0 we delete the Quotation Item directly via DB and skip the full
@@ -647,6 +756,10 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			quotation = frappe.get_doc(parent_dt, quotation.name)
 	else:
 		apply_cart_settings(quotation=quotation)
+		# Tambuzi's Sales Order Item.custom_box_id is reqd=1; `ignore_validate`
+		# doesn't skip mandatory checks, so every cart save needs ids stamped.
+		# Helper is a no-op when the field doesn't exist on this cart's child doctype.
+		_assign_sequential_box_ids(quotation)
 		quotation.flags.ignore_permissions = True
 		quotation.flags.ignore_validate = True
 		quotation.payment_schedule = []
@@ -1063,9 +1176,11 @@ def get_party(user=None):
 
 	if contact_name:
 		contact = frappe.get_doc("Contact", contact_name)
-		if contact.links:
-			party_doctype = contact.links[0].link_doctype
-			party = contact.links[0].link_name
+		for link in contact.links:
+			if frappe.db.exists(link.link_doctype, link.link_name):
+				party_doctype = link.link_doctype
+				party = link.link_name
+				break
 
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
 
@@ -1347,7 +1462,24 @@ def update_cart_delivery_date(delivery_date):
 	if not delivery_date or getdate(delivery_date) < getdate(tomorrow):
 		delivery_date = tomorrow
 	quotation = _get_cart_quotation()
+	requested = getdate(delivery_date)
+	current = quotation.get("delivery_date")
+	current_custom = quotation.get("custom_delivery_date")
+	already_current = (
+		current and getdate(current) == requested
+		and (not quotation.meta.has_field("custom_delivery_date")
+		     or (current_custom and getdate(current_custom) == requested))
+	)
+	# Page load fires onchange from the datepicker's programmatic set_value,
+	# so this endpoint gets POSTed redundantly. Skip the save when nothing
+	# would actually change — avoids racing _ensure_default_delivery_date's
+	# in-render write and the "Record has changed since last read" error.
+	if already_current:
+		return {"name": quotation.name, "delivery_date": str(delivery_date)}
+
 	quotation.delivery_date = delivery_date
+	if quotation.meta.has_field("custom_delivery_date"):
+		quotation.custom_delivery_date = delivery_date
 	quotation.flags.ignore_permissions = True
 	quotation.save()
 	return {"name": quotation.name, "delivery_date": str(delivery_date)}

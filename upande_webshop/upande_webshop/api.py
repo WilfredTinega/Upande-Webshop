@@ -85,15 +85,6 @@ def get_guest_redirect_on_action():
 	return frappe.db.get_single_value("Webshop Settings", "redirect_on_action")
 
 
-@frappe.whitelist()
-def get_post_login_redirect():
-	"""Return the correct redirect URL after login based on the user's role.
-	Customers go to /webshop; all other roles go to /app (desk).
-	"""
-	if "Customer" in frappe.get_roles(frappe.session.user):
-		return "/webshop"
-	return "/app"
-
 @frappe.whitelist(allow_guest=True)
 def get_box_items():
 	"""Return only BOX items from PACKAGING group for the box type dropdown."""
@@ -104,36 +95,6 @@ def get_box_items():
 		order_by="item_name asc"
 	)
 	return items
-
-@frappe.whitelist(allow_guest=True)
-def get_pack_rate(item_code):
-	"""Return default_pack_rate for a variant item."""
-	rate = frappe.db.get_value("Item", item_code, "default_pack_rate")
-	return {"default_pack_rate": rate or 0}
-
-
-@frappe.whitelist(allow_guest=True)
-def get_pack_rates_map():
-	"""
-	Return all Pack Rate records as a nested map:
-	    { variety_lowercase: { box_key: { length_cm: stems_per_box } } }
-	box_key is 'std' for Standard, 'zim' for Zim — matching item_configure.js.
-	"""
-	rows = frappe.get_all(
-		"Pack Rate",
-		fields=["variety", "box_group", "length_cm", "stems_per_box"],
-	)
-	box_key_map = {"Standard": "std", "Zim": "zim"}
-	result = {}
-	for r in rows:
-		variety = (r.variety or "").lower().strip()
-		box_key = box_key_map.get(r.box_group)
-		if not variety or not box_key or not r.length_cm:
-			continue
-		result.setdefault(variety, {}).setdefault(box_key, {})[int(r.length_cm)] = int(
-			r.stems_per_box or 0
-		)
-	return result
 
 @frappe.whitelist()
 def get_customer_boxes():

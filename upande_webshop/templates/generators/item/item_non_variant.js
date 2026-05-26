@@ -168,7 +168,16 @@ class InlineNonVariantSelector {
 			const length = String($input.closest('.length-row').data('length'));
 			const state = this.length_state.get(length);
 			if (!state) return;
-			state.num_bunches = Math.max(parseInt($input.val()) || 0, 0);
+			let raw = Math.max(parseInt($input.val()) || 0, 0);
+			// Clamp at per-length stock cap. data-max-bunches is set on render
+			// from floor(stock_qty / bunch_size); enforce both the spinner-click
+			// path and typed/pasted values here.
+			const maxAttr = parseInt($input.attr('data-max-bunches'));
+			if (!isNaN(maxAttr) && maxAttr >= 0 && raw > maxAttr) {
+				raw = maxAttr;
+				$input.val(raw);
+			}
+			state.num_bunches = raw;
 			state.user_edited = true;
 			this.update_row(length);
 			this.update_grand_totals();
@@ -195,6 +204,15 @@ class InlineNonVariantSelector {
 			const stockText = (state.stock_qty != null)
 				? `${__('Stock')}: ${Number(state.stock_qty).toLocaleString()}`
 				: '';
+			// Cap bunches at floor(stock_qty / bunch_size). 0 = no cap (stock unknown
+			// or item not stock-tracked). The actual click-time enforcement lives in
+			// the `input` handler — `max` alone doesn't block browser spinner clicks.
+			const bunchSize = this.bunch_size || 1;
+			const maxBunches = (state.stock_qty != null && state.stock_qty >= 0)
+				? Math.floor(Number(state.stock_qty) / bunchSize)
+				: '';
+			const maxAttr = maxBunches !== '' ? `max="${maxBunches}"` : '';
+			const dataMaxAttr = maxBunches !== '' ? `data-max-bunches="${maxBunches}"` : '';
 			return `
 				<div class="length-row" data-length="${frappe.utils.escape_html(length)}">
 					<div>
@@ -212,7 +230,7 @@ class InlineNonVariantSelector {
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
 							${__('No. of Bunches')}
 						</label>
-						<input type="number" class="form-control bunches-input" value="${state.num_bunches || 0}" min="0">
+						<input type="number" class="form-control bunches-input" value="${state.num_bunches || 0}" min="0" ${maxAttr} ${dataMaxAttr}>
 					</div>
 					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">=</div>
 					<div>
@@ -246,6 +264,24 @@ class InlineNonVariantSelector {
 			`.length-row[data-length="${$.escapeSelector(length)}"]`
 		);
 		if (!state || !$row.length) return;
+
+		// Refresh the stock cap on the bunches input. Stock or bunch_size may
+		// have changed since render — keep `max` and `data-max-bunches` in sync
+		// and clamp any prior bunches value down to the new cap.
+		const $bunches = $row.find('.bunches-input');
+		const bunchSize = this.bunch_size || 1;
+		if (state.stock_qty != null && state.stock_qty >= 0) {
+			const maxBunches = Math.floor(Number(state.stock_qty) / bunchSize);
+			$bunches.attr('max', maxBunches);
+			$bunches.attr('data-max-bunches', maxBunches);
+			if ((state.num_bunches || 0) > maxBunches) {
+				state.num_bunches = maxBunches;
+				$bunches.val(maxBunches);
+			}
+		} else {
+			$bunches.removeAttr('max');
+			$bunches.removeAttr('data-max-bunches');
+		}
 
 		const total_stems = (state.num_bunches || 0) * (this.bunch_size || 1);
 		$row.find('.total-stems').val(total_stems);
