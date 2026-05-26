@@ -20,26 +20,79 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_remove_coupon_code();
 		shopping_cart.bind_delivery_date();
 		shopping_cart.bind_delivery_point();
+		shopping_cart.bind_box_type();
+		shopping_cart.bind_line_code();
+	},
+
+	bind_line_code: function() {
+		// Cart-level Line Code (sidebar input). Save on blur/Enter; skip if unchanged.
+		var $input = $("#cart-line-code");
+		if (!$input.length) return;
+		$input.on("focus", function() {
+			$(this).data("last-saved", $(this).val());
+		});
+		$input.on("change blur", function() {
+			var $el = $(this);
+			var value = $el.val() || "";
+			if ($el.data("last-saved") === value) return;
+			$el.data("last-saved", value);
+			frappe.call({
+				type: "POST",
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_line_code",
+				args: { line_code: value },
+			});
+		});
+		$input.on("keydown", function(e) {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				$(this).blur();
+			}
+		});
+	},
+
+	_validate_required_cart_fields: function() {
+		// Returns true when all required cart-level fields are filled in.
+		// Shows an alert + focuses the offending input on the first miss.
+		var delivery_date = $("#delivery-date").val();
+		if (!delivery_date) {
+			frappe.show_alert({
+				message: __('Please select an expected delivery date before placing your order.'),
+				indicator: 'red'
+			}, 5);
+			$("#delivery-date").focus();
+			return false;
+		}
+		var $dp = $("#delivery-point-wrapper").find("input").first();
+		if ($dp.length && !($dp.val() || "").trim()) {
+			frappe.show_alert({
+				message: __('Please select a Delivery Point before placing your order.'),
+				indicator: 'red'
+			}, 5);
+			$dp.focus();
+			return false;
+		}
+		var $lc = $("#cart-line-code");
+		if ($lc.length && !($lc.val() || "").trim()) {
+			frappe.show_alert({
+				message: __('Please enter a Line Code before placing your order.'),
+				indicator: 'red'
+			}, 5);
+			$lc.focus();
+			return false;
+		}
+		return true;
 	},
 
 	bind_place_order: function() {
 		$(".btn-place-order").on("click", function() {
-			// Validate delivery date is set before placing order
-			var delivery_date = $("#delivery-date").val();
-			if (!delivery_date) {
-				frappe.show_alert({
-					message: __('Please select an expected delivery date before placing your order.'),
-					indicator: 'red'
-				}, 5);
-				$("#delivery-date").focus();
-				return;
-			}
+			if (!shopping_cart._validate_required_cart_fields()) return;
 			shopping_cart.place_order(this);
 		});
 	},
 
 	bind_request_quotation: function() {
 		$('.btn-request-for-quotation').on('click', function() {
+			if (!shopping_cart._validate_required_cart_fields()) return;
 			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
 			window.onbeforeunload = null;
 			shopping_cart.request_quotation(this);
@@ -299,6 +352,90 @@ $.extend(shopping_cart, {
 		});
 	},
 	// ---- End Delivery Point ----
+
+	// ---- Box Type ----
+	bind_box_type: function() {
+		var $wrapper = $("#box-type-wrapper");
+		if (!$wrapper.length) return;
+
+		var initial_value = $wrapper.data("initial-value") || "";
+
+		if (!(frappe.ui && frappe.ui.form && frappe.ui.form.make_control)) {
+			shopping_cart._render_native_box_type($wrapper, initial_value);
+			return;
+		}
+
+		var control = frappe.ui.form.make_control({
+			parent: $wrapper.get(0),
+			df: {
+				fieldtype: "Autocomplete",
+				fieldname: "custom_box_type",
+				label: "",
+				placeholder: __("Select box type"),
+			},
+			render_input: true,
+			only_input: true,
+		});
+
+		var load_options = function(txt) {
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.search_box_types",
+				args: { txt: txt || "", limit: 50 },
+				callback: function(r) {
+					var rows = (r && r.message) || [];
+					control.set_data(rows);
+				},
+			});
+		};
+		load_options("");
+
+		if (control.$input && control.$input.length) {
+			control.$input.on("input", function() {
+				load_options($(this).val() || "");
+			});
+		}
+
+		var suppress_save = true;
+		control.df.onchange = function() {
+			if (suppress_save) return;
+			var value = control.get_value() || "";
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_box_type",
+				args: { box_type: value },
+				callback: function(r) {
+					if (r && r.message && r.message.reload) {
+						window.location.reload();
+					}
+				},
+			});
+		};
+
+		if (initial_value) {
+			control.set_value(initial_value);
+		}
+		suppress_save = false;
+	},
+
+	// Fallback if controls.bundle fails to load — keeps the form functional.
+	_render_native_box_type: function($wrapper, initial_value) {
+		var $input = $('<input type="text" class="form-control font-md" placeholder="' + __("Select box type") + '">')
+			.val(initial_value);
+		$wrapper.empty().append($input);
+
+		$input.on("change", function() {
+			var value = $(this).val() || "";
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_box_type",
+				args: { box_type: value },
+				callback: function(r) {
+					if (r && r.message && r.message.reload) {
+						window.location.reload();
+					}
+				},
+			});
+		});
+	},
+	// ---- End Box Type ----
 
 	// Fallback if controls.bundle fails to load — keeps the form functional.
 	_render_native_date_input: function($wrapper, initial_value, min_date, min_offset) {

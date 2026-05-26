@@ -93,11 +93,33 @@
 
 					<div class="mt-3">
 						<label for="delivery-point" class="form-label delivery-field-label">
-							{{ _('Delivery Point') }}
+							{{ _('Delivery Point') }} <span class="text-danger">*</span>
 						</label>
 						<div id="delivery-point-wrapper"
 							data-initial-value="{{ doc.custom_delivery_point or '' }}"></div>
 					</div>
+
+					<div class="mt-3">
+						<label for="box-type" class="form-label delivery-field-label">
+							{{ _('Box Type') }}
+						</label>
+						<div id="box-type-wrapper"
+							data-initial-value="{{ doc.get('custom_box_type') or '' }}"></div>
+					</div>
+
+					{% if frappe.get_meta(doc.doctype).has_field('custom_line_code') %}
+					<div class="mt-3">
+						<label for="line-code" class="form-label delivery-field-label">
+							{{ _('Line Code') }} <span class="text-danger">*</span>
+						</label>
+						<input type="text"
+							id="cart-line-code"
+							class="form-control font-md"
+							value="{{ doc.get('custom_line_code') or '' }}"
+							maxlength="140"
+							placeholder="{{ _('Enter line code') }}">
+					</div>
+					{% endif %}
 				</div>
 
 				<!-- Apply Coupon Code  -->
@@ -128,7 +150,6 @@
 					</div>
 				</div>
 
-				{% include "templates/includes/cart/cart_address.html" %}
 			</div>
 		</div>
 		{% endif %}

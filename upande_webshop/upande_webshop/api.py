@@ -1,6 +1,7 @@
 import json
 
 import frappe
+from frappe import _
 from frappe.utils import cint
 
 from upande_webshop.upande_webshop.product_data_engine.filters import ProductFiltersBuilder
@@ -138,6 +139,20 @@ def get_customer_boxes():
 		fields=["name", "item_name"],
 		order_by="item_name asc"
 	)
+
+
+@frappe.whitelist()
+def set_user_profile_image(file_url):
+	"""Store a profile image URL on the currently logged-in User."""
+	if not frappe.session.user or frappe.session.user == "Guest":
+		frappe.throw(_("You must be logged in to update your profile image."), frappe.PermissionError)
+
+	if not file_url:
+		frappe.throw(_("No profile image was provided."))
+
+	frappe.db.set_value("User", frappe.session.user, "user_image", file_url, update_modified=False)
+	frappe.db.commit()
+	return {"user_image": file_url}
 
 
 @frappe.whitelist(allow_guest=True)

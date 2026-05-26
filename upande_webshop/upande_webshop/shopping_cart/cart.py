@@ -297,9 +297,23 @@ def _validate_cart_stock(doc):
 			)
 
 
+def _check_required_cart_fields(quotation):
+	"""Cart-level required fields (Delivery Point, Line Code). Returns an error
+	dict the place_order / request_for_quotation endpoints surface to the UI,
+	or None when everything is filled in."""
+	if quotation.meta.has_field("custom_delivery_point") and not (quotation.get("custom_delivery_point") or "").strip():
+		return _("Please select a Delivery Point before placing your order.")
+	if quotation.meta.has_field("custom_line_code") and not (quotation.get("custom_line_code") or "").strip():
+		return _("Please enter a Line Code before placing your order.")
+	return None
+
+
 @frappe.whitelist()
 def place_order():
 	quotation = _get_cart_quotation()
+	required_err = _check_required_cart_fields(quotation)
+	if required_err:
+		return {"error": required_err}
 	box_err = _check_box_type_min_order_qty(quotation)
 	if box_err:
 		return {"error": box_err}
@@ -356,6 +370,9 @@ def place_order():
 @frappe.whitelist()
 def request_for_quotation():
 	quotation = _get_cart_quotation()
+	required_err = _check_required_cart_fields(quotation)
+	if required_err:
+		return {"error": required_err}
 	box_err = _check_box_type_min_order_qty(quotation)
 	if box_err:
 		return {"error": box_err}
@@ -1486,6 +1503,22 @@ def update_cart_delivery_date(delivery_date):
 
 
 @frappe.whitelist()
+def update_cart_line_code(line_code=None):
+	"""Cart-level Line Code. Persists on Quotation.custom_line_code (or
+	Sales Order.custom_line_code) so the label flows through to the saved
+	document. Sidebar-style edit, no pricing/stock revalidation needed."""
+	quotation = _get_cart_quotation()
+	if not quotation.meta.has_field("custom_line_code"):
+		frappe.throw(_("Line Code field is not configured on this cart."))
+
+	value = (line_code or "").strip() or None
+	frappe.db.set_value(
+		quotation.doctype, quotation.name, "custom_line_code", value, update_modified=False
+	)
+	return {"name": quotation.name, "line_code": value or ""}
+
+
+@frappe.whitelist()
 def update_cart_delivery_point(delivery_point):
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_delivery_point"):
@@ -1526,6 +1559,61 @@ def search_delivery_points(txt=None, limit=20):
 		as_dict=True,
 	)
 	return [{"value": r.name, "label": r.name, "description": ""} for r in rows]
+
+
+@frappe.whitelist()
+def update_cart_box_type(box_type):
+	"""Cart-level Box Type. Saves on Quotation.custom_box_type and overwrites
+	every Quotation Item's custom_box_type so pricing / min_order_qty derive
+	from the single cart-level choice."""
+	quotation = _get_cart_quotation()
+	if not quotation.meta.has_field("custom_box_type"):
+		frappe.throw(_("Box Type field is not configured on this cart."))
+
+	if box_type and not frappe.db.exists("Box Type", box_type):
+		frappe.throw(_("Box Type {0} does not exist.").format(box_type))
+
+	value = box_type or None
+	quotation.custom_box_type = value
+
+	child_dt = "Sales Order Item" if quotation.doctype == "Sales Order" else "Quotation Item"
+	propagate = frappe.db.has_column(child_dt, "custom_box_type")
+	if propagate:
+		for item in quotation.get("items", []):
+			item.custom_box_type = value
+
+	quotation.flags.ignore_permissions = True
+	quotation.save()
+	# Box type drives pricing on per-row flows (pack rate / min_order_qty), so
+	# reload the cart page to pick up recomputed line totals.
+	return {"name": quotation.name, "box_type": box_type or "", "reload": bool(propagate)}
+
+
+@frappe.whitelist()
+def search_box_types(txt=None, limit=20):
+	"""Storefront Link-search for the cart's Box Type field. Mirrors
+	search_delivery_points — webshop customers don't usually have read access
+	to the Box Type doctype, so bypass permissions and return name + label."""
+	if not _get_cart_quotation():
+		return []
+
+	conditions = ""
+	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
+	if txt:
+		conditions = "WHERE name LIKE %(txt)s"
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT name FROM `tabBox Type`
+		{conditions}
+		ORDER BY name ASC
+		LIMIT %(limit)s
+		""",
+		args,
+		as_dict=True,
+	)
+	return [{"value": r.name, "label": r.name, "description": ""} for r in rows]
+
 
 @frappe.whitelist()
 def get_item_price_for_configure(item_code):

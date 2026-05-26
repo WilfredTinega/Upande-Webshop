@@ -93,6 +93,13 @@ def add_custom_fields():
 				"options": "Delivery Points",
 				"insert_after": "shipping_address_name",
 			},
+			{
+				"fieldname": "custom_box_type",
+				"fieldtype": "Link",
+				"label": "Box Type",
+				"options": "Box Type",
+				"insert_after": "custom_delivery_point",
+			},
 		],
 		"Item Price": [
 			{

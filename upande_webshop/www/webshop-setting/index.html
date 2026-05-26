@@ -1,0 +1,130 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Webshop Setting") }}{% endblock %}
+{% block header %}
+<div class="mb-6">{{ _("Webshop Setting") }}</div>
+{% endblock header %}
+
+{% block page_content %}
+<div class="row">
+	<div class="col-12 col-md-8 offset-md-2">
+		<div class="frappe-card p-4 mb-4">
+			<h4>{{ _("Your Account") }}</h4>
+			<div class="d-flex flex-wrap align-items-center mb-4">
+				<div id="profile-image-uploader" class="me-4 mb-3 position-relative" style="min-width:96px;width:96px;height:96px;cursor:pointer;">
+					{% if current_user_image %}
+						<img id="profile-image-preview" src="{{ current_user_image }}" alt="{{ _("Profile photo") }}" style="width:96px;height:96px;border-radius:8px;object-fit:cover;">
+					{% else %}
+						<div id="profile-image-preview" style="width:96px;height:96px;border-radius:8px;display:flex;align-items:center;justify-content:center;background:#0d6efd;color:#fff;font-size:2rem;font-weight:600;">
+							{{ full_name[0] if full_name else (user_id[0] if user_id else "U") }}
+						</div>
+					{% endif %}
+					<div class="position-absolute top-0 end-0 m-2 d-flex align-items-center justify-content-center" style="width:28px;height:28px;background:rgba(0,0,0,0.65);border-radius:50%;color:#fff;font-size:0.95rem;">
+						✎
+					</div>
+					<input type="file" id="profile-image-upload" accept="image/*" style="display:none;">
+				</div>
+			<div class="flex-grow-1">
+				<p class="mb-1"><strong>{{ _("Full name") }}:</strong> {{ full_name or user_id }}</p>
+				<p class="mb-1"><strong>{{ _("User ID") }}:</strong> {{ user_id }}</p>
+				</div>
+			</div>
+			<div id="profile-upload-message" class="form-text text-muted mt-3"></div>
+
+			<div class="mt-4">
+				<div class="mb-2"><strong>{{ _("Customer") }}:</strong></div>
+				{% if linked_customers %}
+					<ul class="list-unstyled mb-0">
+						{% for c in linked_customers %}
+							<li><strong>{{ c.name }}</strong>{% if c.currency %} - {{ c.currency }}{% endif %}</li>
+						{% endfor %}
+					</ul>
+				{% else %}
+					<div>{{ _("No customer linked yet") }}</div>
+				{% endif %}
+			</div>
+		</div>
+	</div>
+</div>
+
+<script>
+frappe.ready(function() {
+	var fileInput = document.getElementById('profile-image-upload');
+	var uploader = document.getElementById('profile-image-uploader');
+	var messageEl = document.getElementById('profile-upload-message');
+
+	if (uploader && fileInput) {
+		uploader.addEventListener('click', function() {
+			fileInput.click();
+		});
+	}
+
+	if (fileInput) {
+		fileInput.addEventListener('change', function(event) {
+			var selectedFile = event.target.files[0];
+			if (!selectedFile) {
+				return;
+			}
+
+			messageEl.textContent = selectedFile.name;
+			uploadFile(selectedFile);
+		});
+	}
+
+	function uploadFile(file) {
+		messageEl.textContent = '{{ _("Uploading...") }}';
+
+		var formData = new FormData();
+		formData.append('file', file);
+		formData.append('is_private', 0);
+		formData.append('cmd', 'upload_file');
+
+		fetch('/api/method/upload_file', {
+			method: 'POST',
+			body: formData,
+			headers: {
+				'X-Frappe-CSRF-Token': frappe.csrf_token
+			}
+		}).then(function(response) {
+			return response.json();
+		}).then(function(data) {
+			if (!data || !data.message || !data.message.file_url) {
+				throw new Error('{{ _("Upload failed") }}');
+			}
+
+			return frappe.call({
+				method: 'upande_webshop.upande_webshop.api.set_user_profile_image',
+				args: {
+					file_url: data.message.file_url
+				}
+			});
+		}).then(function(result) {
+			if (result && result.message && result.message.user_image) {
+				var preview = document.getElementById('profile-image-preview');
+				if (preview) {
+					if (preview.tagName.toLowerCase() === 'img') {
+						preview.src = result.message.user_image;
+					} else {
+						var img = document.createElement('img');
+						img.id = 'profile-image-preview';
+						img.src = result.message.user_image;
+						img.alt = '{{ _("Profile photo") }}';
+						img.style.width = '96px';
+						img.style.height = '96px';
+						img.style.borderRadius = '8px';
+						img.style.objectFit = 'cover';
+						preview.parentNode.replaceChild(img, preview);
+					}
+				}
+				messageEl.textContent = '{{ _("Profile photo updated successfully.") }}';
+			} else {
+				throw new Error('{{ _("Unable to update profile photo.") }}');
+			}
+		}).catch(function(error) {
+			console.error(error);
+			messageEl.textContent = error.message || '{{ _("Unable to upload profile photo.") }}';
+		});
+	}
+});
+</script>
+{% endblock %}

@@ -5,3 +5,5 @@ upande_webshop.patches.migrate_webshop_warehouse_to_table
 upande_webshop.patches.add_quotation_item_stem_fields
 upande_webshop.patches.add_sales_order_item_stem_fields
 upande_webshop.patches.backfill_per_length_item_prices
+upande_webshop.patches.add_line_code_field
+upande_webshop.patches.add_cart_line_code_parent_field

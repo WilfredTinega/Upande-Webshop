@@ -834,16 +834,6 @@ class InlineVariantSelector {
 	add_to_cart() {
 		if (!this.variant_rows.size) return;
 
-		if (frappe.session.user === 'Guest') {
-			if (localStorage) {
-				localStorage.setItem('last_visited', window.location.pathname);
-			}
-			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
-				window.location.href = res.message || '/login';
-			});
-			return;
-		}
-
 		const specs = [];
 		$('.item-website-specification table tr').each(function () {
 			const label = $(this).find('.spec-label').text().trim();
@@ -870,6 +860,34 @@ class InlineVariantSelector {
 				title: __('Nothing to add'),
 				message: __('Enter the number of bunches for at least one variant.'),
 				indicator: 'orange',
+			});
+			return;
+		}
+
+		// Guest detection: frappe.session is undefined on web pages, so use the
+		// body attribute Frappe sets in base.html.
+		const is_guest = document.body.getAttribute('frappe-session-status') === 'logged-out';
+		if (is_guest) {
+			const payload = entries.map(({ state, stems }) => ({
+				item_code: state.item_code,
+				qty: state.num_bunches,
+				uom: state.bunch_uom || null,
+				additional_notes: [
+					state.box_type ? `Box: ${state.box_type}` : '',
+					state.pack_rate ? `Pack Rate: ${state.pack_rate} stems/box` : '',
+					`Total Stems: ${stems} (${state.num_bunches} bunches × ${state.bunch_size} stems)`,
+					state.attribute_label ? `Attrs: ${state.attribute_label}` : '',
+					specs.length ? `Specs: ${specs.join(', ')}` : '',
+				].filter(Boolean).join(' | '),
+				custom_box_type: state.box_type || null,
+			}));
+			this.$add_to_cart.prop('disabled', true);
+			frappe.call({
+				method: 'upande_webshop.upande_webshop.shopping_cart.pending_cart.stash',
+				args: { entries: payload },
+				callback: () => {
+					window.location.href = '/login?redirect-to=/cart';
+				},
 			});
 			return;
 		}

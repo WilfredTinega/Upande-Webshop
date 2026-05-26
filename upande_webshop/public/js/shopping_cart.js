@@ -18,8 +18,17 @@ var getParams = function (url) {
 frappe.ready(function() {
 	$(document).on('click', 'a[href*="/logout"]', function(e) {
 		e.preventDefault();
+		// Honor ?redirect-to= on the logout link so Customer-only users land on /webshop
+		// (set by the webshop nav dropdown) instead of /index.
+		var href = $(this).attr('href') || '';
+		var redirect_to = '/index';
+		try {
+			var qs = href.split('?')[1] || '';
+			var match = qs.split('&').find(function(p) { return p.indexOf('redirect-to=') === 0; });
+			if (match) redirect_to = decodeURIComponent(match.split('=')[1] || '/index');
+		} catch (err) { /* keep default */ }
 		frappe.call({ method: 'logout' }).then(function() {
-			window.location.href = '/index';
+			window.location.href = redirect_to;
 		});
 	});
 
@@ -139,13 +148,22 @@ $.extend(shopping_cart, {
 			: `<span class="webshop-subnav-badge" id="wish-count" style="display:none;">${wishCount || 0}</span>`;
 
 		var appLogo = '/assets/upande_webshop/images/UpandeLogo.png';
+		var webshop_user_fullname = window.webshop_user_fullname || (frappe.session && frappe.session.user_fullname) || (frappe.session && frappe.session.user) || '';
+		var webshop_user_initials = webshop_user_fullname.split(' ').filter(function(word) {
+			return word;
+		}).slice(0, 2).map(function(word) {
+			return word[0];
+		}).join('').toUpperCase() || 'U';
+		var webshop_user_avatar = window.webshop_user_image
+			? `<img src="${window.webshop_user_image}" alt="Account" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;">`
+			: `<span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:50%;background:#0d6efd;color:#fff;font-size:0.8rem;font-weight:600;line-height:1;">${webshop_user_initials}</span>`;
 		var shopIconHtml = appLogo
 			? `<img src="${appLogo}" class="webshop-subnav-app-logo" alt="Shop">`
 			: `<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
-					<line x1="3" y1="6" x2="21" y2="6"/>
-					<path d="M16 10a4 4 0 0 1-8 0"/>
-				</svg>`;
+				<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+				<line x1="3" y1="6" x2="21" y2="6"/>
+				<path d="M16 10a4 4 0 0 1-8 0"/>
+			</svg>`;
 
 		var html = `
 			<div id="webshop-subnav">
@@ -179,15 +197,14 @@ $.extend(shopping_cart, {
 
 						<!-- Account dropdown -->
 						<div class="webshop-subnav-dropdown">
-							<button class="webshop-subnav-link webshop-subnav-dropdown-toggle" id="ws-account-toggle" aria-expanded="false">
-								Account
+							<button class="webshop-subnav-link webshop-subnav-dropdown-toggle" id="ws-account-toggle" aria-expanded="false" aria-label="Account" title="Account">
+								${webshop_user_avatar}
 								<svg style="width:12px;height:12px;margin-left:4px;vertical-align:middle;" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 									<polyline points="4 6 8 10 12 6"/>
 								</svg>
 							</button>
 							<ul class="webshop-subnav-dropdown-menu" id="ws-account-menu" role="menu">
 								<li><a href="/webshop" class="webshop-subnav-dropdown-item">Products</a></li>
-								<li class="webshop-subnav-dropdown-divider"></li>
 								<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
 								<li><a href="/quotations" class="webshop-subnav-dropdown-item">Quotations</a></li>
 								<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
@@ -199,16 +216,17 @@ $.extend(shopping_cart, {
 								<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
 								<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
 								<li class="webshop-subnav-dropdown-divider"></li>
+								<li><a href="/webshop-setting" class="webshop-subnav-dropdown-item">Setting</a></li>
 								<li><a href="/logout?redirect-to=/webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
 							</ul>
 						</div>
-						` : `
-						<!-- Guest: show Login button -->
-						<a href="/login" class="webshop-subnav-login-btn">Login</a>
-						`}
-					</div>
+					` : `
+					<!-- Guest: show Login button -->
+					<a href="/login" class="webshop-subnav-login-btn">Login</a>
+					`}
 				</div>
 			</div>
+		</div>
 		`;
 
 		var $header = $('header.navbar, nav.navbar').first();

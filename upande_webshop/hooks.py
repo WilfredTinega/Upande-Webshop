@@ -241,6 +241,7 @@ override_doctype_class = {
 # Request Events
 # ----------------
 # before_request = ["upande_webshop.utils.before_request"]
+before_request = ["upande_webshop.monkey_patches.apply"]
 after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
 
 # If another app already owns the `Stem Length` doctype on this site, hide our
@@ -307,6 +308,7 @@ on_session_creation = [
     "upande_webshop.upande_webshop.utils.portal.update_debtors_account",
     "upande_webshop.upande_webshop.shopping_cart.utils.set_cart_count",
     "upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_on_session_creation",
+    "upande_webshop.upande_webshop.shopping_cart.pending_cart.replay_for_user",
 ]
 update_website_context = [
     "upande_webshop.upande_webshop.shopping_cart.utils.update_website_context",

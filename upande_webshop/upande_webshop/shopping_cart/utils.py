@@ -76,9 +76,12 @@ def redirect_customer_after_login(response, request):
 		or (not meaningful_roles and user_type == "Website User")
 	)
 	if is_customer_redirect:
+		# If a guest just stashed a pending cart and we replayed it during
+		# on_session_creation, land them on /cart so they see the order.
+		target = "/cart" if getattr(frappe.local.flags, "pending_cart_replayed", False) else "/webshop"
 		data["message"] = "No App"
-		data["redirect_to"] = "/webshop"
-		data["home_page"] = "/webshop"
+		data["redirect_to"] = target
+		data["home_page"] = target
 		response.set_data(json.dumps(data))
 
 
@@ -109,10 +112,21 @@ def update_website_context(context):
 	)
 	context["webshop_show_bouquets_page"] = show_bouquets_page
 
+	customer_is_linked = is_customer()
+	context["webshop_user_is_customer"] = customer_is_linked
+
+	user_image = frappe.session.user_image if getattr(frappe.session, "user_image", None) else ""
+	user_fullname = frappe.session.user_fullname or frappe.session.user or ""
+	context["webshop_user_image"] = user_image
+	context["webshop_user_fullname"] = user_fullname
+
 	boot_script = (
 		f'<script>'
 		f'window.webshop_app_logo = {json.dumps(app_logo)};'
 		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
+		f'window.webshop_user_is_customer = {json.dumps(customer_is_linked)};'
+		f'window.webshop_user_image = {json.dumps(user_image)};'
+		f'window.webshop_user_fullname = {json.dumps(user_fullname)};'
 		f'</script>'
 	)
 	context["head_include"] = (context.get("head_include") or "") + boot_script

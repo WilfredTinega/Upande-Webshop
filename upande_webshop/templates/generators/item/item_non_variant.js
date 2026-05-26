@@ -571,22 +571,40 @@ class InlineNonVariantSelector {
 			return;
 		}
 
-		if (frappe.session.user === 'Guest') {
-			if (localStorage) {
-				localStorage.setItem('last_visited', window.location.pathname);
-			}
-			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
-				window.location.href = res.message || '/login';
-			});
-			return;
-		}
-
 		const specs = [];
 		$('.item-website-specification table tr').each(function () {
 			const label = $(this).find('.spec-label').text().trim();
 			const val = $(this).find('.spec-content').text().trim();
 			if (label && val) specs.push(`${label}: ${val}`);
 		});
+
+		// Guest detection: frappe.session is undefined on web pages, so use the
+		// body attribute Frappe sets in base.html.
+		const is_guest = document.body.getAttribute('frappe-session-status') === 'logged-out';
+		if (is_guest) {
+			const payload = entries.map((entry) => ({
+				item_code: this.item_code,
+				qty: entry.num_bunches,
+				uom: this.bunch_uom || null,
+				additional_notes: [
+					this.selected_box_type ? `Box: ${this.selected_box_type}` : '',
+					entry.pack_rate ? `Pack Rate: ${entry.pack_rate} stems/box` : '',
+					`Total Stems: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
+					specs.length ? `Specs: ${specs.join(', ')}` : '',
+				].filter(Boolean).join(' | '),
+				custom_length: entry.length,
+				custom_box_type: this.selected_box_type || null,
+			}));
+			this.$add_to_cart.prop('disabled', true);
+			frappe.call({
+				method: 'upande_webshop.upande_webshop.shopping_cart.pending_cart.stash',
+				args: { entries: payload },
+				callback: () => {
+					window.location.href = '/login?redirect-to=/cart';
+				},
+			});
+			return;
+		}
 
 		this.$add_to_cart.prop('disabled', true);
 
