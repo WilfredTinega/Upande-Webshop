@@ -65,8 +65,8 @@
   "bouquet_recipes",
   "bulk_actions_tab",
   "bulk_publish_section",
-  "bulk_publish_intro_html",
-  "open_bulk_publish_page"
+  "open_bulk_publish_page",
+  "bulk_publish_intro_html"
  ],
  "fields": [
   {
@@ -400,7 +400,6 @@
   },
   {
    "depends_on": "show_bouquets_page",
-   "description": "Items in this group are listed at /bouquets when the page is enabled.",
    "fieldname": "bouquets_item_group",
    "fieldtype": "Link",
    "label": "Bouquets Item Group",
@@ -408,7 +407,6 @@
   },
   {
    "depends_on": "show_bouquets_page",
-   "description": "Define what makes up each bouquet: pick a bouquet Website Item and add rows of {item group, stem length, quantity}.",
    "fieldname": "bouquet_recipes_section",
    "fieldtype": "Section Break",
    "label": "Bouquet Recipes"
@@ -428,12 +426,12 @@
   {
    "fieldname": "bulk_actions_tab",
    "fieldtype": "Tab Break",
-   "label": "Bulk Actions"
+   "label": "Actions"
   },
   {
    "fieldname": "bulk_publish_section",
    "fieldtype": "Section Break",
-   "label": "Publish Items in Bulk"
+   "label": "Publish Item"
   },
   {
    "fieldname": "bulk_publish_intro_html",
@@ -449,7 +447,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-26 04:40:13.150231",
+ "modified": "2026-05-26 04:45:40.051688",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",
