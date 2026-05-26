@@ -19,7 +19,7 @@ add_to_apps_screen = [
 		"name": "upande_webshop",
 		"logo": "/assets/upande_webshop/images/UpandeLogo.png",
 		"title": "Upande Webshop",
-		"route": "/upande-webshop",
+		"route": "/app/upande-webshop",
 		# "has_permission": "upande_webshop.api.permission.has_app_permission"
 	}
 ]
@@ -83,15 +83,16 @@ website_generators = ["Website Item", "Item Group"]
 # ----------
 
 # add methods and filters to jinja environment
-# jinja = {
-# 	"methods": "upande_webshop.utils.jinja_methods",
-# 	"filters": "upande_webshop.utils.jinja_filters"
-# }
+jinja = {
+	"methods": [
+		"upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin.get_stock_by_length",
+	],
+}
 
 # Installation
 # ------------
 
-# before_install = "upande_webshop.install.before_install"
+before_install = "upande_webshop.setup.stem_length_guard.guard"
 after_install = "upande_webshop.setup.install.after_install"
 
 # Uninstallation
@@ -148,6 +149,7 @@ doc_events = {
         "on_update": [
             "upande_webshop.upande_webshop.crud_events.item.update_website_item.execute",
             "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
+            "upande_webshop.upande_webshop.crud_events.item.ensure_per_length_item_prices.execute",
         ],
         "before_rename": [
             "upande_webshop.upande_webshop.crud_events.item.validate_duplicate_website_item.execute",
@@ -180,6 +182,34 @@ doc_events = {
             "upande_webshop.upande_webshop.crud_events.tax_rule.validate_use_for_cart.execute",
         ],
     },
+    "Stock Ledger Entry": {
+        "on_submit": [
+            "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.on_stock_ledger_entry_change",
+        ],
+        "on_cancel": [
+            "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.on_stock_ledger_entry_change",
+        ],
+    },
+    "Stock Entry": {
+        "before_save": [
+            "upande_webshop.upande_webshop.crud_events.stock.stem_length_carry.stock_entry_before_save",
+        ],
+        "on_submit": [
+            "upande_webshop.upande_webshop.crud_events.stock.stem_length_carry.stock_entry_on_submit",
+            "upande_webshop.server_scripts.update_stem_length_bin.on_stock_entry_submit",
+        ],
+        "on_cancel": [
+            "upande_webshop.server_scripts.update_stem_length_bin.on_stock_entry_cancel",
+        ],
+    },
+    "Sales Order": {
+        "on_submit": [
+            "upande_webshop.server_scripts.update_stem_length_bin.on_sales_order_submit",
+        ],
+        "on_cancel": [
+            "upande_webshop.server_scripts.update_stem_length_bin.on_sales_order_cancel",
+        ],
+    },
 }
 
 # Override Methods
@@ -196,6 +226,7 @@ override_doctype_class = {
     "Payment Request": "upande_webshop.upande_webshop.doctype.override_doctype.payment_request.PaymentRequest",
     "Item Group": "upande_webshop.upande_webshop.doctype.override_doctype.item_group.WebshopItemGroup",
     "Item": "upande_webshop.upande_webshop.doctype.override_doctype.item.WebshopItem",
+    "Item Price": "upande_webshop.upande_webshop.doctype.override_doctype.item_price.WebshopItemPrice",
 }
 
 # exempt linked doctypes from being automatically cancelled
@@ -211,6 +242,13 @@ override_doctype_class = {
 # ----------------
 # before_request = ["upande_webshop.utils.before_request"]
 after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
+
+# If another app already owns the `Stem Length` doctype on this site, hide our
+# on-disk copy before Frappe's doctype sync runs — otherwise migrate would
+# overwrite the existing record with our version.
+before_migrate = [
+	"upande_webshop.setup.stem_length_guard.guard",
+]
 
 # Restore Floriday Settings-driven scheduled jobs after every migrate (Frappe's
 # scheduler sync deletes Scheduled Job Type rows whose method isn't declared in

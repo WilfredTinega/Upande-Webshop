@@ -69,21 +69,57 @@ def _normalize_stem_length(value):
 
 
 def _stem_length_rates_from_item_prices(item_code, price_list):
+	# Non-variant items differentiate per-length Item Price rows via the
+	# custom_length field. On sites that ship the Custom Field, read it.
+	# On sites without it, fall back to the single Item Price rate and
+	# apply it to every Stem Length master value.
 	filters = {"item_code": item_code}
 	if price_list:
 		filters["price_list"] = price_list
 
-	rows = frappe.get_all(
-		"Item Price",
-		filters=filters,
-		fields=["custom_length", "price_list_rate"],
-	)
+	has_length_col = frappe.db.has_column("Item Price", "custom_length")
+	fields = ["price_list_rate"] + (["custom_length"] if has_length_col else [])
+	rows = frappe.get_all("Item Price", filters=filters, fields=fields)
+	if not rows:
+		return {}
+
 	latest_rate = {}
+	if has_length_col:
+		for row in rows:
+			stem_length = _normalize_stem_length(row.custom_length)
+			if not stem_length:
+				continue
+			latest_rate[stem_length] = row.price_list_rate
+
+	if latest_rate:
+		return latest_rate
+
+	# Fallback: no per-length rows usable. Apply the single Item Price rate
+	# (prefer one with no custom_length) across every master Stem Length.
+	flat_rate = None
 	for row in rows:
-		stem_length = _normalize_stem_length(row.custom_length)
-		if not stem_length:
+		if has_length_col and row.get("custom_length"):
 			continue
-		latest_rate[stem_length] = row.price_list_rate
+		flat_rate = row.price_list_rate
+		break
+	if flat_rate is None:
+		flat_rate = rows[0].price_list_rate
+	if flat_rate is None:
+		return {}
+
+	master_lengths = frappe.get_all(
+		"Item Attribute Value",
+		filters={"parent": "Stem Length"},
+		fields=["attribute_value"],
+		order_by="idx",
+	)
+	if not master_lengths:
+		return {}
+
+	for ml in master_lengths:
+		norm = _normalize_stem_length(ml.attribute_value)
+		if norm:
+			latest_rate[norm] = flat_rate
 	return latest_rate
 
 
@@ -145,15 +181,16 @@ def _stem_length_rates_from_variants(template_item_code, price_list):
 
 class FloridayItems(Document):
 	@frappe.whitelist()
-	def fetch_stem_length_prices(self):
+	def fetch_stem_length_prices(self, price_list=None):
 		if not self.item_code:
 			_alert("Item Code is required to fetch prices.", "red")
 			return 0
 
-		# Floriday Settings has no price_list field; reuse the Webshop Item Prices
-		# resolver (USD Price List → first USD Selling list → Webshop Settings).
-		from upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices import _resolve_price_list
-		price_list = _resolve_price_list()
+		if not price_list:
+			# Floriday Settings has no price_list field; reuse the Webshop Item Prices
+			# resolver (USD Price List → first USD Selling list → Webshop Settings).
+			from upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices import _resolve_price_list
+			price_list = _resolve_price_list()
 
 		has_variants = frappe.db.get_value("Item", self.item_code, "has_variants")
 		if has_variants:
@@ -318,9 +355,12 @@ def get_item_code_from_trade_item_id(trade_item_id):
 
 
 @frappe.whitelist()
-def sync_system_items(force=False):
+def sync_system_items(force=False, price_list=None):
 	if not force and not frappe.db.get_single_value("Floriday Settings", "fi_enabled"):
 		return {"skipped": True, "reason": "Floriday Items sync is disabled (fi_enabled = 0)"}
+
+	if price_list and not frappe.db.exists("Price List", price_list):
+		frappe.throw(f"Price List '{price_list}' does not exist.")
 
 	items = frappe.db.sql(
 		"""
@@ -342,7 +382,7 @@ def sync_system_items(force=False):
 			doc, was_created = _find_or_create_floriday_item(item)
 			if was_created:
 				created += 1
-			doc.fetch_stem_length_prices()
+			doc.fetch_stem_length_prices(price_list=price_list)
 			updated_prices += 1
 		except Exception as e:
 			skipped += 1
@@ -430,7 +470,7 @@ def update_trade_item_ids(force=False):
 
 
 @frappe.whitelist()
-def sync_floriday_items(force=False):
-	system = sync_system_items(force=force)
+def sync_floriday_items(force=False, price_list=None):
+	system = sync_system_items(force=force, price_list=price_list)
 	trade = update_trade_item_ids(force=force)
 	return {**system, **trade}

@@ -1,5 +1,6 @@
 {
  "actions": [],
+ "allow_import": 1,
  "allow_rename": 1,
  "autoname": "field:box_type_name",
  "creation": "2026-05-02 00:00:00",
@@ -11,8 +12,9 @@
   "box_group",
   "description",
   "column_break_1",
-  "min_order_qty",
-  "is_active"
+  "is_active",
+  "pack_rates_section",
+  "pack_rates"
  ],
  "fields": [
   {
@@ -28,16 +30,8 @@
    "fieldtype": "Select",
    "in_list_view": 1,
    "label": "Box Group",
-   "options": "zim\nstd",
+   "options": "zim\nstd\ntransversal\nspecial",
    "reqd": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "min_order_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Order Qty (Bunches)",
-   "non_negative": 1
   },
   {
    "default": "1",
@@ -54,10 +48,22 @@
    "fieldname": "description",
    "fieldtype": "Small Text",
    "label": "Description"
+  },
+  {
+   "fieldname": "pack_rates_section",
+   "fieldtype": "Section Break",
+   "label": "Pack Rates"
+  },
+  {
+   "description": "Stems-per-box for each stem length. Used to compute total stems on the storefront.",
+   "fieldname": "pack_rates",
+   "fieldtype": "Table",
+   "label": "Pack Rates",
+   "options": "Pack Rate"
   }
  ],
  "links": [],
- "modified": "2026-05-12 00:35:52.685284",
+ "modified": "2026-05-24 22:21:34.888041",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Box Type",

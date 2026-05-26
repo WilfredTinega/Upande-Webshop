@@ -12,5 +12,16 @@ frappe.ui.form.on("Webshop Item Prices", {
 				frm.reload_doc();
 			});
 		}, __("Actions"));
+
+		frm.add_custom_button(__("Refresh Prices & Stock"), () => {
+			frm.call("refresh_prices_and_stock").then((r) => {
+				const lengths = (r && r.message && r.message.lengths) || 0;
+				frappe.show_alert({
+					message: __("Refreshed prices & stock ({0} lengths)", [lengths]),
+					indicator: lengths ? "green" : "orange",
+				});
+				frm.reload_doc();
+			});
+		}, __("Actions"));
 	},
 });

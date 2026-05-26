@@ -191,12 +191,14 @@
 		{% endif %}
 	</div>
 
-	{% if settings.show_stock_availability and not item.available %}
+	{% set is_out_of_stock = settings.show_stock_availability and not item.available %}
+	{% if is_out_of_stock %}
 		<div class="out-of-stock mb-2">{{ _("Out of stock") }}</div>
 	{% endif %}
 	<button data-item-code="{{ item.item_code }}"
 		data-custom-length="{{ item.get('default_length') or '' }}"
 		data-uom="{{ item.get('default_bunch') or '' }}"
+		{% if is_out_of_stock %}disabled{% endif %}
 		class="btn btn-primary btn-add-to-cart-list btn-add-to-cart mt-2 w-100">
 		<span class="mr-2">
 			<svg class="icon icon-md">

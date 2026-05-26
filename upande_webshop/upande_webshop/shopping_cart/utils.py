@@ -1,5 +1,3 @@
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
 import frappe
 from frappe import _
 
@@ -17,9 +15,6 @@ def show_cart_count():
 
 
 def set_cart_count(login_manager):
-	# since this is run only on hooks login event
-	# make sure user is already a customer
-	# before trying to set cart count
 	user_is_customer = is_customer()
 	if not user_is_customer:
 		return
@@ -27,9 +22,6 @@ def set_cart_count(login_manager):
 	if show_cart_count():
 		from upande_webshop.upande_webshop.shopping_cart.cart import set_cart_count
 
-		# set_cart_count will try to fetch existing cart quotation
-		# or create one if non existent (and create a customer too)
-		# cart count is calculated from this quotation's items
 		set_cart_count()
 
 
@@ -40,7 +32,6 @@ def redirect_customer_after_login(response, request):
 	"""
 	import json
 
-	# Only act on login POST requests
 	is_login = (
 		request.method == "POST"
 		and (
@@ -51,7 +42,6 @@ def redirect_customer_after_login(response, request):
 	if not is_login:
 		return
 
-	# Only act if we have a JSON response with message='Logged In'
 	content_type = response.content_type or ""
 	if "json" not in content_type:
 		return
@@ -62,7 +52,6 @@ def redirect_customer_after_login(response, request):
 		return
 
 	message = data.get("message")
-	# Handle both System Users (Logged In) and Website Users (No App) with Customer role
 	if message not in ("Logged In", "No App"):
 		return
 
@@ -74,16 +63,13 @@ def redirect_customer_after_login(response, request):
 	if not user or user == "Guest":
 		return
 
-	# Use a fresh DB query to avoid stale cached roles from the current request.
-	# On first login, on_session_creation may have just assigned the Customer role
-	# but frappe.get_roles() returns the cached pre-login role list.
+	# Fresh DB query — frappe.get_roles() returns cached pre-login roles, missing the
+	# Customer role just assigned by on_session_creation on first login.
 	roles = frappe.db.get_values(
 		"Has Role", {"parent": user, "parenttype": "User"}, "role", pluck="role"
 	) or frappe.get_roles(user)
 	meaningful_roles = [r for r in roles if r not in ("All", "Guest")]
 
-	# Redirect if Customer role is present and user has no other meaningful roles,
-	# OR if user is a Website User with no meaningful roles yet (first-login race condition).
 	user_type = frappe.db.get_value("User", user, "user_type")
 	is_customer_redirect = (
 		meaningful_roles == ["Customer"]
@@ -91,8 +77,8 @@ def redirect_customer_after_login(response, request):
 	)
 	if is_customer_redirect:
 		data["message"] = "No App"
-		data["redirect_to"] = "/upande-webshop"
-		data["home_page"] = "/upande-webshop"
+		data["redirect_to"] = "/webshop"
+		data["home_page"] = "/webshop"
 		response.set_data(json.dumps(data))
 
 
@@ -113,27 +99,38 @@ def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
 
-	# Expose app logo URL for the webshop sub-navbar via an inline script in <head>
 	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 	import json
 	app_logo = get_app_logo() or ""
 	context["webshop_app_logo"] = app_logo
-	logo_script = f'<script>window.webshop_app_logo = {json.dumps(app_logo)};</script>'
-	context["head_include"] = (context.get("head_include") or "") + logo_script
 
-	# Remove "My Account" from the top navbar — it's now in the webshop sub-navbar dropdown
+	show_bouquets_page = bool(
+		frappe.db.get_single_value("Webshop Settings", "show_bouquets_page")
+	)
+	context["webshop_show_bouquets_page"] = show_bouquets_page
+
+	boot_script = (
+		f'<script>'
+		f'window.webshop_app_logo = {json.dumps(app_logo)};'
+		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
+		f'</script>'
+	)
+	context["head_include"] = (context.get("head_include") or "") + boot_script
+
 	if context.get("post_login"):
 		context["post_login"] = [
 			item for item in context["post_login"]
 			if item.get("label") not in ("My Account", _("My Account"))
 		]
 
-	# Remove "My Account" from top_bar_items if present
 	if context.get("top_bar_items"):
 		context["top_bar_items"] = [
 			item for item in context["top_bar_items"]
 			if item.get("label") not in ("My Account", _("My Account"))
 		]
+
+	context["show_sidebar"] = False
+	context["sidebar_items"] = []
 
 
 def is_customer():

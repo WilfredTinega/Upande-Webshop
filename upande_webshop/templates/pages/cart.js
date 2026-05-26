@@ -19,6 +19,7 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_coupon_code();
 		shopping_cart.bind_remove_coupon_code();
 		shopping_cart.bind_delivery_date();
+		shopping_cart.bind_delivery_point();
 	},
 
 	bind_place_order: function() {
@@ -106,95 +107,220 @@ $.extend(shopping_cart, {
 		});
 	},
 
-	// ---- Delivery Date & Shipment Date ----
+	// ---- Delivery Date ----
 	bind_delivery_date: function() {
-		var $deliveryInput = $("#delivery-date");
-		if (!$deliveryInput.length) return;
+		var $wrapper = $("#delivery-date-wrapper");
+		if (!$wrapper.length) return;
 
-		// Set minimum date: today + transit_days
-		var transit_days = parseInt($(".delivery-date-section").data("transit-days")) || 2;
+		var transit_days = parseInt($(".delivery-date-section").data("transit-days")) || 1;
+		var min_offset = Math.max(transit_days, 1);
 		var min_date = new Date();
-		min_date.setDate(min_date.getDate() + transit_days);
-		$deliveryInput.attr("min", shopping_cart._format_date(min_date));
+		min_date.setDate(min_date.getDate() + min_offset);
+		min_date.setHours(0, 0, 0, 0);
 
-		// If a delivery date is already saved on the quotation, show shipment date
-		if ($deliveryInput.val()) {
-			shopping_cart._calculate_shipment_date($deliveryInput.val(), transit_days);
+		var initial_value = $wrapper.data("initial-value") || "";
+
+		// controls.bundle.js is included on this page (cart.html base_scripts),
+		// so frappe.ui.form.make_control is available synchronously.
+		if (!(frappe.ui && frappe.ui.form && frappe.ui.form.make_control)) {
+			shopping_cart._render_native_date_input($wrapper, initial_value, min_date, min_offset);
+			return;
 		}
 
-		// Bind change event
-		$deliveryInput.on("change", function() {
-			var delivery_date = $(this).val();
-			if (!delivery_date) {
-				$("#shipment-date-display").text("—");
-				return;
+		var control = frappe.ui.form.make_control({
+			parent: $wrapper.get(0),
+			df: {
+				fieldtype: "Date",
+				fieldname: "delivery_date",
+				label: "",
+				placeholder: __("Select delivery date"),
+			},
+			render_input: true,
+			only_input: true,
+		});
+
+		var apply_min = function() {
+			if (control.datepicker) {
+				// Floor at tomorrow and hide the "Today" shortcut button so users can't
+				// jump to a date that the server will reject.
+				control.datepicker.update({ minDate: min_date, todayButton: false });
+				return true;
 			}
+			return false;
+		};
+		if (!apply_min()) {
+			var tries = 0;
+			var iv = setInterval(function() {
+				tries++;
+				if (apply_min() || tries > 20) clearInterval(iv);
+			}, 50);
+		}
 
-			// Validate: delivery date must be at least transit_days from today
-			var selected = new Date(delivery_date);
-			var min_allowed = new Date();
-			min_allowed.setDate(min_allowed.getDate() + transit_days);
-			min_allowed.setHours(0, 0, 0, 0);
-
-			if (selected < min_allowed) {
-				frappe.show_alert({
-					message: __('Expected delivery date must be at least {0} days from today (transit time).', [transit_days]),
-					indicator: 'orange'
-				}, 5);
-				$(this).val("");
-				$("#shipment-date-display").text("—");
-				return;
-			}
-
-			// Show calculated shipment date immediately (client-side)
-			shopping_cart._calculate_shipment_date(delivery_date, transit_days);
-
-			// Save to server
+		// Default to the next valid delivery date (today + transit_days) when the
+		// cart has no saved date, and persist it so the server-side quotation is
+		// consistent with what the picker shows.
+		var default_value = shopping_cart._format_date(min_date);
+		if (initial_value) {
+			control.set_value(initial_value);
+		} else {
+			control.set_value(default_value);
 			frappe.call({
 				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
-				args: { delivery_date: delivery_date },
+				args: { delivery_date: default_value },
+			});
+		}
+
+		control.df.onchange = function() {
+			var value = control.get_value();
+			if (!value) return;
+
+			var selected = frappe.datetime.str_to_obj(value);
+			selected.setHours(0, 0, 0, 0);
+
+			var today = new Date();
+			today.setHours(0, 0, 0, 0);
+
+			// Reject today (and earlier) regardless of transit_days configuration.
+			if (selected <= today || selected < min_date) {
+				frappe.show_alert({
+					message: __("Please select a date after today."),
+					indicator: "orange",
+				}, 5);
+				control.set_value("");
+				return;
+			}
+
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
+				args: { delivery_date: value },
+			});
+		};
+	},
+
+	// ---- Delivery Point ----
+	bind_delivery_point: function() {
+		var $wrapper = $("#delivery-point-wrapper");
+		if (!$wrapper.length) return;
+
+		var initial_value = $wrapper.data("initial-value") || "";
+
+		if (!(frappe.ui && frappe.ui.form && frappe.ui.form.make_control)) {
+			shopping_cart._render_native_delivery_point($wrapper, initial_value);
+			return;
+		}
+
+		var control = frappe.ui.form.make_control({
+			parent: $wrapper.get(0),
+			df: {
+				fieldtype: "Autocomplete",
+				fieldname: "custom_delivery_point",
+				label: "",
+				placeholder: __("Select delivery point"),
+			},
+			render_input: true,
+			only_input: true,
+		});
+
+		var load_options = function(txt) {
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.search_delivery_points",
+				args: { txt: txt || "", limit: 50 },
 				callback: function(r) {
-					if (r.message && r.message.shipment_date) {
-						// Only update if server returned a valid date
-						$("#shipment-date-display")
-							.text(shopping_cart._display_date(r.message.shipment_date))
-							.css("color", "var(--text-color)");
-					}
-					// Otherwise keep the client-side calculated value already showing
-				}
+					var rows = (r && r.message) || [];
+					control.set_data(rows);
+				},
+			});
+		};
+		load_options("");
+
+		if (control.$input && control.$input.length) {
+			control.$input.on("input", function() {
+				load_options($(this).val() || "");
+			});
+		}
+
+		if (initial_value) {
+			control.set_value(initial_value);
+		}
+
+		control.df.onchange = function() {
+			var value = control.get_value() || "";
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_point",
+				args: { delivery_point: value },
+			});
+		};
+	},
+
+	// Fallback if controls.bundle fails to load — keeps the form functional.
+	_render_native_delivery_point: function($wrapper, initial_value) {
+		var $input = $('<input type="text" class="form-control font-md" placeholder="' + __("Select delivery point") + '">')
+			.val(initial_value);
+		$wrapper.empty().append($input);
+
+		$input.on("change", function() {
+			var value = $(this).val() || "";
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_point",
+				args: { delivery_point: value },
+			});
+		});
+	},
+	// ---- End Delivery Point ----
+
+	// Fallback if controls.bundle fails to load — keeps the form functional.
+	_render_native_date_input: function($wrapper, initial_value, min_date, min_offset) {
+		var min_iso = shopping_cart._format_date(min_date);
+		var default_value = initial_value || min_iso;
+		var $input = $('<input type="date" class="form-control font-md" style="cursor:pointer;">')
+			.attr("min", min_iso)
+			.val(default_value);
+		$wrapper.empty().append($input);
+
+		if (!initial_value) {
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
+				args: { delivery_date: default_value },
+			});
+		}
+
+		$input.on("click focus", function() {
+			if (typeof this.showPicker === "function") {
+				try { this.showPicker(); } catch (e) {}
+			}
+		});
+
+		$input.on("change", function() {
+			var value = $(this).val();
+			if (!value) return;
+			var selected = new Date(value);
+			selected.setHours(0, 0, 0, 0);
+
+			var today = new Date();
+			today.setHours(0, 0, 0, 0);
+
+			if (selected <= today || selected < min_date) {
+				frappe.show_alert({
+					message: __("Please select a date after today."),
+					indicator: "orange",
+				}, 5);
+				$(this).val("");
+				return;
+			}
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_delivery_date",
+				args: { delivery_date: value },
 			});
 		});
 	},
 
-	_calculate_shipment_date: function(delivery_date, transit_days) {
-		var d = new Date(delivery_date);
-		d.setDate(d.getDate() - transit_days);
-		var formatted = shopping_cart._display_date(shopping_cart._format_date(d));
-		$("#shipment-date-display")
-			.text(formatted)
-			.css("color", "var(--text-color)");
-	},
-
 	_format_date: function(date) {
-		// Returns YYYY-MM-DD
 		var y = date.getFullYear();
 		var m = String(date.getMonth() + 1).padStart(2, "0");
 		var d = String(date.getDate()).padStart(2, "0");
 		return y + "-" + m + "-" + d;
 	},
-
-	_display_date: function(date_str) {
-		// Converts YYYY-MM-DD to "14 Mar 2026"
-		if (!date_str) return "—";
-		var parts = date_str.split("-");
-		if (parts.length !== 3) return date_str;
-		var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-		var day = parseInt(parts[2]);
-		var month = months[parseInt(parts[1]) - 1];
-		var year = parts[0];
-		return day + " " + month + " " + year;
-	},
-	// ---- End Delivery Date & Shipment Date ----
+	// ---- End Delivery Date ----
 
 	render_tax_row: function($cart_taxes, doc, shipping_rules) {
 		var shipping_selector;
@@ -280,6 +406,7 @@ $.extend(shopping_cart, {
 	},
 
 	request_quotation: function(btn) {
+		var target = $(btn).attr("data-cart-target") || "quotation";
 		return frappe.call({
 			type: "POST",
 			method: "upande_webshop.upande_webshop.shopping_cart.cart.request_for_quotation",
@@ -296,7 +423,8 @@ $.extend(shopping_cart, {
 					return;
 				}
 				$(btn).hide();
-				window.location.href = '/quotations/' + encodeURIComponent(r.message);
+				var base = target === "sales_order" ? "/orders/" : "/quotations/";
+				window.location.href = base + encodeURIComponent(r.message);
 			}
 		});
 	},

@@ -4,8 +4,14 @@
 			<button class="btn btn-primary btn-place-order font-md w-100" type="button">
 				{{ _("Place Order") }}
 			</button>
+		{% elif cart_settings.use_sales_order_as_cart %}
+			<button class="btn btn-primary btn-request-for-quotation font-md w-100"
+				data-cart-target="sales_order" type="button">
+				{{ _("Save Order") }}
+			</button>
 		{% else %}
-			<button class="btn btn-primary btn-request-for-quotation font-md w-100" type="button">
+			<button class="btn btn-primary btn-request-for-quotation font-md w-100"
+				data-cart-target="quotation" type="button">
 				{{ _("Request for Quote") }}
 			</button>
 		{% endif %}

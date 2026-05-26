@@ -6,7 +6,7 @@ import frappe.defaults
 from frappe import _, throw
 from frappe.contacts.doctype.address.address import get_address_display
 from frappe.contacts.doctype.contact.contact import get_contact_name
-from frappe.utils import cint, cstr, flt, get_fullname
+from frappe.utils import add_days, cint, cstr, flt, get_fullname, getdate, nowdate
 from frappe.utils.nestedset import get_root_of
 
 from erpnext.accounts.utils import get_account_name
@@ -21,6 +21,35 @@ class WebsitePriceListMissingError(frappe.ValidationError):
     pass
 
 
+def _cart_doctype():
+	"""Return the doctype currently configured as the cart container.
+
+	`enable_checkout` (payment-gateway flow) takes precedence and always uses
+	Quotation, because the gateway path converts Quotation→Sales Order itself.
+	"""
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	if cint(cart_settings.enable_checkout):
+		return "Quotation"
+	if cint(getattr(cart_settings, "use_sales_order_as_cart", 0)):
+		return "Sales Order"
+	return "Quotation"
+
+
+def _cart_item_doctype():
+	return "Sales Order Item" if _cart_doctype() == "Sales Order" else "Quotation Item"
+
+
+def _cart_party_name(quotation):
+	"""Return the party name from a cart doc, regardless of doctype.
+
+	Quotation stores it in `party_name` (+ `quotation_to` for Lead/Customer).
+	Sales Order stores it in `customer` (always Customer).
+	"""
+	if quotation.doctype == "Sales Order":
+		return quotation.get("customer")
+	return quotation.get("party_name")
+
+
 def set_cart_count(quotation=None):
 	if cint(frappe.db.get_singles_value("Webshop Settings", "enabled")):
 		if not quotation:
@@ -33,14 +62,14 @@ def set_cart_count(quotation=None):
 
 
 def _get_transit_days_for_party(party=None):
-        """Get transit days from Customer record. Returns int (default 2)."""
+        """Get transit days from Customer record. Returns int (default 1 — next-day delivery to JKIA)."""
         if not party:
                 party = get_party()
         if party and party.doctype == "Customer":
                 transit_days = frappe.db.get_value("Customer", party.name, "custom_transit_days")
                 if transit_days:
                         return cint(transit_days)
-        return 2
+        return 1
 
 
 @frappe.whitelist()
@@ -57,6 +86,8 @@ def get_cart_quotation(doc=None):
 	if not doc.customer_address and addresses:
 		update_cart_address("billing", addresses[0].name)
 
+	_ensure_default_delivery_date(doc)
+
 	return {
 		"doc": decorate_quotation_doc(doc),
 		"shipping_addresses": get_shipping_addresses(party),
@@ -65,6 +96,34 @@ def get_cart_quotation(doc=None):
 		"cart_settings": frappe.get_cached_doc("Webshop Settings"),
 		"transit_days": _get_transit_days_for_party(party),
 	}
+
+
+def _ensure_default_delivery_date(doc):
+	"""Make sure the cart doc has a delivery date set to at least tomorrow.
+
+	The template renders the date input from `custom_delivery_date` (Quotation
+	custom field) or `delivery_date` (Sales Order standard field). Either way,
+	if it's blank we set it to tomorrow and persist so the input shows a value
+	on first render instead of forcing the user to pick one before anything.
+	"""
+	from frappe.utils import add_days, nowdate, getdate
+	tomorrow = add_days(nowdate(), 1)
+	updates = {}
+
+	if doc.meta.has_field("delivery_date"):
+		current = doc.get("delivery_date")
+		if not current or getdate(current) < getdate(tomorrow):
+			doc.delivery_date = tomorrow
+			updates["delivery_date"] = tomorrow
+
+	if doc.meta.has_field("custom_delivery_date"):
+		current_custom = doc.get("custom_delivery_date")
+		if not current_custom or getdate(current_custom) < getdate(tomorrow):
+			doc.custom_delivery_date = tomorrow
+			updates["custom_delivery_date"] = tomorrow
+
+	if updates and not doc.get("__islocal"):
+		frappe.db.set_value(doc.doctype, doc.name, updates, update_modified=False)
 
 
 @frappe.whitelist()
@@ -105,14 +164,16 @@ def _fmt_qty(q):
 
 
 def _check_box_type_min_order_qty(quotation):
-	"""Return error message (string) if any line fails the box-type minimum, else None."""
+	"""Return error message (string) if any line fails the box-type minimum, else None.
+
+	Box Type is optional — lines without one skip the minimum-order check entirely
+	(no Box Type → no min qty to enforce).
+	"""
 	min_qty_cache = {}
 	for item in quotation.get("items") or []:
 		box_type = getattr(item, "custom_box_type", None)
 		if not box_type:
-			return _("{0} ({1}) has no Box Type selected. Please remove the line and re-add it with a Box Type.").format(
-				item.item_code, item.custom_length or _("no length")
-			)
+			continue
 		if box_type not in min_qty_cache:
 			min_qty_cache[box_type] = flt(
 				frappe.db.get_value("Box Type", box_type, "min_order_qty") or 0
@@ -158,6 +219,16 @@ def place_order():
 	)
 	sales_order.payment_schedule = []
 
+	# Ensure delivery_date is at least tomorrow (next day from today).
+	# Sales Order requires a future date; if the quotation didn't carry a fresh
+	# date, fall back to tomorrow on both the header and every line item.
+	tomorrow = add_days(nowdate(), 1)
+	if not sales_order.delivery_date or getdate(sales_order.delivery_date) < getdate(tomorrow):
+		sales_order.delivery_date = tomorrow
+	for so_item in sales_order.get("items") or []:
+		if not so_item.delivery_date or getdate(so_item.delivery_date) < getdate(tomorrow):
+			so_item.delivery_date = tomorrow
+
 	if not cint(cart_settings.allow_items_not_in_stock):
 		for item in sales_order.get("items"):
 			item.warehouse = frappe.db.get_value(
@@ -171,10 +242,18 @@ def place_order():
 				)
 				if not cint(item_stock.in_stock):
 					throw(_("{0} Not in Stock").format(item.item_code))
-				if item.qty > item_stock.stock_qty:
+				# Compare in stock UOM (stems) using length-aware availability so a
+				# customer can't oversell a specific length even if the item has
+				# enough total stock across lengths.
+				available_stock_qty = flt(
+					_stock_uom_qty_available(item.item_code, item.get("custom_length"))
+				)
+				if flt(item.stock_qty) > available_stock_qty:
+					stock_uom = frappe.db.get_value("Item", item.item_code, "stock_uom") or ""
+					length_label = item.get("custom_length") or _("any length")
 					throw(
-						_("Only {0} in Stock for item {1}").format(
-							item_stock.stock_qty, item.item_code
+						_("Only {0} {1} of {2} ({3}) available in stock").format(
+							available_stock_qty, stock_uom, item.item_code, length_label
 						)
 					)
 
@@ -197,6 +276,13 @@ def request_for_quotation():
 	quotation.flags.ignore_permissions = True
 	quotation.flags.ignore_validate = True
 	quotation.save()
+
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	# In Sales-Order-as-cart mode, always leave the SO in draft. Sales staff
+	# submit it from the desk; the webshop never auto-submits orders.
+	if quotation.doctype == "Quotation" and not cint(cart_settings.save_quotations_as_draft):
+		quotation.submit()
+
 	return quotation.name
 
 
@@ -259,17 +345,98 @@ def _stems_per_bunch_from_uom(uom_name):
 	return 1
 
 
+def _stock_uom_qty_available(item_code, custom_length=None):
+	"""Total actual_qty available in stock UOM, optionally scoped to a stem length.
+
+	Warehouse resolution uses the storefront warehouse set (Webshop Settings →
+	Warehouses, group-expanded) — same as the listing card and product detail
+	page — so the qty surfaced to the cart matches what users see elsewhere.
+	Falls back to the per-item website_warehouse if Webshop Settings is empty.
+
+	Source-of-truth choice:
+	  - Variant or template items resolve length at the item level, so core Bin
+	    already tracks per-length qty. Always read from Bin.
+	  - Plain items (the case Stem Length Bin was built for) read from
+	    Stem Length Bin: a specific length if given, summed across all lengths
+	    in the warehouse(s) otherwise.
+	"""
+	from upande_webshop.upande_webshop.product_data_engine.query import (
+		_all_storefront_warehouses,
+	)
+
+	warehouse = frappe.db.get_value(
+		"Website Item", {"item_code": item_code}, "website_warehouse"
+	)
+	if not warehouse:
+		template = frappe.db.get_value("Item", item_code, "variant_of")
+		if template and template != item_code:
+			warehouse = frappe.db.get_value(
+				"Website Item", {"item_code": template}, "website_warehouse"
+			)
+
+	warehouses = _all_storefront_warehouses(warehouse)
+	if not warehouses:
+		return 0
+
+	item_meta = frappe.db.get_value(
+		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
+	) or frappe._dict()
+	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	if is_variant_or_template:
+		total = frappe.db.sql(
+			"""SELECT COALESCE(SUM(actual_qty), 0)
+			   FROM `tabBin`
+			   WHERE item_code = %s AND warehouse IN ({})""".format(
+				",".join(["%s"] * len(warehouses))
+			),
+			[item_code, *warehouses],
+		)
+		return flt(total[0][0]) if total else 0
+
+	if custom_length:
+		total = frappe.db.sql(
+			"""SELECT COALESCE(SUM(actual_qty), 0)
+			   FROM `tabStem Length Bin`
+			   WHERE item_code = %s AND stem_length = %s AND warehouse IN ({})""".format(
+				",".join(["%s"] * len(warehouses))
+			),
+			[item_code, custom_length, *warehouses],
+		)
+		return flt(total[0][0]) if total else 0
+
+	total = frappe.db.sql(
+		"""SELECT COALESCE(SUM(actual_qty), 0)
+		   FROM `tabStem Length Bin`
+		   WHERE item_code = %s AND warehouse IN ({})""".format(
+			",".join(["%s"] * len(warehouses))
+		),
+		[item_code, *warehouses],
+	)
+	return flt(total[0][0]) if total else 0
+
+
 def _apply_length_price_db(quotation):
 	"""After quotation.save(), directly update rate/amount in DB for length-priced items.
 	This bypasses ERPNext's calculate_taxes_and_totals which overwrites our values.
 	Item Price.price_list_rate is already per-stem.
 	qty is in bunches; stock_qty = qty × conversion_factor = total stems.
 	rate = per_stem price, amount = per_stem × total_stems.
+
+	Works against either Quotation/Quotation Item or Sales Order/Sales Order Item;
+	the relevant custom fields (custom_length, custom_total_stems) exist on both.
 	"""
+	parent_dt = quotation.doctype
+	child_dt = "Sales Order Item" if parent_dt == "Sales Order" else "Quotation Item"
 	price_list = quotation.selling_price_list
 	currency = quotation.currency
 	net_total = flt(0)
 	any_changed = False
+	# Sites without the rose/length flow (mona, tambuzi) won't have custom_length /
+	# custom_total_stems on Quotation/Sales Order Item. Drop those keys from the
+	# DB write so we don't 1146 the cart on a missing column.
+	has_custom_length = frappe.db.has_column(child_dt, "custom_length")
+	has_total_stems = frappe.db.has_column(child_dt, "custom_total_stems")
 
 	for item in quotation.get("items"):
 		# Derive conversion_factor from the UOM name (e.g. "Bunch (15)" → 15).
@@ -279,23 +446,26 @@ def _apply_length_price_db(quotation):
 		item.conversion_factor = cf
 		total_stems = flt(item.qty) * cf
 		if item.name:
-			per_stem = _get_per_stem_rate(item.item_code, item.custom_length, currency, price_list, uom=item.uom)
-			db_fields = {"conversion_factor": cf, "stock_qty": total_stems, "custom_total_stems": total_stems}
+			length_for_price = item.get("custom_length") if has_custom_length else None
+			per_stem = _get_per_stem_rate(item.item_code, length_for_price, currency, price_list, uom=item.uom)
+			db_fields = {"conversion_factor": cf, "stock_qty": total_stems}
+			if has_total_stems:
+				db_fields["custom_total_stems"] = total_stems
+				item.custom_total_stems = total_stems
 			item.stock_qty = total_stems
-			item.custom_total_stems = total_stems
 			if per_stem is not None:
 				amount = flt(per_stem * total_stems, 9)
 				db_fields.update({"rate": per_stem, "amount": amount})
 				item.rate = per_stem
 				item.amount = amount
 				any_changed = True
-			frappe.db.set_value("Quotation Item", item.name, db_fields, update_modified=False)
+			frappe.db.set_value(child_dt, item.name, db_fields, update_modified=False)
 		net_total += flt(item.amount)
 
 	if any_changed:
-		# Update quotation-level totals in DB and in-memory so template context is correct
+		# Update parent totals in DB and in-memory so template context is correct
 		frappe.db.set_value(
-			"Quotation", quotation.name,
+			parent_dt, quotation.name,
 			{"total": net_total, "net_total": net_total, "grand_total": net_total},
 			update_modified=False
 		)
@@ -310,6 +480,52 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 
 	empty_card = False
 	qty = flt(qty)
+
+	if qty > 0:
+		cart_settings = frappe.get_cached_doc("Webshop Settings")
+		if not cint(cart_settings.allow_items_not_in_stock):
+			is_stock_item = frappe.db.get_value("Item", item_code, "is_stock_item")
+			if is_stock_item:
+				item_stock = get_web_item_qty_in_stock(item_code, "website_warehouse")
+				if not cint(item_stock.in_stock):
+					throw(_("{0} is not in stock").format(item_code))
+
+				# Cap the requested qty at what's actually available in the warehouse.
+				# Compare in stock UOM so it works across bunch UOMs of different sizes.
+				# Include other rows already in the cart for the same item so users can't
+				# split a request across multiple (length/box type) rows to bypass the limit.
+				requested_stock_qty = qty * flt(_stems_per_bunch_from_uom(uom)) if uom else qty
+
+				def _is_row_being_replaced(i):
+					if child_docname:
+						return i.name == child_docname
+					return (
+						i.item_code == item_code
+						and (i.custom_length or "") == (custom_length or "")
+						and (i.custom_box_type or "") == (custom_box_type or "")
+						and (i.uom or "") == (uom or "")
+					)
+
+				other_rows_stock_qty = sum(
+					flt(i.stock_qty)
+					for i in quotation.get("items", [])
+					if i.item_code == item_code
+					and (i.custom_length or "") == (custom_length or "")
+					and not _is_row_being_replaced(i)
+				)
+				available_stock_qty = flt(_stock_uom_qty_available(item_code, custom_length))
+				if requested_stock_qty + other_rows_stock_qty > available_stock_qty:
+					remaining = max(0, available_stock_qty - other_rows_stock_qty)
+					stock_uom = frappe.db.get_value("Item", item_code, "stock_uom") or ""
+					if other_rows_stock_qty > 0:
+						msg = _("Only {0} {1} of {2} available in stock — you already have {3} {1} in your cart.").format(
+							_fmt_qty(remaining), stock_uom, item_code, _fmt_qty(other_rows_stock_qty)
+						)
+					else:
+						msg = _("Only {0} {1} of {2} available in stock.").format(
+							_fmt_qty(remaining), stock_uom, item_code
+						)
+					throw(msg)
 
 	if qty == 0:
 		# Remove specific row by child_docname if provided, otherwise remove all rows for item_code
@@ -328,7 +544,11 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			"Website Item", {"item_code": item_code}, "website_warehouse"
 		)
 
-		# Match by child_docname (update), or by item_code + custom_length + uom (existing row), else append new
+		# Match by child_docname (update), or by item_code + custom_length +
+		# custom_box_type + uom (existing row), else append new.
+		# Box type is part of the dedup key so each (length, box type) combo
+		# selected on the product page gets its own cart row, and carries
+		# through to Quotation / Sales Order independently.
 		if child_docname:
 			matched = [i for i in quotation.get("items") if i.name == child_docname]
 		else:
@@ -336,6 +556,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 				i for i in quotation.get("items")
 				if i.item_code == item_code
 				and (i.custom_length or "") == (custom_length or "")
+				and (i.custom_box_type or "") == (custom_box_type or "")
 				and (i.uom or "") == (uom or "")
 			]
 
@@ -347,10 +568,11 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			# UOM Conversion Detail may be missing entries for custom bunch UOMs.
 			conversion_factor = flt(_stems_per_bunch_from_uom(uom))
 			total_stems = qty * conversion_factor
+			child_dt = "Sales Order Item" if quotation.doctype == "Sales Order" else "Quotation Item"
 			quotation.append(
 				"items",
 				{
-					"doctype": "Quotation Item",
+					"doctype": child_dt,
 					"item_code": item_code,
 					"qty": qty,
 					"uom": uom,
@@ -374,23 +596,70 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 				item.custom_box_type = custom_box_type
 			item.warehouse = warehouse
 			item.additional_notes = additional_notes
-			total_stems = qty * flt(item.conversion_factor or 1)
+			# Always re-derive conversion_factor from the (possibly updated) UOM
+			# so qty × cf produces the right stem count even when a legacy row
+			# (uom="Nos", cf=1) is being migrated to a bunch UOM.
+			cf = flt(_stems_per_bunch_from_uom(item.uom))
+			if not cf:
+				cf = flt(item.conversion_factor or 1)
+			item.conversion_factor = cf
+			total_stems = qty * cf
 			item.stock_qty = total_stems
 			item.custom_total_stems = total_stems
 
-	apply_cart_settings(quotation=quotation)
-
-	quotation.flags.ignore_permissions = True
-	quotation.flags.ignore_validate = True
-	quotation.payment_schedule = []
-	if not empty_card:
+	# Row removal must always succeed, even if pricing/FX is misconfigured.
+	# On qty==0 we delete the Quotation Item directly via DB and skip the full
+	# quotation.save() (which re-runs validators that fetch exchange rates and
+	# can 500 when USD→KES is unavailable for the quotation's transaction_date).
+	if qty == 0:
+		parent_dt = quotation.doctype
+		child_dt = "Sales Order Item" if parent_dt == "Sales Order" else "Quotation Item"
+		if empty_card:
+			frappe.delete_doc(parent_dt, quotation.name, ignore_permissions=True, force=True)
+			quotation = None
+		else:
+			# Delete the row(s) directly; recompute totals without touching FX.
+			kept_names = {i.name for i in quotation.get("items")}
+			frappe.db.sql(
+				"""DELETE FROM `tab{child}`
+				   WHERE parent=%s AND name NOT IN ({placeholders})""".format(
+					   child=child_dt,
+					   placeholders=",".join(["%s"] * len(kept_names)) if kept_names else "''",
+				   ),
+				[quotation.name, *kept_names] if kept_names else [quotation.name],
+			)
+			# Recompute net/grand totals from remaining rows; skip FX/pricing.
+			net_total = sum(flt(i.amount) for i in quotation.get("items"))
+			frappe.db.set_value(
+				parent_dt,
+				quotation.name,
+				{
+					"total_qty": sum(flt(i.qty) for i in quotation.get("items")),
+					"total": net_total,
+					"net_total": net_total,
+					"grand_total": net_total,
+					"rounded_total": net_total,
+				},
+				update_modified=False,
+			)
+			frappe.db.commit()
+			# Reload so downstream rendering sees fresh state.
+			quotation = frappe.get_doc(parent_dt, quotation.name)
+	else:
+		apply_cart_settings(quotation=quotation)
+		quotation.flags.ignore_permissions = True
+		quotation.flags.ignore_validate = True
+		quotation.payment_schedule = []
 		quotation.save()
 		_apply_length_price_db(quotation)
-	else:
-		frappe.delete_doc("Quotation", quotation.name, ignore_permissions=True, force=True)
-		quotation = None
 
 	set_cart_count(quotation)
+
+	# Include cart_count in the response so the client can update the badge
+	# without depending on cookie propagation timing (cookies set via
+	# Set-Cookie are usually visible by the callback, but returning the count
+	# directly is more reliable and avoids a stale-badge race).
+	cart_count = cint(quotation.get("total_qty")) if quotation else 0
 
 	if cint(with_items):
 		context = get_cart_quotation(quotation)
@@ -404,9 +673,10 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 			"taxes_and_totals": frappe.render_template(
 				"templates/includes/cart/cart_payment_summary.html", context
 			),
+			"cart_count": cart_count,
 		}
 	else:
-		return {"name": quotation.name}
+		return {"name": quotation.name, "cart_count": cart_count}
 
 
 @frappe.whitelist()
@@ -560,41 +830,97 @@ def decorate_quotation_doc(doc):
 
 
 def _get_cart_quotation(party=None):
-	"""Return the open Quotation of type "Shopping Cart" or make a new one"""
+	"""Return the open cart document (Quotation or Sales Order) or make a new one.
+
+	Kept under the historical name as a thin shim so callers across this module
+	keep working. The actual cart doctype is chosen by `_cart_doctype()`.
+	"""
+	return _get_cart_doc(party=party)
+
+
+def _get_cart_doc(party=None):
+	"""Return the open draft cart document of the configured doctype.
+
+	For "Sales Order" mode, the party must be a Customer (Sales Order has no
+	`quotation_to`). If `get_party()` returns a Lead, we still need a Customer —
+	we fall back to Quotation mode for that session rather than silently
+	promoting the Lead, which is a destructive side-effect for a cart action.
+	"""
 	if not party:
 		party = get_party()
 
-	quotation = frappe.get_all(
-		"Quotation",
-		fields=["name"],
-		filters={
+	target_doctype = _cart_doctype()
+
+	# Sales Order can't accept a Lead. If we don't have a Customer in hand,
+	# degrade to Quotation for this request so the cart still works.
+	if target_doctype == "Sales Order" and (not party or party.doctype != "Customer"):
+		target_doctype = "Quotation"
+
+	if target_doctype == "Sales Order":
+		filters = {
+			"customer": party.name,
+			"contact_email": frappe.session.user,
+			"order_type": "Shopping Cart",
+			"docstatus": 0,
+		}
+	else:
+		filters = {
 			"party_name": party.name,
 			"contact_email": frappe.session.user,
 			"order_type": "Shopping Cart",
 			"docstatus": 0,
-		},
+		}
+
+	existing = frappe.get_all(
+		target_doctype,
+		fields=["name"],
+		filters=filters,
 		order_by="modified desc",
 		limit_page_length=1,
 	)
 
-	if quotation:
-		qdoc = frappe.get_doc("Quotation", quotation[0].name)
+	if existing:
+		qdoc = frappe.get_doc(target_doctype, existing[0].name)
 	else:
-		company = frappe.db.get_single_value("Webshop Settings", "company")
-		qdoc = frappe.get_doc(
-			{
-				"doctype": "Quotation",
-				"naming_series": get_shopping_cart_settings().quotation_series
-				or "QTN-CART-",
-				"quotation_to": party.doctype,
-				"company": company,
-				"order_type": "Shopping Cart",
-				"status": "Draft",
-				"docstatus": 0,
-				"__islocal": 1,
-				"party_name": party.name,
-			}
-		)
+		cart_settings = frappe.get_cached_doc("Webshop Settings")
+		company = cart_settings.company
+
+		# Default delivery to the next day from the order date (tomorrow).
+		# The cart UI may overwrite this via update_cart_delivery_date once the
+		# customer picks a date, but the doc must be valid before that happens.
+		default_delivery_date = add_days(nowdate(), 1)
+
+		if target_doctype == "Sales Order":
+			qdoc = frappe.get_doc(
+				{
+					"doctype": "Sales Order",
+					"naming_series": cart_settings.get("quotation_series")
+					or "SAL-ORD-.YYYY.-",
+					"customer": party.name,
+					"company": company,
+					"order_type": "Shopping Cart",
+					"delivery_date": default_delivery_date,
+					"status": "Draft",
+					"docstatus": 0,
+					"__islocal": 1,
+				}
+			)
+		else:
+			qdoc = frappe.get_doc(
+				{
+					"doctype": "Quotation",
+					"naming_series": get_shopping_cart_settings().quotation_series
+					or "QTN-CART-",
+					"quotation_to": party.doctype,
+					"company": company,
+					"order_type": "Shopping Cart",
+					"delivery_date": default_delivery_date,
+					"status": "Draft",
+					"docstatus": 0,
+					"__islocal": 1,
+					"party_name": party.name,
+				}
+			)
 
 		qdoc.contact_person = frappe.db.get_value(
 			"Contact", {"email_id": frappe.session.user}
@@ -679,7 +1005,7 @@ def _set_price_list(cart_settings, quotation=None):
 	"""Set price list based on customer or shopping cart default"""
 	from erpnext.accounts.party import get_default_price_list
 
-	party_name = quotation.get("party_name") if quotation else get_party().get("name")
+	party_name = _cart_party_name(quotation) if quotation else get_party().get("name")
 	selling_price_list = None
 
 	# check if default customer price list exists
@@ -702,12 +1028,13 @@ def set_taxes(quotation, cart_settings):
 	"""set taxes based on billing territory"""
 	from erpnext.accounts.party import set_taxes
 
+	party_name = _cart_party_name(quotation)
 	customer_group = frappe.db.get_value(
-		"Customer", quotation.party_name, "customer_group"
+		"Customer", party_name, "customer_group"
 	)
 
 	quotation.taxes_and_charges = set_taxes(
-		quotation.party_name,
+		party_name,
 		"Customer",
 		quotation.transaction_date,
 		quotation.company,
@@ -1014,11 +1341,59 @@ def remove_coupon_code():
 
 @frappe.whitelist()
 def update_cart_delivery_date(delivery_date):
+	# Delivery must be at least tomorrow; the cart UI enforces this too,
+	# but the server is the source of truth.
+	tomorrow = add_days(nowdate(), 1)
+	if not delivery_date or getdate(delivery_date) < getdate(tomorrow):
+		delivery_date = tomorrow
 	quotation = _get_cart_quotation()
 	quotation.delivery_date = delivery_date
 	quotation.flags.ignore_permissions = True
 	quotation.save()
-	return {"name": quotation.name}
+	return {"name": quotation.name, "delivery_date": str(delivery_date)}
+
+
+@frappe.whitelist()
+def update_cart_delivery_point(delivery_point):
+	quotation = _get_cart_quotation()
+	if not quotation.meta.has_field("custom_delivery_point"):
+		frappe.throw(_("Delivery Point field is not configured on this cart."))
+
+	if delivery_point and not frappe.db.exists("Delivery Points", delivery_point):
+		frappe.throw(_("Delivery Point {0} does not exist.").format(delivery_point))
+
+	quotation.custom_delivery_point = delivery_point or None
+	quotation.flags.ignore_permissions = True
+	quotation.save()
+	return {"name": quotation.name, "delivery_point": delivery_point or ""}
+
+
+@frappe.whitelist()
+def search_delivery_points(txt=None, limit=20):
+	"""Storefront Link-search for the cart's Delivery Point field.
+
+	Customers logging in via the webshop don't usually have any role with read
+	access to Delivery Points, so the standard Link autocomplete returns nothing.
+	This whitelisted helper ignores permissions and returns name + label."""
+	if not _get_cart_quotation():
+		return []
+
+	conditions = ""
+	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
+	if txt:
+		conditions = "WHERE name LIKE %(txt)s"
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT name FROM `tabDelivery Points`
+		{conditions}
+		ORDER BY name ASC
+		LIMIT %(limit)s
+		""",
+		args,
+		as_dict=True,
+	)
+	return [{"value": r.name, "label": r.name, "description": ""} for r in rows]
 
 @frappe.whitelist()
 def get_item_price_for_configure(item_code):

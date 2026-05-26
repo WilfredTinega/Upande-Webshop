@@ -258,10 +258,10 @@ class TestProductDataEngine(unittest.TestCase):
 		self.assertEqual(items[0].get("item_code"), "Test Web Item-L")
 
 	def test_product_list_with_variants(self):
-		"Test if variants are hideen on hiding variants in settings."
+		"Test if variants are hidden when show_variants is off."
 		create_variant_web_item()
 
-		setup_webshop_settings({"enable_attribute_filters": 0, "hide_variants": 1})
+		setup_webshop_settings({"enable_attribute_filters": 0, "show_variants": 0})
 		frappe.local.shopping_cart_settings = None
 
 		attribute_filters = {"Test Size": ["Large"]}
@@ -275,7 +275,7 @@ class TestProductDataEngine(unittest.TestCase):
 		self.assertEqual(len(items), 0)
 
 		# tear down
-		setup_webshop_settings({"enable_attribute_filters": 1, "hide_variants": 0})
+		setup_webshop_settings({"enable_attribute_filters": 1, "show_variants": 1})
 
 	def test_custom_field_as_filter(self):
 		"Test if custom field functions as filter correctly."

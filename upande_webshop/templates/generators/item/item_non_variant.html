@@ -1,0 +1,144 @@
+{% if shopping_cart and shopping_cart.cart_settings.enabled %}
+{% set cart_settings = shopping_cart.cart_settings %}
+
+{# Stem-length picker always shows every globally defined Stem Length.
+   Per-length qty comes from get_stock_by_length() — same storefront warehouse
+   resolution as the listing grid, so a length that shows N in stock on the
+   listing also shows N on the detail page.
+   A length with no Stem Length Bin row, or actual_qty <= 0, renders disabled. #}
+{% set qty_by_sl = get_stock_by_length(doc.item_code) %}
+
+{% set stem_master = frappe.get_all(
+	'Stem Length',
+	fields=['name', 'length'],
+	filters={'length': ['!=', '']},
+	order_by='length asc'
+) %}
+{% set rows_ns = namespace(list=[]) %}
+{% for row in stem_master %}
+	{% if row.length %}
+		{% set qty = qty_by_sl.get(row.name, 0) %}
+		{% set rows_ns.list = rows_ns.list + [{'stem_length': row.length, 'stock_qty': qty}] %}
+	{% endif %}
+{% endfor %}
+{% set stem_length_rows = rows_ns.list %}
+
+<div class="mt-5 mb-6 inline-non-variant-selector"
+	data-item-code="{{ doc.item_code }}"
+	data-item-name="{{ doc.web_item_name }}">
+
+	{% if cart_settings.show_stem_length | int and stem_length_rows %}
+	<div class="attr-group">
+		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
+			{{ _('Stem Length') }} <span style="font-weight:400; color:var(--gray-500); font-size:11px;">— {{ _('select one or more') }}</span>
+		</label>
+		<div class="attr-toggle stem-length-toggle">
+			{% for row in stem_length_rows %}
+			{% set _qty = row.stock_qty or 0 %}
+			{% set _oos = _qty <= 0 %}
+			<button type="button"
+				class="btn stem-length-btn{% if _oos %} oos{% endif %}"
+				data-value="{{ row.stem_length }}"
+				data-stock-qty="{{ _qty }}"
+				{% if _oos %}disabled aria-disabled="true" title="{{ _('Out of stock') }}"{% endif %}>
+				{{ row.stem_length }}
+			</button>
+			{% endfor %}
+		</div>
+	</div>
+	{% endif %}
+
+	{% if cart_settings.show_box_type | int %}
+	<div class="box-type-area mt-3" style="display:none;">
+		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
+			{{ _('Box Type') }}
+			<span class="moq-label" style="font-weight:400; color:var(--gray-500); font-size:11px;"></span>
+		</label>
+		<div class="box-type-toggle btn-group btn-group-toggle flex-wrap" role="group"
+			style="gap:6px; flex-wrap:wrap;">
+		</div>
+	</div>
+	{% endif %}
+
+	<div class="pack-rate-display mt-3" style="min-height:20px;"></div>
+
+	{% if cart_settings.show_bunch | int %}
+	<div class="mt-3 totals-area" style="display:none;">
+		<div class="length-rows" style="display:flex; flex-direction:column; gap:10px;"></div>
+		<div class="grand-totals mt-3" style="display:none; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--gray-700);">
+			<div><strong class="grand-bunches">0</strong> {{ _('bunches') }}</div>
+			<div><strong class="grand-stems">0</strong> {{ _('stems') }}</div>
+		</div>
+	</div>
+	{% endif %}
+
+	<div class="stems-validation-msg mt-2"></div>
+	<div class="price-display mt-2 p-2" style="min-height:28px; border-radius:6px;"></div>
+	<div class="status-area mt-2"></div>
+	<div class="variant-label-area mt-2"></div>
+
+	<div class="d-flex flex-wrap mt-3" style="gap:8px;">
+		<button class="btn btn-primary btn-add-to-cart-non-variant" disabled>
+			{{ _('Add to Cart') }}
+		</button>
+	</div>
+</div>
+
+<style>
+	.inline-non-variant-selector .attr-toggle .btn,
+	.inline-non-variant-selector .box-type-toggle .btn {
+		border-radius: 6px;
+		font-size: 13px;
+		padding: 6px 14px;
+		border: 1px solid var(--gray-300);
+		background: #fff;
+		color: var(--gray-800);
+	}
+	.inline-non-variant-selector .attr-toggle .btn:hover:not(:disabled),
+	.inline-non-variant-selector .box-type-toggle .btn:hover:not(:disabled) {
+		border-color: var(--gray-500);
+	}
+	.inline-non-variant-selector .attr-toggle .btn.active,
+	.inline-non-variant-selector .box-type-toggle .btn.active {
+		background: var(--primary-color, #2490ef);
+		color: #fff;
+		border-color: var(--primary-color, #2490ef);
+	}
+	.inline-non-variant-selector .attr-toggle .btn:disabled,
+	.inline-non-variant-selector .box-type-toggle .btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.inline-non-variant-selector .stem-length-btn.oos {
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+		color: var(--gray-500);
+		background: #f7f7f9;
+	}
+	.inline-non-variant-selector .stem-length-btn.oos:hover {
+		border-color: var(--gray-300);
+	}
+	.inline-non-variant-selector .length-row {
+		display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+		padding: 8px 10px; border: 1px solid var(--gray-200); border-radius: 6px;
+		background: #fafbfc;
+	}
+	.inline-non-variant-selector .length-row .length-tag {
+		font-weight: 600; font-size: 13px; color: var(--gray-800);
+		padding: 6px 10px; background: #fff; border: 1px solid var(--gray-300);
+		border-radius: 6px;
+	}
+	.inline-non-variant-selector .length-row .length-stock {
+		font-weight: 400; color: var(--gray-500); font-size: 11px; margin-left: 6px;
+	}
+	.inline-non-variant-selector .length-row .form-control { max-width: 100px; font-size: 14px; }
+	.inline-non-variant-selector .length-row .total-stems { font-weight: 700; background: #f4f5f6; }
+	.inline-non-variant-selector .length-row .row-msg { flex-basis: 100%; font-size: 12px; }
+	.inline-non-variant-selector .attr-group { margin-bottom: 12px; }
+	.inline-non-variant-selector .attr-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+</style>
+
+<script>
+{% include "templates/generators/item/item_non_variant.js" %}
+</script>
+{% endif %}

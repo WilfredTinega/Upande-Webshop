@@ -12,11 +12,29 @@ body.product-page {
 
 // ─── Hide Frappe top navbar on webshop pages (logged-in only, applied via JS) ─
 // JS adds this class only when frappe.session.user !== 'Guest',
-// so guests on /upande-webshop still see the Frappe navbar with Login.
+// so guests on /webshop still see the Frappe navbar with Login.
 body.hide-frappe-navbar {
 	header.navbar,
 	nav.navbar {
 		display: none !important;
+	}
+
+	// Align page content with the webshop sub-navbar's inner container
+	// (max-width 1200px, centred, 1rem horizontal padding — see #webshop-subnav .webshop-subnav-inner).
+	// Without this, breadcrumbs/heading/filters sit flush against the viewport edge
+	// while the inner <main class="container"> bounds only the page_content block.
+	.page-content-wrapper {
+		max-width: 1200px;
+		margin: 0 auto;
+		padding: 0 1rem;
+
+		// Cancel the nested Bootstrap container's own gutter so it aligns flush
+		// with the wrapper (otherwise we get double padding inside main).
+		> main.container {
+			max-width: none;
+			padding-left: 0;
+			padding-right: 0;
+		}
 	}
 }
 
@@ -120,19 +138,32 @@ body.hide-frappe-navbar {
 
 
 	.card-img-container {
-		height: 210px;
+		height: 180px;
 		width: 100%;
+		display: flex;
+		align-items: stretch;
+		justify-content: stretch;
+		overflow: hidden;
+		background: var(--fg-color, #fff);
+		border: none;
+		border-top-left-radius: var(--border-radius);
+		border-top-right-radius: var(--border-radius);
 	}
 
 	.card-img {
-		max-height: 210px;
-		object-fit: contain;
-		margin-top: 1.25rem;
+		height: 100%;
+		width: 100%;
+		max-height: none;
+		max-width: none;
+		object-fit: cover;
+		margin: 0;
+		border: none !important;
+		border-radius: 0 !important;
 	}
 
 	.no-image {
 		@include flex(flex, center, center, null);
-		height: 220px;
+		height: 180px;
 		background: var(--gray-100);
 		width: 100%;
 		border-radius: var(--border-radius) var(--border-radius) 0 0;
@@ -143,12 +174,12 @@ body.hide-frappe-navbar {
 	.no-image-list {
 		@include flex(flex, center, center, null);
 		height: 150px;
+		width: 150px;
 		background: var(--gray-100);
 		border-radius: var(--border-radius);
-		font-size: 2rem;
+		font-size: 1.25rem;
 		color: var(--gray-500);
-		margin-top: 15px;
-		margin-bottom: 15px;
+		margin: 0;
 	}
 
 	.card-body-flex {
@@ -201,8 +232,22 @@ body.hide-frappe-navbar {
 	}
 
 	.item-card {
-		padding: var(--padding-sm);
-		min-width: 300px;
+		padding: 4px;
+		display: flex;
+
+		// The grid markup wraps each card in <a style="display:block"> — inside a
+		// flex parent that child shrinks to content width unless we force it to
+		// stretch, which left the card narrower than its column (the absolute
+		// cart-indicator was anchored to the column, so it ended up floating in
+		// the gap to the right of the card).
+		> a {
+			width: 100%;
+			flex: 1 1 auto;
+		}
+
+		.card {
+			width: 100%;
+		}
 	}
 
 	.wishlist-card {
@@ -212,19 +257,65 @@ body.hide-frappe-navbar {
 			display: flex;
 			flex-direction: column;
 		}
+
+		// The image container is a flex row with the <a> as the only child. With
+		// no explicit width on the <a>, it shrinks to its content (the .no-image
+		// abbreviation), collapsing the placeholder into a narrow strip. Stretch
+		// the anchor to fill the container.
+		.card-img-container > a {
+			width: 100%;
+			display: flex;
+			align-items: stretch;
+		}
 	}
 }
 
 #products-list-area, #products-grid-area {
-	padding: 0 5px;
+	padding: 0;
+	margin-left: -4px;
+	margin-right: -4px;
+}
+
+#products-list-area > a {
+	display: block;
+	padding: 0 !important;
+	line-height: 0;
+	margin: 0 0 8px !important;
+}
+
+#products-list-area > a + a .list-row {
+	border-top: none;
+}
+
+// Tighten the inter-card gap. Bootstrap's grid uses 15px column padding which,
+// combined with the previous .item-card padding, left a wide gap between cards.
+#products-grid-area > [class*="col-"] {
+	padding-left: 4px;
+	padding-right: 4px;
+}
+
+// Bootstrap's 12-col grid can't divide evenly into 5. At xl viewports we want
+// 5 product cards per row, so override the column flex-basis directly. The
+// `col-lg-3` still applies at lg (4 cards/row) and below.
+@media (min-width: 1200px) {
+	#products-grid-area > .item-card {
+		flex: 0 0 20%;
+		max-width: 20%;
+	}
 }
 
 .list-row {
 	background-color: white;
-	padding-bottom: 1rem;
-	padding-top: 1.5rem !important;
+	padding: 0 !important;
+	margin: 0 !important;
 	border-radius: 8px;
-	border-bottom: 1px solid var(--gray-50);
+	border-bottom: none;
+	min-height: 80px;
+	line-height: normal;
+	align-items: center;
+	overflow: hidden;
+	display: flex;
+	flex-wrap: nowrap;
 
 	&:hover, &:focus-within {
 		box-shadow: 0px 16px 60px rgba(0, 0, 0, 0.08), 0px 8px 30px -20px rgba(0, 0, 0, 0.04);
@@ -239,6 +330,12 @@ body.hide-frappe-navbar {
 		.btn-explore-variants {
 			visibility: visible;
 		}
+	}
+
+	.list-body {
+		flex: 1 1 auto;
+		min-width: 0;
+		padding: 0 16px;
 	}
 
 	.product-code {
@@ -318,8 +415,15 @@ body.hide-frappe-navbar {
 .list-image {
 	border: none !important;
 	overflow: hidden;
-	max-height: 200px;
+	width: 150px;
+	height: 150px;
+	flex: 0 0 150px;
+	max-width: 150px;
 	background-color: white;
+	padding: 0 !important;
+	display: flex;
+	align-items: stretch;
+	justify-content: stretch;
 }
 
 .product-container {
@@ -944,73 +1048,44 @@ body.hide-frappe-navbar {
 	}
 }
 
-.cart-indicator {
-	position: absolute;
-	text-align: center;
-	width: 22px;
-	height: 22px;
-	left: calc(100% - 40px);
-	top: 22px;
-
-	border-radius: 66px;
-	box-shadow: 0px 2px 6px rgba(17, 43, 66, 0.08), 0px 1px 4px rgba(17, 43, 66, 0.1);
-	background: white;
-	color: var(--primary-color);
-	font-size: 14px;
-
-	&.list-indicator {
-		position: unset;
-		margin-left: auto;
-	}
-}
-
-
 .like-action {
-	visibility: hidden;
+	visibility: visible;
 	text-align: center;
 	position: absolute;
 	cursor: pointer;
 	width: 28px;
 	height: 28px;
-	left: 20px;
-	top: 20px;
+	right: 16px;
+	top: 16px;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 
 	/* White */
 	background: white;
 	box-shadow: 0px 2px 6px rgba(17, 43, 66, 0.08), 0px 1px 4px rgba(17, 43, 66, 0.1);
 	border-radius: 66px;
-
-	&.like-action-wished {
-		visibility: visible !important;
-	}
-
-	@media (max-width: 992px) {
-		visibility: visible !important;
-	}
 }
 
 .like-action-list {
-	visibility: hidden;
+	visibility: visible;
 	text-align: center;
 	position: absolute;
 	cursor: pointer;
 	width: 28px;
 	height: 28px;
-	left: 20px;
-	top: 0;
+	right: 16px;
+	top: 16px;
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	justify-content: center;
 
 	/* White */
 	background: white;
 	box-shadow: 0px 2px 6px rgba(17, 43, 66, 0.08), 0px 1px 4px rgba(17, 43, 66, 0.1);
 	border-radius: 66px;
-
-	&.like-action-wished {
-		visibility: visible !important;
-	}
-
-	@media (max-width: 992px) {
-		visibility: visible !important;
-	}
 }
 
 .like-action-item-fp {
@@ -1332,9 +1407,39 @@ body.hide-frappe-navbar {
 #toggle-view {
 	float: right;
 
+	.btn {
+		background-color: var(--gray-100);
+		border: 1px solid var(--gray-300);
+		color: var(--gray-700);
+		transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+
+		&:hover {
+			background-color: var(--gray-200);
+			border-color: var(--gray-400);
+			color: var(--gray-900);
+		}
+
+		.icon {
+			stroke: currentColor;
+			fill: none;
+		}
+	}
+
 	.btn-primary {
-		background-color: var(--gray-600);
-		box-shadow: 0 0 0 0.2rem var(--gray-400);
+		background-color: var(--primary-color) !important;
+		border-color: var(--primary-color) !important;
+		color: white !important;
+		box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+
+		&:hover {
+			background-color: var(--primary-color) !important;
+			border-color: var(--primary-color) !important;
+			color: white !important;
+		}
+
+		.icon {
+			stroke: white;
+		}
 	}
 }
 
@@ -1567,15 +1672,15 @@ body.hide-frappe-navbar {
 	}
 
 	.webshop-subnav-cart-link {
-		display: flex;
+		position: relative;
+		display: inline-flex;
 		align-items: center;
-		gap: 6px;
-		font-size: 14px;
-		font-weight: 500;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
 		color: var(--text-color, #1f272e);
 		text-decoration: none;
-		padding: 4px 10px;
-		border-radius: 6px;
+		border-radius: 50%;
 		border: 1px solid var(--border-color, #e2e8f0);
 
 		&:hover {
@@ -1584,23 +1689,28 @@ body.hide-frappe-navbar {
 		}
 
 		.webshop-subnav-cart-label {
-			font-size: 13px;
+			display: none;
 		}
 	}
 
 	.webshop-subnav-badge {
+		position: absolute;
+		top: -4px;
+		right: -4px;
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		min-width: 18px;
-		height: 18px;
+		min-width: 16px;
+		height: 16px;
 		padding: 0 4px;
-		font-size: 11px;
+		font-size: 10px;
 		font-weight: 600;
 		line-height: 1;
 		color: #fff;
 		background: var(--red-600, #dc2626);
 		border-radius: 9px;
+		border: 2px solid #fff;
+		pointer-events: none;
 	}
 }
 

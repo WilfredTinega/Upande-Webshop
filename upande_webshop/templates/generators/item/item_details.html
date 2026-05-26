@@ -3,50 +3,6 @@
 {% set product_info = shopping_cart.product_info %}
 {% set price_info = product_info.get('price') or {} %}
 
-{# Stem lengths come from Webshop Item Prices: only show lengths that have a
-   price configured for this item (or its template, for variants). #}
-{% set _priced_parent = frappe.db.get_value('Webshop Item Prices', {'item_code': doc.item_code}, 'name') %}
-{% if not _priced_parent and doc.variant_of %}
-    {% set _priced_parent = frappe.db.get_value('Webshop Item Prices', {'item_code': doc.variant_of}, 'name') %}
-{% endif %}
-{% set stem_lengths = [] %}
-{% if _priced_parent %}
-    {% set _priced_rows = frappe.db.sql("""
-        SELECT stem_length, rate
-        FROM `tabStem Length Price`
-        WHERE parent = %s
-          AND parenttype = 'Webshop Item Prices'
-          AND stem_length IS NOT NULL AND stem_length != ''
-          AND rate IS NOT NULL AND rate != ''
-        ORDER BY LENGTH(stem_length) ASC, stem_length ASC
-    """, (_priced_parent,), as_dict=True) %}
-    {% for _row in _priced_rows %}
-        {% set _ = stem_lengths.append({'name': _row.stem_length, 'length': _row.stem_length}) %}
-    {% endfor %}
-{% endif %}
-
-<!-- FETCH UOMS THAT CONTAIN "BUNCH" FROM UOM DOCTYPE -->
-{% set all_uoms = frappe.get_list('UOM', 
-    fields=['name', 'uom_name', 'enabled'],
-    filters={'enabled': 1},
-    order_by='name asc',
-    ignore_permissions=True
-) %}
-
-<!-- Filter to only show UOMs that have "Bunch" in the name -->
-{% set bunch_uoms = [] %}
-{% for uom in all_uoms %}
-    {% if 'bunch' in uom.name|lower or 'bunch' in uom.uom_name|lower %}
-        {% set bunch_uoms = bunch_uoms.append(uom) %}
-    {% endif %}
-{% endfor %}
-
-{% set default_length = stem_lengths | first %}
-{% set default_length_value = default_length.length if default_length else '' %}
-
-<!-- Set first bunch UOM as default if available -->
-{% set default_bunch_value = bunch_uoms[0].name if bunch_uoms else '' %}
-
 <div id="product-meta"
 	data-item-code="{{ doc.item_code }}"
 	data-currency="{{ price_info.get('currency') or 'USD' }}"
@@ -60,11 +16,13 @@
 			{{ _(doc.web_item_name) }}
 		</div>
 
-		{% if shopping_cart.cart_settings.enabled %}
-		<div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2" style="cursor:pointer;" title="{{ _('Go to Wishlist') }}"
-			data-item-code="{{ doc.item_code }}">
+		{% if shopping_cart.cart_settings.enabled and shopping_cart.cart_settings.enable_wishlist %}
+		<div class="like-action-item-fp {% if wished %}like-action-wished{% endif %} ml-2" style="cursor:pointer;"
+			title="{{ _('Remove from Wishlist') if wished else _('Add to Wishlist') }}"
+			data-item-code="{{ doc.item_code }}"
+			data-wished="{{ '1' if wished else '0' }}">
 			<svg class="icon icon-md">
-				<use class="wish-icon {% if wished %}wished-green{% else %}not-wished-fp{% endif %}" href="#icon-heart"></use>
+				<use class="wish-icon {% if wished %}wished{% else %}not-wished{% endif %}" href="#icon-heart"></use>
 			</svg>
 		</div>
 		{% endif %}
@@ -76,99 +34,17 @@
 	<div itemprop="review" itemscope itemtype="https://schema.org/Review">
 	</div>
 
-	<!-- STEM LENGTH SELECTOR - DYNAMICALLY FROM DOCTYPE -->
-	{% if not has_variants and stem_lengths %}
-	<div class="stem-length-selector form-group mt-4 mb-4">
-		<label for="stem-length" class="d-block mb-2" style="font-weight:600; font-size:13px;">{{ _("Stem Length") }}</label>
-		<select id="stem-length" class="form-control" name="stem_length" style="max-width: 200px;" required>
-			<option value="">{{ _("Stem Length") }}</option>
-			{% for length in stem_lengths %}
-				<option value="{{ length.length }}" {% if loop.first %}selected{% endif %}>
-					{{ length.length }}
-				</option>
-			{% endfor %}
-		</select>
-
-		<!-- Price indicator based on length (optional) -->
-		<div class="mt-2 length-price-info" style="display: none;">
-			<small class="text-muted" id="length-price-message"></small>
-		</div>
-
-	</div>
-	{% endif %}
-
-	<!-- BUNCH UOM SELECTOR - DYNAMICALLY FROM UOM DOCTYPE -->
-	{% if not has_variants and bunch_uoms %}
-	<div class="bunch-uom-selector form-group mt-4 mb-4" style="display:none;">
-		<select id="bunch-uom" class="form-control" name="bunch_uom" style="max-width: 200px;" required>
-			<option value="">{{ _("Bunch Size") }}</option>
-			{% for uom in bunch_uoms %}
-				<option value="{{ uom.name }}" {% if loop.first %}selected{% endif %}>
-					{{ uom.uom_name or uom.name }}
-				</option>
-			{% endfor %}
-		</select>
-	</div>
-	{% endif %}
-
-	<!-- BOX TYPE SELECTOR - DYNAMICALLY LOADED PER CUSTOMER -->
-	{% if not has_variants %}
-	<div class="box-type-selector form-group mt-4 mb-4">
-		<label for="box-type" class="d-block mb-2" style="font-weight:600; font-size:13px;">{{ _("Box Type") }}</label>
-		<select id="box-type" class="form-control" name="box_type" style="max-width: 200px;" disabled>
-			<option value="">{{ _("Loading boxes...") }}</option>
-		</select>
-	</div>
-	{% endif %}
-
-	<!-- Filter based on available lengths from attributes -->
-	{% if doc.attributes and not has_variants and stem_lengths %}
-		{% set available_lengths = [] %}
-		{% for attr in doc.attributes %}
-			{% if attr.attribute == "Stem Length" or attr.attribute == "Length" %}
-				{% set available_lengths = available_lengths.append(attr.attribute_value) %}
-			{% endif %}
-		{% endfor %}
-		
-		{% if available_lengths %}
-		<script>
-			// Enable/disable options based on available lengths
-			$(document).ready(function() {
-				const availableLengths = {{ available_lengths | tojson }};
-				const $select = $('#stem-length');
-				
-				$select.find('option').each(function() {
-					const value = $(this).val();
-					if (value && !availableLengths.includes(value) && availableLengths.length > 0) {
-						$(this).prop('disabled', true);
-						$(this).text($(this).text() + ' ({{ _("Not available") }})');
-					}
-				});
-				
-				// Update stock message
-				if (availableLengths.length > 0) {
-					$('.stock-message').text('{{ _("Available in") }}: ' + availableLengths.join(', '));
-				}
-			});
-		</script>
-		{% endif %}
-	{% endif %}
-
 	{% if has_variants %}
 		<!-- configure template -->
 		{% include "templates/generators/item/item_configure.html" %}
 	{% else %}
-		<!-- add variant to cart -->
+		<!-- inline non-variant selector (mirrors the variant flow UI) -->
+		{% include "templates/generators/item/item_non_variant.html" %}
+		<!-- add to cart (wishlist / view-in-cart / contact-us only) -->
 		{% include "templates/generators/item/item_add_to_cart.html" %}
 	{% endif %}
-	
+
 </div>
-
-<!-- Hidden field to store stem length selection -->
-<input type="hidden" id="selected_stem_length" name="selected_stem_length" value="{{ default_length_value }}">
-
-<!-- Hidden field to store bunch UOM selection -->
-<input type="hidden" id="selected_bunch_uom" name="selected_bunch_uom" value="{{ default_bunch_value }}">
 
 {% block base_scripts %}
 <!-- js should be loaded in body! -->
@@ -190,114 +66,49 @@
 			return;
 		}
 
+		const wished = String($btn.attr('data-wished')) === '1';
+		const action = wished ? 'remove' : 'add';
+		const method = action === 'add'
+			? 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist'
+			: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.remove_from_wishlist';
+
+		// Optimistic UI swap.
+		const $use = $btn.find('.wish-icon');
+		if (action === 'add') {
+			$btn.addClass('like-action-wished');
+			$btn.attr('data-wished', '1').attr('title', __('Remove from Wishlist'));
+			$use.removeClass('not-wished').addClass('wished');
+		} else {
+			$btn.removeClass('like-action-wished');
+			$btn.attr('data-wished', '0').attr('title', __('Add to Wishlist'));
+			$use.removeClass('wished').addClass('not-wished');
+		}
+
 		frappe.call({
 			type: 'POST',
-			method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist',
+			method: method,
 			args: { item_code: item_code },
 			callback: function(r) {
-				window.location.href = '/wishlist';
-			}
-		});
-	});
-	
-	// Live price calculation: per-stem price for the selected length
-	function updatePriceDisplay() {
-		const stemLength = $('#stem-length').val();
-		if (!stemLength) return;
-
-		const meta = document.getElementById('product-meta');
-		if (!meta) return;
-		const itemCode = meta.dataset.itemCode;
-		const currency = meta.dataset.currency;
-		const priceList = meta.dataset.priceList;
-
-		const $msg = $('#length-price-message');
-		$msg.removeClass('text-danger').addClass('text-muted').text('');
-		$('.length-price-info').hide();
-
-		const currencySymbols = { USD: '$', EUR: '€', GBP: '£', KES: 'KSh' };
-		const symbol = currencySymbols[currency] || (currency ? currency + ' ' : '');
-
-		frappe.call({
-			method: 'upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.get_item_length_price',
-			args: { item_code: itemCode, length: stemLength, currency: currency, price_list: priceList },
-			callback(r) {
-				const rate = r && r.message ? parseFloat(r.message.price_list_rate) : NaN;
-				if (!isNaN(rate) && rate > 0) {
-					const formatted = symbol + ' ' + rate.toFixed(2);
-					$('#dynamic-price-value').text(formatted);
-					$('#dynamic-price-uom-label').text('');
-					$msg.removeClass('text-danger').addClass('text-muted').text('');
-					$('.length-price-info').hide();
-				} else {
-					$('#dynamic-price-value').text('—');
-					$('#dynamic-price-uom-label').text('');
-					$msg.removeClass('text-muted').addClass('text-danger').text('{{ _("No price for this length") }}');
-					$('.length-price-info').show();
-				}
-			}
-		});
-	}
-
-	// Load Box Type options from the Box Type doctype (active only)
-	function loadBoxTypes() {
-		const $select = $('#box-type');
-		if (!$select.length) return;
-		frappe.call({
-			method: 'upande_webshop.api.pack_rate.get_box_types',
-			callback(r) {
-				$select.empty();
-				const rows = (r && r.message) || [];
-				if (!rows.length) {
-					$select.append($('<option>').val('').text('{{ _("No boxes configured") }}').prop('disabled', true));
-					$select.prop('disabled', true);
+				if (r.exc) {
+					// Roll back optimistic UI on failure.
+					if (action === 'add') {
+						$btn.removeClass('like-action-wished').attr('data-wished', '0').attr('title', __('Add to Wishlist'));
+						$use.removeClass('wished').addClass('not-wished');
+					} else {
+						$btn.addClass('like-action-wished').attr('data-wished', '1').attr('title', __('Remove from Wishlist'));
+						$use.removeClass('not-wished').addClass('wished');
+					}
+					frappe.show_alert({ message: __('Sorry, something went wrong. Please refresh.'), indicator: 'red' }, 4);
 					return;
 				}
-				rows.forEach((row, idx) => {
-					const label = row.box_type_name || row.name;
-					const $opt = $('<option>').val(label).text(label);
-					if (idx === 0) $opt.prop('selected', true);
-					$select.append($opt);
-				});
-				$select.prop('disabled', false);
-				$select.trigger('change');
-			},
-			error() {
-				$select.empty().append($('<option>').val('').text('{{ _("Failed to load boxes") }}')).prop('disabled', true);
+				frappe.show_alert({
+					message: action === 'add' ? __('Added to Wishlist') : __('Removed from Wishlist'),
+					indicator: action === 'add' ? 'green' : 'orange'
+				}, 3);
+				if (typeof upande_webshop !== 'undefined' && upande_webshop.upande_webshop && upande_webshop.upande_webshop.wishlist) {
+					upande_webshop.upande_webshop.wishlist.set_wishlist_count(true);
+				}
 			}
 		});
-	}
-
-	// Handle stem length selection (delegate from document so the handler
-	// works regardless of whether #stem-length is inside .page_content)
-	$(document).on('change', '#stem-length', function() {
-		const selectedLength = $(this).val();
-		$('#selected_stem_length').val(selectedLength);
-		updatePriceDisplay();
-	});
-
-	// Handle bunch UOM selection (selector is hidden by default; harmless if present)
-	$(document).on('change', '#bunch-uom', function() {
-		$('#selected_bunch_uom').val($(this).val());
-	});
-
-	// Box-type change just stores the selection; pricing depends on length only
-	$(document).on('change', '#box-type', function() {
-		// No-op for now; downstream cart code reads #box-type directly
-	});
-
-	frappe.ready(function() {
-		loadBoxTypes();
-		const $sl = $('#stem-length');
-		if (!$sl.val()) {
-			const firstPriced = $sl.find('option').filter(function() { return $(this).val(); }).first().val();
-			if (firstPriced) {
-				$sl.val(firstPriced);
-				$('#selected_stem_length').val(firstPriced);
-			}
-		}
-		if ($sl.val()) {
-			updatePriceDisplay();
-		}
 	});
 </script>

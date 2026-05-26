@@ -5,27 +5,37 @@ frappe.provide("upande_webshop.upande_webshop.shopping_cart");
 var shopping_cart = upande_webshop.upande_webshop.shopping_cart;
 
 $.extend(wishlist, {
-	set_wishlist_count: function(animate=false) {
+	set_wishlist_count: function(animate=false, override_count=null) {
 		// set badge count for wishlist icon
-		var wish_count = frappe.get_cookie("wish_count");
-		if (frappe.session.user==="Guest") {
-			wish_count = 0;
+		var count;
+		if (override_count !== null && override_count !== undefined) {
+			count = parseInt(override_count) || 0;
+		} else {
+			var wish_count = frappe.get_cookie("wish_count");
+			if (frappe.session.user === "Guest") {
+				wish_count = 0;
+			}
+			count = parseInt(wish_count) || 0;
 		}
 
-		if (wish_count) {
+		if (count > 0) {
 			$(".wishlist").toggleClass('hidden', false);
 		}
 
 		var $wishlist = $('.wishlist-icon');
-		var $badge = $wishlist.find("#wish-count");
+		// Keep the icon itself visible for logged-in users so they can navigate
+		// to /wishlist even when empty. Only toggle the badge.
+		$wishlist.css("display", "inline");
 
-		if (parseInt(wish_count) === 0 || wish_count === undefined) {
-			$wishlist.css("display", "none");
-		} else {
-			$wishlist.css("display", "inline");
+		var $badge = $wishlist.find("#wish-count");
+		if (!$badge.length) {
+			// Badge was removed earlier; re-create it so it can be updated.
+			$badge = $('<span class="webshop-subnav-badge" id="wish-count" style="display:none;">0</span>');
+			$wishlist.append($badge);
 		}
-		if (wish_count) {
-			$badge.html(wish_count);
+
+		if (count > 0) {
+			$badge.text(count).css("display", "inline");
 			if (animate) {
 				$wishlist.addClass('cart-animate');
 				setTimeout(() => {
@@ -33,7 +43,7 @@ $.extend(wishlist, {
 				}, 500);
 			}
 		} else {
-			$badge.remove();
+			$badge.text(0).css("display", "none");
 		}
 	},
 
@@ -103,8 +113,9 @@ $.extend(wishlist, {
 			return;
 		}
 
-		let success_action = function() {
-			upande_webshop.upande_webshop.wishlist.set_wishlist_count(true);
+		let success_action = function(r) {
+			var new_count = (r && r.message && r.message.wish_count);
+			upande_webshop.upande_webshop.wishlist.set_wishlist_count(true, new_count);
 		};
 
 		if ($wish_icon.hasClass('wished')) {
@@ -170,7 +181,7 @@ $.extend(wishlist, {
 							indicator: "red", title: __("Note")
 						});
 					} else if (success_action && (typeof success_action === 'function')) {
-						success_action();
+						success_action(r);
 					}
 				}
 			});

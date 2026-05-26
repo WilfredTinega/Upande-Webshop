@@ -1,57 +1,42 @@
-// Pack rates are loaded from the Pack Rate doctype on first dialog open.
-// Shape: { variety_lowercase: { box_key: { length_cm: stems_per_box } } }
-// Box keys: 'zim' covers ZIM, WAFEX, TFH HUB, FDT, JUMBO; 'std' covers STANDARD BOXES.
-let PACK_RATES = {};
-let PACK_RATES_LOADED = null;
+// Inline variant selector: toggle buttons per attribute + box type.
+// Customer picks a variant + box, then enters No. of Bunches.
+// Total stems = bunch_size (from item's sales UOM) × num_bunches.
 
-function load_pack_rates() {
-	if (PACK_RATES_LOADED) return PACK_RATES_LOADED;
-	PACK_RATES_LOADED = new Promise((resolve) => {
+const _pack_rate_cache = {};
+const _bunch_size_cache = {};
+
+function fetch_bunch_size(item_code) {
+	if (!item_code) return Promise.resolve({ size: 1, uom: null });
+	if (_bunch_size_cache[item_code] !== undefined) {
+		return Promise.resolve(_bunch_size_cache[item_code]);
+	}
+	return new Promise((resolve) => {
 		frappe.call({
-			method: 'upande_webshop.upande_webshop.api.get_pack_rates_map',
+			method: 'upande_webshop.api.pack_rate.get_item_bunch_size',
+			args: { item_code },
 			callback: (r) => {
-				PACK_RATES = r.message || {};
-				resolve(PACK_RATES);
+				const msg = (r && r.message) || {};
+				const result = { size: msg.bunch_size || 1, uom: msg.sales_uom || null };
+				_bunch_size_cache[item_code] = result;
+				resolve(result);
 			},
-			error: () => {
-				PACK_RATES = {};
-				resolve(PACK_RATES);
-			},
+			error: () => resolve({ size: 1, uom: null }),
 		});
 	});
-	return PACK_RATES_LOADED;
 }
 
-const BUNCH_SIZE = 10;
-
-// In-memory cache: avoid re-hitting the server on every keystroke
-const _pack_rate_cache = {};
-
-function _cache_key(item_code, box_name, length_cm) {
-	return `${item_code}|${box_name}|${length_cm}`;
-}
-
-/**
- * Resolve a pack rate via the server-side API.
- * Returns a Promise that resolves to {pack_rate, source} or {pack_rate: null}.
- */
-function fetch_pack_rate(item_code, variety_name, box_name, length_cm) {
+function fetch_pack_rate(box_name, length_cm) {
 	if (!box_name || !length_cm) {
 		return Promise.resolve({ pack_rate: null });
 	}
-	const key = _cache_key(item_code || variety_name, box_name, length_cm);
+	const key = `${box_name}|${length_cm}`;
 	if (_pack_rate_cache[key] !== undefined) {
 		return Promise.resolve(_pack_rate_cache[key]);
 	}
 	return new Promise((resolve) => {
 		frappe.call({
 			method: 'upande_webshop.api.pack_rate.get_pack_rate',
-			args: {
-				item_code: item_code || null,
-				variety_name: variety_name || null,
-				box_name,
-				length_cm,
-			},
+			args: { box_name, length_cm },
 			callback: (r) => {
 				const result = (r && r.message) || { pack_rate: null };
 				_pack_rate_cache[key] = result;
@@ -62,331 +47,488 @@ function fetch_pack_rate(item_code, variety_name, box_name, length_cm) {
 	});
 }
 
-class ItemConfigure {
-	constructor(item_code, item_name) {
+class InlineVariantSelector {
+	constructor($root, item_code, item_name) {
+		this.$root = $root;
 		this.item_code = item_code;
 		this.item_name = item_name;
+		this.selected_attributes = {};
 		this.selected_box_type = '';
+		this.exact_match_item = null;
 		this._per_stem_rate = null;
 		this._currency = '€';
-		this._flower_type = null;
-		this._moq = 10;
+		this._moq = 0; // MOQ expressed in stems
+		this._moq_bunches = 0;
 		this._pack_rate = null;
-		this._template_item_code = null;  // resolved on first lookup
+		this._user_edited_bunches = false;
+		this.bunch_size = 1;
+		this.bunch_uom = null; // sales UOM (e.g. "Bunch (12)") — sent to update_cart
+		this._in_stock = null; // null=unknown, true/false once resolved
+		this._stock_qty = null;
+		this._show_stock_qty = false;
+		this._on_backorder = false;
 
-		load_pack_rates();
+		this.$attr_area = $root.find('.variant-attributes-area');
+		this.$box_area = $root.find('.box-type-area');
+		this.$box_toggle = $root.find('.box-type-toggle');
+		this.$pack_rate_display = $root.find('.pack-rate-display');
+		this.$totals_area = $root.find('.totals-area');
+		this.$bunch_size_input = $root.find('.bunch-size-input');
+		this.$bunches_display = $root.find('.bunches-display');
+		this.$total_stems_display = $root.find('.total-stems-display');
+		this.$validation_msg = $root.find('.stems-validation-msg');
+		this.$price_display = $root.find('.price-display');
+		this.$status_area = $root.find('.variant-status-area');
+		this.$add_to_cart = $root.find('.btn-add-to-cart-variant');
+		this.$clear = $root.find('.btn-clear-variant');
+		this.$moq_label = $root.find('.moq-label');
 
+		fetch_bunch_size(this.item_code).then((info) => {
+			this.bunch_size = info.size;
+			this.bunch_uom = info.uom;
+			this.$bunch_size_input.val(info.size);
+		});
+		this.init();
+	}
+
+	init() {
+		this.load_attributes()
+			.then(attrs => {
+				this.attribute_data = attrs;
+				this.render_attribute_toggles();
+				this.restore_from_cache();
+			});
+
+		this.load_box_types();
+		this.bind_events();
+	}
+
+	bind_events() {
+		this.$root.on('click', '.attr-toggle .attr-btn', (e) => {
+			e.preventDefault();
+			const $btn = $(e.currentTarget);
+			const attribute = $btn.data('attribute');
+			const value = String($btn.data('value'));
+			if (this.selected_attributes[attribute] === value) return;
+			this.selected_attributes[attribute] = value;
+			this._user_edited_bunches = false;
+			$btn.siblings('.attr-btn').removeClass('active');
+			$btn.addClass('active');
+			if (this.range_values) delete this.range_values[attribute];
+			this.remove_range_input(attribute);
+			this.maybe_show_range_input(attribute, value);
+			this.persist_cache();
+			this.refresh_attribute_state();
+			if (this.selected_box_type) {
+				this.refresh_moq_for_box();
+			}
+		});
+
+		this.$root.on('click', '.box-type-toggle .box-btn', (e) => {
+			e.preventDefault();
+			const $btn = $(e.currentTarget);
+			const value = String($btn.data('value'));
+			if (this.selected_box_type === value) return;
+			this.selected_box_type = value;
+			this._user_edited_bunches = false;
+			$btn.siblings('.box-btn').removeClass('active');
+			$btn.addClass('active');
+			this.refresh_moq_for_box().then(() => {
+				this.update_pack_rate_and_totals();
+			});
+		});
+
+		this.$root.on('input', '.bunches-display', () => {
+			this._user_edited_bunches = true;
+			this.recalculate_totals();
+		});
+
+		this.$add_to_cart.on('click', (e) => {
+			e.preventDefault();
+			this.add_to_cart();
+		});
+
+		this.$clear.on('click', (e) => {
+			e.preventDefault();
+			this.clear_all();
+		});
+	}
+
+	load_attributes() {
+		return this.call(
+			'upande_webshop.upande_webshop.variant_selector.utils.get_attributes_and_values',
+			{ item_code: this.item_code }
+		);
+	}
+
+	load_box_types() {
 		frappe.call({
-			method: 'frappe.client.get_value',
-			args: {
-				doctype: 'Website Item',
-				filters: { item_code: this.item_code },
-				fieldname: 'custom_flower_type'
-			},
+			method: 'upande_webshop.api.pack_rate.get_box_types',
 			callback: (r) => {
-				if (r.message) {
-					this._flower_type = r.message.custom_flower_type;
-					this._moq = this._flower_type === 'Spray' ? 1000 : 1500;
+				const rows = (r && r.message) || [];
+				if (!rows.length) {
+					this.$box_area.hide();
+					return;
 				}
-				this.get_attributes_and_values()
-					.then(attribute_data => {
-						this.attribute_data = attribute_data;
-						this.show_configure_dialog();
-					});
+				this.$box_toggle.empty();
+				rows.forEach(row => {
+					const label = row.box_type_name || row.name;
+					this.$box_toggle.append(`
+						<button type="button" class="btn box-btn" data-value="${frappe.utils.escape_html(label)}">
+							${frappe.utils.escape_html(label)}
+						</button>
+					`);
+				});
+				this.$box_area.show();
+			},
+			error: () => {
+				this.$box_area.hide();
 			}
 		});
 	}
 
-	show_configure_dialog() {
-		const fields = this.attribute_data.map(a => {
-			return {
-				fieldtype: 'Select',
-				label: a.attribute,
-				fieldname: a.attribute,
-				options: a.values.map(v => ({ label: v, value: v })),
-				change: (e) => {
-					this.on_attribute_selection(e);
-					this.update_pack_rate_and_totals();
-				}
-			};
-		});
+	render_attribute_toggles() {
+		const $area = this.$attr_area;
+		$area.empty();
 
-		this.dialog = new frappe.ui.Dialog({
-			title: __('Select Variant for {0}', [this.item_name]),
-			fields,
-			on_hide: () => set_continue_configuration()
-		});
-
-		this.attribute_data.forEach(a => {
-			const field = this.dialog.get_field(a.attribute);
-			const $a = $(`<a href>${__("Clear")}</a>`);
-			$a.on('click', (e) => {
-				e.preventDefault();
-				this.dialog.set_value(a.attribute, '');
-			});
-			field.$wrapper.find('.help-box').append($a);
-		});
-
-		this.append_status_area();
-		this.dialog.show();
-		this.dialog.set_values(JSON.parse(localStorage.getItem(this.get_cache_key())));
-		$('.btn-configure').prop('disabled', false);
-	}
-
-	on_attribute_selection(e) {
-		if (e) {
-			const changed_fieldname = $(e.target).data('fieldname');
-			this.show_range_input_if_applicable(changed_fieldname);
-		} else {
-			this.show_range_input_for_all_fields();
-		}
-
-		const values = this.dialog.get_values();
-		if (Object.keys(values).length === 0) {
-			this.clear_status();
-			localStorage.removeItem(this.get_cache_key());
+		if (!this.attribute_data || !this.attribute_data.length) {
+			$area.html(`<div style="color:var(--gray-500); font-size:13px;">
+				${__('No variant options available.')}
+			</div>`);
 			return;
 		}
 
-		localStorage.setItem(this.get_cache_key(), JSON.stringify(values));
+		this.attribute_data.forEach(attr => {
+			const $group = $(`
+				<div class="attr-group" data-attribute="${frappe.utils.escape_html(attr.attribute)}">
+					<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
+						${frappe.utils.escape_html(attr.attribute)}
+					</label>
+					<div class="attr-toggle" data-attribute="${frappe.utils.escape_html(attr.attribute)}"></div>
+				</div>
+			`);
+			const $toggle = $group.find('.attr-toggle');
+			(attr.values || []).forEach(v => {
+				$toggle.append(`
+					<button type="button" class="btn attr-btn"
+						data-attribute="${frappe.utils.escape_html(attr.attribute)}"
+						data-value="${frappe.utils.escape_html(v)}">
+						${frappe.utils.escape_html(v)}
+					</button>
+				`);
+			});
+			$area.append($group);
+		});
+	}
+
+	maybe_show_range_input(attribute, value) {
+		// Some attribute values are stored as "60 to 70" — let the user pick
+		// a specific number within that range.
+		this.remove_range_input(attribute);
+		if (!value || !value.includes(' to ')) return;
+		const numbers = value.split(' to ').map(n => parseFloat(n));
+		if (numbers.some(n => isNaN(n))) return;
+		numbers.sort((a, b) => a - b);
+		const $group = this.$root.find(`.attr-group[data-attribute="${$.escapeSelector(attribute)}"]`);
+		const $wrapper = $(`
+			<div class="range-selector mt-2" data-range-for="${frappe.utils.escape_html(attribute)}">
+				<small style="color:var(--gray-600);">
+					${__('Enter a value between {0} and {1}', [numbers[0], numbers[1]])}
+				</small>
+				<input type="number" class="form-control range-input mt-1"
+					min="${numbers[0]}" max="${numbers[1]}"
+					style="max-width:140px; font-size:14px;">
+			</div>
+		`);
+		$group.append($wrapper);
+		$wrapper.find('.range-input').on('input', (e) => {
+			const val = parseInt($(e.currentTarget).val());
+			if (val >= numbers[0] && val <= numbers[1]) {
+				this.range_values = this.range_values || {};
+				this.range_values[attribute] = val;
+				this._user_edited_bunches = false;
+				this.update_pack_rate_and_totals();
+			}
+		});
+	}
+
+	remove_range_input(attribute) {
+		this.$root.find(`.range-selector[data-range-for="${$.escapeSelector(attribute)}"]`).remove();
+	}
+
+	refresh_attribute_state() {
+		const values = this.selected_attributes;
 		this.set_loading_status();
 
-		this.get_next_attribute_and_values(values)
-			.then(data => {
-				const { valid_options_for_attributes } = data;
-				this.set_item_found_status(data);
-
-				for (let attribute in valid_options_for_attributes) {
-					const valid_options = valid_options_for_attributes[attribute];
-					const options = this.dialog.get_field(attribute).df.options;
-					const new_options = options.map(o => {
-						o.disabled = !valid_options.includes(o.value);
-						return o;
-					});
-					this.dialog.set_df_property(attribute, 'options', new_options);
-					this.dialog.get_field(attribute).set_options();
-				}
-			});
-	}
-
-	get_selected_length() {
-		const length_field = this.dialog.get_field('Length');
-		if (!length_field) return null;
-		const val = length_field.get_value() || '';
-		const match = val.match(/(\d+)/);
-		return match ? parseInt(match[1]) : null;
-	}
-
-	/**
-	 * Async pack-rate lookup. Updates UI when the response arrives.
-	 * The server resolves variant → template → item_group fallback automatically.
-	 */
-	update_pack_rate_and_totals() {
-		const length = this.get_selected_length();
-		const box = this.selected_box_type;
-		const $pack_rate_display = this.dialog.$wrapper.find('.pack-rate-display');
-
-		// Show loading state immediately for responsiveness
-		if (box && length) {
-			$pack_rate_display.html(`<small style="color:var(--gray-500);">${__('Looking up pack rate...')}</small>`);
-		} else {
-			$pack_rate_display.html('');
+		if (Object.keys(values).length === 0) {
+			this.exact_match_item = null;
+			this._per_stem_rate = null;
+			this._in_stock = null;
+			this.clear_status();
+			this.update_addable_state();
+			this.update_pack_rate_and_totals();
+			return;
 		}
 
-		fetch_pack_rate(this.item_code, this.item_name, box, length).then((result) => {
-			// Guard: ensure inputs haven't changed since the request was fired
-			if (this.get_selected_length() !== length || this.selected_box_type !== box) {
-				return;
-			}
+		this.call(
+			'upande_webshop.upande_webshop.variant_selector.utils.get_next_attribute_and_values',
+			{ item_code: this.item_code, selected_attributes: values }
+		).then(data => {
+			const { exact_match } = data;
+			this.set_item_found_status(data);
 
-			const pack_rate = result.pack_rate;
-			this._pack_rate = pack_rate;
-
-			if (pack_rate) {
-				const bunches_per_box = Math.floor(pack_rate / BUNCH_SIZE);
-				$pack_rate_display.html(`
-					<small style="color:var(--gray-600);">
-						<strong>${pack_rate} stems/box</strong>
-						= ${bunches_per_box} bunches × ${BUNCH_SIZE} stems per bunch
-					</small>
-				`);
-			} else if (box && length) {
-				$pack_rate_display.html(`
-					<small style="color:var(--gray-500);">
-						${__('No pack rate data for this combination')}
-					</small>
-				`);
+			if (exact_match && exact_match.length === 1) {
+				this.exact_match_item = exact_match[0];
+				this.fetch_per_stem_rate(this.exact_match_item);
+				this.refresh_bunch_size_for(this.exact_match_item);
+				this.fetch_stock_status(this.exact_match_item);
 			} else {
-				$pack_rate_display.html('');
+				this.exact_match_item = null;
+				this._per_stem_rate = null;
+				this._in_stock = null;
+				this.update_price_display();
 			}
 
+			this.update_addable_state();
+			this.update_pack_rate_and_totals();
+		});
+	}
+
+	fetch_stock_status(item_code) {
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.shopping_cart.product_info.get_product_info_for_website',
+			args: { item_code, skip_quotation_creation: 1 },
+			callback: (r) => {
+				if (this.exact_match_item !== item_code) return;
+				const info = (r && r.message && r.message.product_info) || {};
+				this._on_backorder = !!info.on_backorder;
+				this._stock_qty = (info.stock_qty != null) ? Number(info.stock_qty) : null;
+				this._show_stock_qty = !!info.show_stock_qty;
+				if (this._on_backorder) {
+					this._in_stock = true;
+				} else if (info.in_stock === 1 || info.in_stock === true) {
+					this._in_stock = true;
+				} else if (info.in_stock === 0 || info.in_stock === false) {
+					this._in_stock = false;
+				} else {
+					this._in_stock = null;
+				}
+				this.set_item_found_status_with_stock();
+				this.update_addable_state();
+			},
+			error: () => {
+				if (this.exact_match_item !== item_code) return;
+				this._in_stock = null;
+				this._stock_qty = null;
+				this._show_stock_qty = false;
+				this._on_backorder = false;
+				this.update_addable_state();
+			}
+		});
+	}
+
+	stock_suffix() {
+		if (this._on_backorder) return __('On backorder');
+		if (this._in_stock !== true) return '';
+		if (this._show_stock_qty && this._stock_qty != null && this._stock_qty > 0) {
+			return `${__('In stock')} (${this._stock_qty.toLocaleString()})`;
+		}
+		return __('In stock');
+	}
+
+	set_item_found_status_with_stock() {
+		if (this._in_stock === false) {
+			this.$status_area.html(`
+				<div style="color:var(--red-500); font-weight:500;" role="alert">
+					${frappe.utils.escape_html(this.exact_match_item)} — ${__('Out of stock')}
+				</div>
+			`);
+			return;
+		}
+		const suffix = this.stock_suffix();
+		if (!suffix) return;
+		// Append stock info to the existing green item-found banner without
+		// losing its price suffix.
+		const $banner = this.$status_area.find('div[role="status"]').first();
+		if ($banner.length) {
+			$banner.append(document.createTextNode(' — ' + suffix));
+		}
+	}
+
+	fetch_per_stem_rate(item_code) {
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.shopping_cart.cart.get_item_price_for_configure',
+			args: { item_code },
+			callback: (r) => {
+				if (r.message) {
+					this._per_stem_rate = r.message.price_list_rate;
+					this._currency = r.message.currency || '€';
+					this.update_price_display();
+				}
+			}
+		});
+	}
+
+	refresh_bunch_size_for(item_code) {
+		fetch_bunch_size(item_code).then((info) => {
+			if (this.exact_match_item !== item_code) return;
+			this.bunch_size = Math.max(parseInt(info.size) || 1, 1);
+			this.bunch_uom = info.uom || null;
+			this.$bunch_size_input.val(this.bunch_size);
+			// MOQ bunches->stems depends on bunch_size; refresh moq line if a box is picked
+			if (this.selected_box_type) {
+				this._moq = this._moq_bunches * this.bunch_size;
+			}
+			this.autofill_bunches_from_pack_rate();
 			this.recalculate_totals();
 		});
 	}
 
-	recalculate_totals() {
-		const num_boxes = parseInt(this.$num_boxes_input ? this.$num_boxes_input.val() : 1) || 1;
-		const pack_rate = this._pack_rate;
-
-		if (!pack_rate) {
-			if (this.$total_stems_display) this.$total_stems_display.val(0);
-			if (this.$bunches_display) this.$bunches_display.val(0);
-			this.update_price_display();
-			return;
-		}
-
-		const total_stems = num_boxes * pack_rate;
-		const num_bunches = Math.floor(total_stems / BUNCH_SIZE);
-
-		if (this.$total_stems_display) this.$total_stems_display.val(total_stems);
-		if (this.$bunch_size_input) this.$bunch_size_input.val(BUNCH_SIZE);
-		if (this.$bunches_display) this.$bunches_display.val(num_bunches);
-
-		this.validate_moq(total_stems);
-		this.update_price_display();
-	}
-
-	validate_moq(total_stems) {
-		const $msg = this.dialog.$wrapper.find('.stems-validation-msg');
-		const moq = this._moq;
-
-		if (total_stems > 0 && total_stems < moq) {
-			const boxes_needed = Math.ceil(moq / (this._pack_rate || moq));
-			$msg.html(`
-				<small style="color:#e8a000; font-weight:500;">
-					⚠️ Minimum order is ${moq} stems (${this._flower_type || ''} roses).
-					You need at least <strong>${boxes_needed} box${boxes_needed > 1 ? 'es' : ''}</strong> to meet MOQ.
-				</small>
-			`);
-		} else {
-			$msg.html('');
-		}
-	}
-
-	show_range_input_for_all_fields() {
-		this.dialog.fields.forEach(f => {
-			if (!["Section Break", "Coulmn Break"].includes(f.fieldtype)) {
-				this.show_range_input_if_applicable(f.fieldname);
+	get_selected_length() {
+		// Look for a Length / Stem Length attribute among the selected values
+		// (the dialog used the field name 'Length', so keep that as primary).
+		const candidates = ['Length', 'Stem Length'];
+		for (const attr of candidates) {
+			if (this.range_values && this.range_values[attr]) {
+				return this.range_values[attr];
 			}
+			const raw = this.selected_attributes[attr];
+			if (!raw) continue;
+			const match = String(raw).match(/(\d+)/);
+			if (match) return parseInt(match[1]);
+		}
+		return null;
+	}
+
+	refresh_moq_for_box() {
+		const box = this.selected_box_type;
+		if (!box) {
+			this._moq = 0;
+			this._moq_bunches = 0;
+			this.$moq_label.text('');
+			return Promise.resolve();
+		}
+		return new Promise((resolve) => {
+			frappe.call({
+				method: 'upande_webshop.upande_webshop.api.get_box_min_order_qty',
+				args: { box_name: box },
+				callback: (r) => {
+					const bunches = (r && r.message && r.message.min_order_qty) || 0;
+					this._moq_bunches = bunches;
+					this._moq = bunches * (this.bunch_size || 1);
+					this.$moq_label.text(
+						this._moq_bunches
+							? ` — MOQ: ${this._moq_bunches} bunch${this._moq_bunches > 1 ? 'es' : ''}`
+							: ''
+					);
+					if (this._moq_bunches && !this._user_edited_bunches) {
+						this.$bunches_display.val(this._moq_bunches);
+					}
+					resolve();
+				},
+				error: () => {
+					this._moq = 0;
+					this._moq_bunches = 0;
+					this.$moq_label.text('');
+					resolve();
+				}
+			});
 		});
 	}
 
-	show_range_input_if_applicable(fieldname) {
-		const changed_field = this.dialog.get_field(fieldname);
-		const changed_value = changed_field.get_value();
-		if (changed_value && changed_value.includes(' to ')) {
-			let numbers = changed_value.split(' to ').map(n => parseFloat(n));
-			if (!numbers.some(n => isNaN(n))) {
-				numbers.sort((a, b) => a - b);
-				if (changed_field.$input_wrapper.find('.range-selector').length) return;
-				const parent = $('<div class="range-selector">')
-					.insertBefore(changed_field.$input_wrapper.find('.help-box'));
-				const control = frappe.ui.form.make_control({
-					df: {
-						fieldtype: 'Int',
-						label: __('Enter value betweeen {0} and {1}', [numbers[0], numbers[1]]),
-						change: () => {
-							const value = control.get_value();
-							if (value < numbers[0] || value > numbers[1]) {
-								control.$wrapper.addClass('was-validated');
-								control.set_description(__('Value must be between {0} and {1}', [numbers[0], numbers[1]]));
-								control.$input[0].setCustomValidity('error');
-							} else {
-								control.$wrapper.removeClass('was-validated');
-								control.set_description('');
-								control.$input[0].setCustomValidity('');
-								this.update_range_values(fieldname, value);
-							}
-						}
-					},
-					render_input: true,
-					parent
-				});
-				control.$wrapper.addClass('mt-3');
+	update_pack_rate_and_totals() {
+		const length = this.get_selected_length();
+		const box = this.selected_box_type;
+
+		if (this.exact_match_item) {
+			this.$totals_area.css('display', 'flex');
+		}
+
+		if (!(box && length)) {
+			this._pack_rate = null;
+			this.$pack_rate_display.html('');
+			this.recalculate_totals();
+			return;
+		}
+
+		this.$pack_rate_display.html(
+			`<small style="color:var(--gray-500);">${__('Looking up pack rate...')}</small>`
+		);
+
+		fetch_pack_rate(box, length).then((result) => {
+			if (this.get_selected_length() !== length || this.selected_box_type !== box) return;
+
+			this._pack_rate = result.pack_rate;
+			if (this._pack_rate) {
+				this.$pack_rate_display.html(`
+					<small style="color:var(--gray-600);">
+						<strong>${this._pack_rate} stems/box</strong>
+					</small>
+				`);
+			} else {
+				this.$pack_rate_display.html(
+					`<small style="color:var(--gray-500);">${__('No pack rate data for this combination')}</small>`
+				);
 			}
+			this.autofill_bunches_from_pack_rate();
+			this.recalculate_totals();
+		});
+	}
+
+	autofill_bunches_from_pack_rate() {
+		// One box's worth of bunches = pack_rate / bunch_size.
+		// Only seed if the user hasn't manually overridden the value.
+		if (this._user_edited_bunches) return;
+		if (!this._pack_rate || !this.bunch_size) return;
+		const bunches = Math.floor(this._pack_rate / this.bunch_size);
+		if (bunches > 0) {
+			this.$bunches_display.val(bunches);
 		}
 	}
 
-	update_range_values(attribute, range_value) {
-		this.range_values = this.range_values || {};
-		this.range_values[attribute] = range_value;
-	}
+	recalculate_totals() {
+		const num_bunches = parseInt(this.$bunches_display.val()) || 0;
+		const bunch_size = this.bunch_size || 1;
+		const total_stems = num_bunches * bunch_size;
+		this.$total_stems_display.val(total_stems);
 
-	set_loading_status() {
-		this.dialog.$status_area.html(`
-			<div class="alert alert-warning d-flex justify-content-between align-items-center" role="alert">
-				${__('Loading...')}
-			</div>
-		`);
-	}
-
-	set_item_found_status(data) {
-		const html = this.get_html_for_item_found(data);
-		this.dialog.$status_area.html(html);
-
-		const { exact_match } = data;
-		if (exact_match && exact_match.length === 1) {
-			frappe.call({
-				method: 'upande_webshop.upande_webshop.shopping_cart.cart.get_item_price_for_configure',
-				args: { item_code: exact_match[0] },
-				callback: (r) => {
-					if (r.message) {
-						this._per_stem_rate = r.message.price_list_rate;
-						this._currency = r.message.currency || '€';
-						this.update_price_display();
-					}
-				}
-			});
-		} else {
-			this._per_stem_rate = null;
-			this.update_price_display();
-		}
-	}
-
-	clear_status() {
-		this.dialog.$status_area.empty();
-		this._per_stem_rate = null;
+		this.validate_moq(total_stems, num_bunches);
 		this.update_price_display();
+		this.update_addable_state();
 	}
 
-	get_html_for_item_found({ filtered_items_count, filtered_items, exact_match, product_info }) {
-		const one_item = exact_match.length === 1
-			? exact_match[0]
-			: filtered_items_count === 1 ? filtered_items[0] : '';
+	validate_moq(total_stems, num_bunches) {
+		const moq_bunches = this._moq_bunches;
+		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
 
-		const item_add_to_cart = one_item ? `
-			<button data-item-code="${one_item}"
-				class="btn btn-primary btn-add-to-cart w-100 mt-2"
-				data-action="btn_add_to_cart">
-				<span class="mr-2">${frappe.utils.icon('assets', 'md')}</span>
-				${__("Add to Cart")}
-			</button>
-		` : '';
+		if (total_stems > 0 && moq_bunches > 0 && (num_bunches || 0) < moq_bunches) {
+			this.$validation_msg.html(`
+				<small style="color:#e8a000; font-weight:500;">
+					⚠️ ${__('Minimum order is {0} bunch{1} for this box type.', [moq_bunches, moq_bunches > 1 ? 'es' : ''])}
+				</small>
+			`);
+		} else if (total_stems > 0 && stock_qty != null && stock_qty >= 0 && total_stems > stock_qty) {
+			this.$validation_msg.html(`
+				<small style="color:#c0392b; font-weight:500;">
+					⚠️ ${__('Only {0} stems available in stock — reduce the number of bunches.', [stock_qty.toLocaleString()])}
+				</small>
+			`);
+		} else {
+			this.$validation_msg.html('');
+		}
+	}
 
-		const items_found = filtered_items_count === 1
-			? __('{0} item found.', [filtered_items_count])
-			: __('{0} items found.', [filtered_items_count]);
-
-		const item_found_status = exact_match.length === 1
-			? `<div class="alert alert-success d-flex justify-content-between align-items-center" role="alert">
-				<div>
-					${one_item}
-					${product_info && product_info.price && !$.isEmptyObject(product_info.price)
-						? '(' + product_info.price.formatted_price_sales_uom + ')' : ''}
-				</div>
-				<a href data-action="btn_clear_values" data-item-code="${one_item}">${__('Clear Values')}</a>
-			</div>`
-			: `<div class="alert alert-warning d-flex justify-content-between align-items-center" role="alert">
-				<span>${items_found}</span>
-				<a href data-action="btn_clear_values">${__('Clear values')}</a>
-			</div>`;
-
-		return `${item_found_status}${item_add_to_cart}`;
+	update_addable_state() {
+		const stems = parseInt(this.$total_stems_display.val()) || 0;
+		const has_stock = this._in_stock !== false;
+		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
+		const within_stock = (stock_qty == null) || stems <= stock_qty;
+		const can_add = !!(this.exact_match_item && stems > 0 && stems >= (this._moq || 0) && has_stock && within_stock);
+		this.$add_to_cart.prop('disabled', !can_add);
 	}
 
 	update_price_display() {
-		if (!this.$price_display) return;
-		const stems = parseInt(this.$total_stems_display ? this.$total_stems_display.val() : 0) || 0;
+		const stems = parseInt(this.$total_stems_display.val()) || 0;
 		if (this._per_stem_rate && stems > 0) {
 			const total = (this._per_stem_rate * stems).toFixed(2);
 			this.$price_display.html(`
@@ -398,26 +540,137 @@ class ItemConfigure {
 					<strong style="font-size:16px;">${this._currency} ${total}</strong>
 				</div>
 			`);
-		} else if (this._per_stem_rate === null) {
-			this.$price_display.html(`<span style="color:var(--gray-500); font-size:13px;">Select a variant to see price</span>`);
 		} else {
-			this.$price_display.html(`<span style="color:var(--gray-500); font-size:13px;">Select length and box to see total</span>`);
+			this.$price_display.empty();
 		}
 	}
 
-	btn_add_to_cart(e) {
-		if (frappe.session.user !== 'Guest') {
+	set_loading_status() {
+		this.$status_area.html(`
+			<div class="alert alert-warning d-flex justify-content-between align-items-center mb-0" role="alert">
+				${__('Loading...')}
+			</div>
+		`);
+	}
+
+	clear_status() {
+		this.$status_area.empty();
+	}
+
+	set_item_found_status(data) {
+		const { filtered_items_count, filtered_items, exact_match, product_info } = data;
+		const one_item = exact_match.length === 1
+			? exact_match[0]
+			: filtered_items_count === 1 ? filtered_items[0] : '';
+
+		const items_found = filtered_items_count === 1
+			? __('{0} item found.', [filtered_items_count])
+			: __('{0} items found.', [filtered_items_count]);
+
+		const html = exact_match.length === 1
+			? `<div style="color:var(--green-600); font-weight:500;" role="status">
+					${frappe.utils.escape_html(one_item)}
+					${product_info && product_info.price && !$.isEmptyObject(product_info.price)
+						? ' (' + product_info.price.formatted_price_sales_uom + ')' : ''}
+				</div>`
+			: `<div style="color:var(--yellow-600); font-weight:500;" role="status">${items_found}</div>`;
+
+		this.$status_area.html(html);
+	}
+
+	clear_all() {
+		this.selected_attributes = {};
+		this.range_values = {};
+		this.selected_box_type = '';
+		this.exact_match_item = null;
+		this._per_stem_rate = null;
+		this._pack_rate = null;
+		this._moq = 0;
+		this._moq_bunches = 0;
+		this._in_stock = null;
+		this._user_edited_bunches = false;
+
+		this.$root.find('.attr-btn').removeClass('active').prop('disabled', false);
+		this.$root.find('.box-btn').removeClass('active');
+		this.$root.find('.range-selector').remove();
+		this.$bunch_size_input.val(this.bunch_size || 1);
+		this.$bunches_display.val(0);
+		this.$total_stems_display.val(0);
+		this.$pack_rate_display.html('');
+		this.$validation_msg.html('');
+		this.$moq_label.text('');
+		this.clear_status();
+		this.update_price_display();
+		this.update_addable_state();
+		this.$totals_area.css('display', 'none');
+		localStorage.removeItem(this.get_cache_key());
+	}
+
+	persist_cache() {
+		if (Object.keys(this.selected_attributes).length === 0) {
 			localStorage.removeItem(this.get_cache_key());
+			return;
 		}
-		const item_code = $(e.currentTarget).data('item-code');
+		localStorage.setItem(this.get_cache_key(), JSON.stringify(this.selected_attributes));
+	}
+
+	restore_from_cache() {
+		try {
+			const raw = localStorage.getItem(this.get_cache_key());
+			if (!raw) return;
+			const saved = JSON.parse(raw);
+			if (!saved || typeof saved !== 'object') return;
+			Object.entries(saved).forEach(([attr, val]) => {
+				const $btn = this.$root.find(
+					`.attr-toggle[data-attribute="${$.escapeSelector(attr)}"] ` +
+					`.attr-btn[data-value="${$.escapeSelector(String(val))}"]`
+				);
+				if ($btn.length) {
+					this.selected_attributes[attr] = String(val);
+					$btn.addClass('active');
+					this.maybe_show_range_input(attr, String(val));
+				}
+			});
+			if (Object.keys(this.selected_attributes).length) {
+				this.refresh_attribute_state();
+			}
+		} catch (e) {
+			// ignore corrupted cache
+		}
+	}
+
+	add_to_cart() {
+		const item_code = this.exact_match_item;
+		if (!item_code) return;
+
 		const box_type = this.selected_box_type || '';
-		const num_boxes = parseInt(this.$num_boxes_input ? this.$num_boxes_input.val() : 1) || 1;
-		const total_stems = parseInt(this.$total_stems_display ? this.$total_stems_display.val() : 0) || 0;
-		const num_bunches = parseInt(this.$bunches_display ? this.$bunches_display.val() : 0) || 0;
-		const custom_length = this.dialog.get_value('Length') || '';
+		const total_stems = parseInt(this.$total_stems_display.val()) || 0;
+		const num_bunches = parseInt(this.$bunches_display.val()) || 0;
+		const bunch_size = this.bunch_size || 1;
+		const custom_length = this.selected_attributes['Length'] || this.selected_attributes['Stem Length'] || '';
 		const pack_rate = this._pack_rate || 0;
 
-		// Collect specs from product page
+		if (!total_stems) {
+			frappe.msgprint({
+				title: __('Select Variant'),
+				message: __('Enter the number of bunches before adding to quote.'),
+				indicator: 'orange',
+			});
+			return;
+		}
+
+		if (frappe.session.user === 'Guest') {
+			if (localStorage) {
+				localStorage.setItem('last_visited', window.location.pathname);
+			}
+			frappe.call('upande_webshop.upande_webshop.api.get_guest_redirect_on_action').then((res) => {
+				window.location.href = res.message || '/login';
+			});
+			return;
+		}
+
+		localStorage.removeItem(this.get_cache_key());
+
 		const specs = [];
 		$(".item-website-specification table tr").each(function() {
 			const label = $(this).find(".spec-label").text().trim();
@@ -427,161 +680,29 @@ class ItemConfigure {
 
 		const additional_notes = [
 			box_type ? `Box: ${box_type}` : '',
-			`No. of Boxes: ${num_boxes}`,
 			pack_rate ? `Pack Rate: ${pack_rate} stems/box` : '',
-			`Total Stems: ${total_stems} (${num_bunches} bunches × ${BUNCH_SIZE} stems)`,
+			`Total Stems: ${total_stems} (${num_bunches} bunches × ${bunch_size} stems)`,
 			specs.length ? `Specs: ${specs.join(", ")}` : '',
 		].filter(Boolean).join(' | ');
 
-		webshop.webshop.shopping_cart.update_cart({
+		this.$add_to_cart.prop('disabled', true);
+
+		upande_webshop.upande_webshop.shopping_cart.update_cart({
 			item_code,
-			qty: total_stems,
+			qty: num_bunches,
+			uom: this.bunch_uom || undefined,
 			additional_notes,
 			custom_length,
 			box_type,
-		});
-		this.dialog.hide();
-	}
-
-	btn_clear_values() {
-		this.dialog.fields_list.forEach(f => {
-			if (f.df?.options) {
-				f.df.options = f.df.options.map(o => ({ ...o, disabled: false }));
-			}
-		});
-		this.dialog.clear();
-		this.selected_box_type = '';
-		this._pack_rate = null;
-		this.dialog.$wrapper.find('.box-type-select').val('');
-		this.dialog.$wrapper.find('.num-boxes-input').val(1);
-		this.dialog.$wrapper.find('.bunch-size-input').val(BUNCH_SIZE);
-		this.dialog.$wrapper.find('.bunches-display').val(0);
-		this.dialog.$wrapper.find('.total-stems-display').val(0);
-		this.dialog.$wrapper.find('.pack-rate-display').html('');
-		this.dialog.$wrapper.find('.stems-validation-msg').html('');
-		this._per_stem_rate = null;
-		this.update_price_display();
-		this.on_attribute_selection();
-	}
-
-	append_status_area() {
-		const moq_label = this._moq
-			? `MOQ: ${this._moq} stems${this._flower_type ? ` (${this._flower_type})` : ''}`
-			: '';
-
-		const box_html = `
-			<!-- Box Type -->
-			<div class="box-selector mb-3 mt-2">
-				<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
-					${__('Box Type')}
-				</label>
-				<select class="form-control box-type-select" style="font-size:13px;">
-					<option value="">-- ${__('Select Box')} --</option>
-				</select>
-			</div>
-
-			<!-- Pack rate info (auto-filled when length + box selected) -->
-			<div class="pack-rate-display mb-3" style="min-height:20px;"></div>
-
-			<!-- No. of Boxes (customer fills this) -->
-			<div class="mb-3">
-				<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
-					${__('No. of Boxes')}
-					${moq_label ? `<span style="font-weight:400; color:var(--gray-500); font-size:11px;"> — ${moq_label}</span>` : ''}
-				</label>
-				<input type="number" class="form-control num-boxes-input" min="1" value="1"
-					style="max-width:110px; font-size:15px; font-weight:500;">
-			</div>
-
-			<!-- Bunch size × No. of bunches = Total Stems (all read-only, auto-calculated) -->
-			<div class="d-flex mb-1" style="gap:12px; flex-wrap:wrap; align-items:flex-end;">
-				<div>
-					<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
-						${__('Bunch Size')}
-					</label>
-					<input type="number" class="form-control bunch-size-input" value="${BUNCH_SIZE}" readonly
-						style="max-width:90px; font-size:15px; background:#f4f5f6;">
-				</div>
-				<div style="font-size:22px; font-weight:200; padding-bottom:6px;">×</div>
-				<div>
-					<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
-						${__('No. of Bunches')}
-					</label>
-					<input type="number" class="form-control bunches-display" value="0" readonly
-						style="max-width:100px; font-size:15px; background:#f4f5f6;">
-				</div>
-				<div style="font-size:22px; font-weight:200; padding-bottom:6px;">=</div>
-				<div>
-					<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
-						${__('Total Stems')}
-					</label>
-					<input type="number" class="form-control total-stems-display" value="0" readonly
-						style="max-width:100px; font-size:15px; font-weight:700; background:#f4f5f6;">
-				</div>
-			</div>
-
-			<div class="stems-validation-msg mb-2"></div>
-			<div class="price-display mb-3 p-2" style="min-height:28px; border-radius:6px;"></div>
-		`;
-
-		const $box_area = $(box_html);
-		this.dialog.$wrapper.find('.modal-body').append($box_area);
-
-		this.dialog.$status_area = $('<div class="status-area mt-2">');
-		this.dialog.$wrapper.find('.modal-body').append(this.dialog.$status_area);
-
-		// Cache references
-		this.$num_boxes_input = this.dialog.$wrapper.find('.num-boxes-input');
-		this.$bunch_size_input = this.dialog.$wrapper.find('.bunch-size-input');
-		this.$bunches_display = this.dialog.$wrapper.find('.bunches-display');
-		this.$total_stems_display = this.dialog.$wrapper.find('.total-stems-display');
-		this.$price_display = this.dialog.$wrapper.find('.price-display');
-
-		// Populate box dropdown — customer-specific if logged in, all boxes otherwise
-		frappe.call({
-			method: 'upande_webshop.upande_webshop.api.get_customer_boxes',
 			callback: (r) => {
-				if (r.message) {
-					const $select = this.dialog.$wrapper.find('.box-type-select');
-					r.message.forEach(item => {
-						$select.append($('<option>').val(item.item_name).text(item.item_name));
+				this.update_addable_state();
+				if (r && !r.exc) {
+					frappe.show_alert({
+						message: __('Added {0} bunch{1} of {2} to your quote.', [num_bunches, num_bunches === 1 ? '' : 'es', item_code]),
+						indicator: 'green',
 					});
 				}
-			}
-		});
-
-		// Box type change — update pack rate and recalculate
-		this.dialog.$wrapper.on('change', '.box-type-select', (e) => {
-			this.selected_box_type = $(e.currentTarget).val();
-			this.update_pack_rate_and_totals();
-		});
-
-		// No. of boxes change — recalculate totals
-		this.dialog.$wrapper.on('input', '.num-boxes-input', () => {
-			this.recalculate_totals();
-		});
-
-		// Action buttons (Add to Cart, Clear Values)
-		this.dialog.$wrapper.on('click', '[data-action]', (e) => {
-			e.preventDefault();
-			const action = $(e.currentTarget).data('action');
-			if (typeof this[action] === 'function') this[action].call(this, e);
-		});
-
-		this.dialog.$wrapper.addClass('item-configurator-dialog');
-		this.update_price_display();
-	}
-
-	get_next_attribute_and_values(selected_attributes) {
-		return this.call('upande_webshop.upande_webshop.variant_selector.utils.get_next_attribute_and_values', {
-			item_code: this.item_code,
-			selected_attributes
-		});
-	}
-
-	get_attributes_and_values() {
-		return this.call('upande_webshop.upande_webshop.variant_selector.utils.get_attributes_and_values', {
-			item_code: this.item_code
+			},
 		});
 	}
 
@@ -598,25 +719,9 @@ class ItemConfigure {
 	}
 }
 
-function set_continue_configuration() {
-	const $btn_configure = $('.btn-configure');
-	const { itemCode } = $btn_configure.data();
-	$btn_configure.text(
-		localStorage.getItem(`configure:${itemCode}`)
-			? __('Continue Selection')
-			: __('Select Variant')
-	);
-}
-
 frappe.ready(() => {
-	const $btn_configure = $('.btn-configure');
-	if (!$btn_configure.length) return;
-	const { itemCode, itemName } = $btn_configure.data();
-
-	set_continue_configuration();
-
-	$btn_configure.on('click', () => {
-		$btn_configure.prop('disabled', true);
-		new ItemConfigure(itemCode, itemName);
-	});
+	const $root = $('.inline-variant-selector');
+	if (!$root.length) return;
+	const { itemCode, itemName } = $root.data();
+	new InlineVariantSelector($root, itemCode, itemName);
 });

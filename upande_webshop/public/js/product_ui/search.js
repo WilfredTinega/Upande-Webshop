@@ -13,7 +13,12 @@ webshop.ProductSearch = class {
 	setupSearchDropDown() {
 		this.search_area = $("#dropdownMenuSearch");
 		this.setupSearchResultContainer();
-		this.populateRecentSearches();
+	}
+
+	submitSearch() {
+		const query = (this.searchBox.val() || "").trim();
+		if (!query) return;
+		window.location.href = `/product_search?search=${encodeURIComponent(query)}`;
 	}
 
 	bindSearchAction() {
@@ -22,6 +27,20 @@ webshop.ProductSearch = class {
 		// Show Search dropdown
 		this.searchBox.on("focus", () => {
 			this.search_dropdown.removeClass("hidden");
+		});
+
+		// Submit on Enter
+		this.searchBox.on("keydown", (e) => {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				me.submitSearch();
+			}
+		});
+
+		// Submit on magnifying-glass click (icon lives in the same dropdown wrapper)
+		this.search_area.on("click", ".search-icon", (e) => {
+			e.preventDefault();
+			me.submitSearch();
 		});
 
 		// If click occurs outside search input/results, hide results.
@@ -64,11 +83,6 @@ webshop.ProductSearch = class {
 						category_results = data.message ? data.message.category_results : null;
 						me.populateCategoriesList(category_results);
 					}
-
-					// Populate recent search chips only on successful queries
-					if (!$.isEmptyObject(product_results) || !$.isEmptyObject(category_results)) {
-						me.setRecentSearches(query);
-					}
 				}
 			});
 
@@ -87,13 +101,12 @@ webshop.ProductSearch = class {
 
 		this.setupCategoryContainer();
 		this.setupProductsContainer();
-		this.setupRecentsContainer();
 	}
 
 	setupProductsContainer() {
 		this.products_container = this.search_dropdown.append(`
 			<div id="product-results mt-2">
-				<div id="product-scroll" style="overflow: scroll; max-height: 300px">
+				<div id="product-scroll" style="overflow-x: hidden; overflow-y: auto; max-height: 300px">
 				</div>
 			</div>
 		`).find("#product-scroll");
@@ -135,10 +148,7 @@ webshop.ProductSearch = class {
 		for (let chip of chips) {
 			chip.addEventListener("click", () => {
 				me.searchBox[0].value = chip.innerText.trim();
-
-				// Start search with `recent query`
-				me.searchBox.trigger("input");
-				me.searchBox.focus();
+				me.submitSearch();
 			});
 		}
 	}

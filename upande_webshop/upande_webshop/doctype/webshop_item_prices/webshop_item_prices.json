@@ -11,6 +11,7 @@
   "item_name",
   "column_break_main",
   "item_group",
+  "currency",
   "section_break_prices",
   "stem_length_prices"
  ],
@@ -46,6 +47,15 @@
    "label": "Item Group"
   },
   {
+   "default": "USD",
+   "fieldname": "currency",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Currency",
+   "options": "Currency",
+   "reqd": 1
+  },
+  {
    "fieldname": "section_break_prices",
    "fieldtype": "Section Break",
    "label": "Stem Length Prices"
@@ -60,7 +70,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2026-05-11 23:50:25.732191",
+ "modified": "2026-05-21 12:00:00.000000",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Item Prices",

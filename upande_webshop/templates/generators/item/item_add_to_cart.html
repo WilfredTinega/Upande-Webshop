@@ -5,37 +5,6 @@
 
 <div class="item-cart row mt-2" data-variant-item-code="{{ item_code }}">
 	<div class="col-md-12">
-		<!-- Price and Availability -->
-		<div id="dynamic-price-display" class="product-price mt-2 mb-2" style="font-size: inherit;">
-			{% if cart_settings.show_price and product_info.price %}
-				<span id="dynamic-price-value" class="font-weight-bold">{{ product_info.price.formatted_price }}</span>
-			{% else %}
-				<span id="dynamic-price-value" class="font-weight-bold">—</span>
-			{% endif %}
-			<small class="text-muted ml-2" id="dynamic-price-uom-label"></small>
-		</div>
-
-		{% if cart_settings.show_stock_availability %}
-		<div class="mt-2">
-			{% if product_info.get("on_backorder") %}
-				<span class="no-stock out-of-stock" style="color: var(--primary-color);">
-					{{ _('Available on backorder') }}
-				</span>
-			{% elif product_info.in_stock == 0 %}
-				<span class="no-stock out-of-stock">
-					{{ _('Out of stock') }}
-				</span>
-			{% elif product_info.in_stock == 1 %}
-				<span class="in-green has-stock">
-					{{ _('In stock') }}
-					{% if product_info.show_stock_qty and product_info.stock_qty %}
-						({{ product_info.stock_qty }})
-					{% endif %}
-				</span>
-			{% endif %}
-		</div>
-		{% endif %}
-
 		<!-- Offers -->
 		{% if doc.offers %}
 			<br>
@@ -70,127 +39,23 @@
 			</div>
 		{% endif %}
 
-		<!-- Add to Cart / View in Cart / Wishlist / Contact Us -->
-		<div class="mt-6 mb-5">
-			<div class="mb-4 d-flex flex-wrap" style="gap:8px;">
-				<!-- View in Cart -->
-				<a href="/cart" class="btn btn-light btn-view-in-cart font-md" role="button">
-					{{ _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
-				</a>
-
-				<!-- Add to Cart -->
-				<button
-					data-item-code="{{ item_code }}"
-					class="btn btn-primary btn-add-to-cart w-30-40"
-				>
-					<span class="mr-2">
-						<svg class="icon icon-md">
-							<use href="#icon-assets"></use>
-						</svg>
-					</span>
-					{{ _("Add to Cart") if cart_settings.enable_checkout else _("Add to Quote") }}
-				</button>
-
-				<!-- Add to Wishlist -->
-				<button class="btn btn-light btn-add-to-wishlist"
-					data-item-code="{{ item_code }}"
-					title="{{ _('Add to Wishlist') }}"
-					style="display:flex; align-items:center; gap:6px;">
-					<svg class="wish-icon" xmlns="http://www.w3.org/2000/svg"
-						style="width:16px;height:16px;" viewBox="0 0 24 24"
-						fill="none" stroke="currentColor" stroke-width="2"
-						stroke-linecap="round" stroke-linejoin="round">
-						<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-					</svg>
-					<span class="wish-label">{{ _('Wishlist') }}</span>
-				</button>
-
-				<!-- Contact Us -->
-				{% if cart_settings.show_contact_us_button %}
-					{% include "templates/generators/item/item_inquiry.html" %}
-				{% endif %}
-			</div>
+		<!-- Hidden View-in-Cart, revealed by Add-to-Cart success (non-variant flow).
+		     Contact-Us button rendered inline for parity with the variant page. -->
+		<div class="mt-3" style="display:none;">
+			<a href="/cart" class="btn btn-light btn-view-in-cart font-md hidden" role="button">
+				{{ _("View in Cart") if cart_settings.enable_checkout else _("View in Quote") }}
+			</a>
 		</div>
+		{% if cart_settings.show_contact_us_button %}
+		<div class="mt-3 d-flex flex-wrap" style="gap:8px;">
+			{% include "templates/generators/item/item_inquiry.html" %}
+		</div>
+		{% endif %}
 	</div>
 </div>
 
 <script>
 	frappe.ready(() => {
-		// Add to Cart
-		$('.page_content').on('click', '.btn-add-to-cart', (e) => {
-			const $btn = $(e.currentTarget);
-			const item_code = $btn.data('item-code');
-			const custom_length = $('#stem-length').val() || undefined;
-			const uom = $('#bunch-uom').val() || undefined;
-			const custom_box_type = $('#box-type').val() || undefined;
-
-			if (!custom_length) {
-				frappe.show_alert({
-					message: __('Please select a stem length before adding to cart.'),
-					indicator: 'red'
-				}, 4);
-				$('#stem-length').focus();
-				return;
-			}
-
-			if (!custom_box_type) {
-				frappe.show_alert({
-					message: __('Please select a box type before adding to cart.'),
-					indicator: 'red'
-				}, 4);
-				$('#box-type').focus();
-				return;
-			}
-
-			$btn.prop('disabled', true);
-
-			// qty is in bunches; ERPNext converts to stems via conversion_factor
-			upande_webshop.upande_webshop.shopping_cart.update_cart({
-				item_code,
-				qty: 1,
-				custom_length,
-				uom,
-				custom_box_type,
-				callback(r) {
-					$btn.prop('disabled', false);
-					if (r.message) {
-						$('.btn-view-in-cart').removeClass('hidden');
-					}
-				}
-			});
-		});
-
-		// Add to Wishlist
-		$('.page_content').on('click', '.btn-add-to-wishlist', (e) => {
-			const $btn = $(e.currentTarget);
-			const item_code = $btn.data('item-code');
-			const wished = $btn.hasClass('wished');
-			const action = wished ? 'remove' : 'add';
-
-			frappe.call({
-				method: action === 'add' ? 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.add_to_wishlist' : 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.remove_from_wishlist',
-				args: { item_code },
-				callback(r) {
-					if (!r.exc) {
-						if (action === 'add') {
-							$btn.addClass('wished');
-							$btn.find('.wish-icon').attr('fill', 'red').attr('stroke', 'red');
-							$btn.find('.wish-label').text(__('Wishlisted'));
-							frappe.show_alert({ message: __('Added to Wishlist'), indicator: 'green' }, 3);
-						} else {
-							$btn.removeClass('wished');
-							$btn.find('.wish-icon').attr('fill', 'none').attr('stroke', 'currentColor');
-							$btn.find('.wish-label').text(__('Wishlist'));
-							frappe.show_alert({ message: __('Removed from Wishlist'), indicator: 'orange' }, 3);
-						}
-						if (typeof webshop !== 'undefined' && webshop.webshop && webshop.webshop.wishlist) {
-							webshop.webshop.wishlist.set_wishlist_count(true);
-						}
-					}
-				}
-			});
-		});
-
 		// Offer details
 		$('.page_content').on('click', '.offer-details', (e) => {
 			const $btn = $(e.currentTarget);

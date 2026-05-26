@@ -4,66 +4,47 @@ import click
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 
-from upande_webshop.upande_webshop.utils.setup import has_ecommerce_fields
 
 def after_install():
-	run_patches()
-	copy_from_ecommerce_settings()
-	drop_ecommerce_settings()
-	remove_ecommerce_settings_doctype()
 	add_custom_fields()
 	navbar_add_products_link()
 	say_thanks()
 
 
-def copy_from_ecommerce_settings():
-	if not has_ecommerce_fields():
-		return
-
-	frappe.reload_doc("webshop", "doctype", "webshop_settings")
-
-	qb = frappe.qb
-	table = frappe.qb.Table("tabSingles")
-	old_doctype = "E Commerce Settings"
-	new_doctype = "Webshop Settings"
-
-	entries = (
-		qb.from_(table)
-		.select(table.field, table.value)
-		.where((table.doctype == old_doctype) & (table.field != "name"))
-		.run(as_dict=True)
-	)
-
-	for e in entries:
-		qb.into(table).insert(new_doctype, e.field, e.value).run()
-
-	for doctype in ["Website Filter Field", "Website Attribute"]:
-		table = qb.DocType(doctype)
-		query = (
-			qb.update(table)
-			.set(table.parent, new_doctype)
-			.set(table.parenttype, new_doctype)
-			.where(table.parent == old_doctype)
+def _has_quotation_business_unit():
+	"""The Quotation Item length fields depend on `Quotation.custom_business_unit == "Roses"`.
+	On sites that don't have that driver field (e.g. mona, tambuzi) the eval is
+	always falsy, so creating these fields would just leak hidden columns that
+	core code might still try to populate. Skip them when the driver is absent.
+	"""
+	return bool(
+		frappe.db.get_value(
+			"Custom Field", {"dt": "Quotation", "fieldname": "custom_business_unit"}, "name"
 		)
-
-		query.run()
-
-def drop_ecommerce_settings():
-	frappe.delete_doc_if_exists("DocType", "E Commerce Settings", force=True)
-
-
-def remove_ecommerce_settings_doctype():
-	if not has_ecommerce_fields():
-		return
-
-	table = frappe.qb.Table("tabSingles")
-	old_doctype = "E Commerce Settings"
-
-	frappe.qb.from_(table).delete().where(table.doctype == old_doctype).run()
+	)
 
 
 def add_custom_fields():
 	custom_fields = {
+		"Quotation": [
+			{
+				"fieldname": "custom_delivery_point",
+				"fieldtype": "Link",
+				"label": "Delivery Point",
+				"options": "Delivery Points",
+				"insert_after": "shipping_address_name",
+			},
+		],
+		"Item Price": [
+			{
+				"fieldname": "custom_length",
+				"fieldtype": "Link",
+				"label": "Stem Length",
+				"options": "Stem Length",
+				"insert_after": "item_name",
+				"description": "Set for non-variant rose items priced per stem length. Variants leave this blank.",
+			},
+		],
 		"Item": [
 			{
 				"default": 0,
@@ -177,17 +158,27 @@ def add_custom_fields():
 				"insert_after": "filter_fields",
 			},
 		],
-		"Quotation Item": [
-			{
-				"fieldname": "custom_box_type",
-				"fieldtype": "Link",
-				"label": "Box Type",
-				"options": "Box Type",
-				"insert_after": "custom_total_stems",
-				"in_list_view": 1,
-			},
-		],
 	}
+
+	if _has_quotation_business_unit():
+		custom_fields["Quotation Item"] = [
+			{
+				"fieldname": "custom_length",
+				"fieldtype": "Link",
+				"label": "Length",
+				"options": "Stem Length",
+				"insert_after": "stock_uom",
+				"depends_on": "eval: parent.custom_business_unit == \"Roses\"",
+				"mandatory_depends_on": "eval: parent.custom_business_unit == \"Roses\"",
+			},
+			{
+				"fieldname": "custom_total_stems",
+				"fieldtype": "Float",
+				"label": "Total Stems",
+				"insert_after": "custom_length",
+				"read_only": 1,
+			},
+		]
 
 	frappe.make_property_setter(
 		{
@@ -202,6 +193,7 @@ def add_custom_fields():
 	)
 
 	return create_custom_fields(custom_fields)
+
 
 def navbar_add_products_link():
 	website_settings = frappe.get_doc("Website Settings")
@@ -222,30 +214,3 @@ def navbar_add_products_link():
 
 def say_thanks():
 	click.secho("Thank you for installing Upande Webshop!", color="green")
-
-
-patches = [
-	"create_website_items",
-	"populate_e_commerce_settings",
-	"add_homepage_field",
-	"make_homepage_products_website_items",
-	"fetch_thumbnail_in_website_items",
-	"convert_to_website_item_in_item_card_group_template",
-	"shopping_cart_to_ecommerce",
-	"copy_custom_field_filters_to_website_item",
-]
-
-def run_patches():
-	# Customers migrating from v13 to v15 directly need to run all below patches
-
-	frappe.flags.in_patch = True
-
-	try:
-		for patch in patches:
-			frappe.get_attr(f"upande_webshop.patches.{patch}.execute")()
-
-	finally:
-		frappe.flags.in_patch = False
-
-
-		

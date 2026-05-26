@@ -14,6 +14,11 @@ def get_context(context):
 	is_guest = frappe.session.user == "Guest"
 
 	settings = get_shopping_cart_settings()
+
+	if not settings.enable_wishlist:
+		frappe.local.flags.redirect_location = "/webshop"
+		raise frappe.Redirect
+
 	items = get_wishlist_items() if not is_guest else []
 	selling_price_list = _set_price_list(settings) if not is_guest else None
 

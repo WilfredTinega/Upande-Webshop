@@ -1,7 +1,3 @@
-# -*- coding: utf-8 -*-
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and contributors
-# For license information, please see license.txt
-
 import json
 
 import frappe
@@ -92,10 +88,10 @@ def get_guest_redirect_on_action():
 @frappe.whitelist()
 def get_post_login_redirect():
 	"""Return the correct redirect URL after login based on the user's role.
-	Customers go to /upande-webshop; all other roles go to /app (desk).
+	Customers go to /webshop; all other roles go to /app (desk).
 	"""
 	if "Customer" in frappe.get_roles(frappe.session.user):
-		return "/upande-webshop"
+		return "/webshop"
 	return "/app"
 
 @frappe.whitelist(allow_guest=True)
@@ -181,3 +177,27 @@ def get_customer_boxes():
 		fields=["name", "item_name"],
 		order_by="item_name asc"
 	)
+
+
+@frappe.whitelist(allow_guest=True)
+def get_box_min_order_qty(box_name):
+	"""
+	Resolve the MOQ (in bunches) for a box, sourced from Box Type.min_order_qty.
+
+	`box_name` is the value selected in the configurator dropdown — currently the
+	Item item_name (e.g. 'STD-EB BOX'). Match by Box Type primary key first,
+	then by box_type_name; finally try a startswith match so 'STD-EB BOX' resolves
+	to Box Type 'STD-EB'. Returns {min_order_qty: float} (0 if no match).
+	"""
+	if not box_name:
+		return {"min_order_qty": 0}
+
+	moq = frappe.db.get_value("Box Type", box_name, "min_order_qty")
+	if moq is None:
+		moq = frappe.db.get_value("Box Type", {"box_type_name": box_name}, "min_order_qty")
+	if moq is None:
+		first_token = box_name.split()[0] if box_name else ""
+		if first_token:
+			moq = frappe.db.get_value("Box Type", first_token, "min_order_qty")
+
+	return {"min_order_qty": float(moq or 0)}
