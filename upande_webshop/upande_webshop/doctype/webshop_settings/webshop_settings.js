@@ -1,6 +1,3 @@
-// Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and contributors
-// For license information, please see license.txt
-
 frappe.ui.form.on("Webshop Settings", {
 	onload: function(frm) {
 		if(frm.doc.__onload && frm.doc.__onload.quotation_series) {
