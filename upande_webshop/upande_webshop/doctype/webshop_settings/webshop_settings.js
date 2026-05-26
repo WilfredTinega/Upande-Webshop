@@ -134,7 +134,7 @@ frappe.ui.form.on("Webshop Settings", {
 			);
 		});
 	},
-	publish_items: function(frm) {
+	open_bulk_publish_page: function(frm) {
 		frappe.set_route("bulk-publish-items");
 	},
 	enabled: function(frm) {

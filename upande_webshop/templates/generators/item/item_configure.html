@@ -27,15 +27,6 @@
 
 	<div class="variant-status-area mt-2"></div>
 
-	<div class="d-flex flex-wrap mt-3" style="gap:8px;">
-		<button class="btn btn-outline-primary btn-add-variant-row" disabled>
-			+ {{ _('Add Variant') }}
-		</button>
-		<button class="btn btn-link btn-clear-variant" type="button">
-			{{ _('Clear selection') }}
-		</button>
-	</div>
-
 	{% if cart_settings.show_bunch | int %}
 	<div class="mt-4 variant-rows-area" style="display:none;">
 		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
@@ -88,6 +79,16 @@
 		opacity: 0.45;
 		cursor: not-allowed;
 		text-decoration: line-through;
+	}
+	.inline-variant-selector .attr-toggle .btn.oos {
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+		color: var(--gray-500);
+		background: #f7f7f9;
+		cursor: not-allowed;
+	}
+	.inline-variant-selector .attr-toggle .btn.oos:hover {
+		border-color: var(--gray-300);
 	}
 	.inline-variant-selector .attr-group { margin-bottom: 12px; }
 	.inline-variant-selector .attr-toggle { display: flex; gap: 6px; flex-wrap: wrap; }

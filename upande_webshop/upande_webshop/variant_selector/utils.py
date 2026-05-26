@@ -214,6 +214,54 @@ def get_next_attribute_and_values(item_code, selected_attributes):
 	}
 
 
+@frappe.whitelist(allow_guest=True)
+def get_attribute_value_stock(template_item_code, attribute):
+	"""Return {attribute_value: total_actual_qty} across storefront warehouses.
+
+	Used by the variant picker to strikethrough out-of-stock options on the
+	first-attribute toggles (so 50cm renders crossed out when no variant
+	with Stem Length=50cm has any storefront stock).
+	"""
+	from upande_webshop.upande_webshop.product_data_engine.query import (
+		_all_storefront_warehouses,
+	)
+
+	item_cache = ItemVariantsCacheManager(template_item_code)
+	item_variants_data = item_cache.get_item_variants_data()
+
+	# Map: attribute_value -> set(variant item_code)
+	value_to_variants = {}
+	for variant_code, attr, value in item_variants_data:
+		if attr != attribute:
+			continue
+		value_to_variants.setdefault(value, set()).add(variant_code)
+
+	if not value_to_variants:
+		return {}
+
+	ws_warehouse = frappe.db.get_value(
+		"Website Item", {"item_code": template_item_code}, "website_warehouse"
+	)
+	warehouses = _all_storefront_warehouses(ws_warehouse)
+	if not warehouses:
+		return {v: 0 for v in value_to_variants}
+
+	all_variants = list({c for codes in value_to_variants.values() for c in codes})
+	bin_rows = frappe.db.get_all(
+		"Bin",
+		fields=["item_code", "actual_qty"],
+		filters={"item_code": ("in", all_variants), "warehouse": ("in", warehouses)},
+	)
+	qty_by_variant = {}
+	for r in bin_rows:
+		qty_by_variant[r.item_code] = qty_by_variant.get(r.item_code, 0) + flt(r.actual_qty)
+
+	result = {}
+	for value, codes in value_to_variants.items():
+		result[value] = sum(qty_by_variant.get(c, 0) for c in codes)
+	return result
+
+
 def get_items_with_selected_attributes(item_code, selected_attributes):
 	item_cache = ItemVariantsCacheManager(item_code)
 	attribute_value_item_map = item_cache.get_attribute_value_item_map()

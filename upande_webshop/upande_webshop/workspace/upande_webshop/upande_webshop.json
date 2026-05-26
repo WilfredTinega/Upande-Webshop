@@ -117,7 +117,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Shortcuts",
-   "link_count": 4,
+   "link_count": 5,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -161,9 +161,19 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Box Type",
+   "link_count": 0,
+   "link_to": "Box Type",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-05-25 17:15:13.044773",
+ "modified": "2026-05-26 10:10:46.892811",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",

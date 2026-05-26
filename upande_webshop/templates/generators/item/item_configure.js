@@ -1,6 +1,6 @@
-// Inline variant selector: toggle buttons per attribute + box type.
-// Customer picks a variant + box, then enters No. of Bunches.
-// Total stems = bunch_size (from item's sales UOM) × num_bunches.
+// Inline variant selector: pick attributes + box, then "+ Add Variant" stages
+// one resolved variant per row. Multiple variants can be staged at once and
+// posted to the cart together via "Add to Cart".
 
 const _pack_rate_cache = {};
 const _bunch_size_cache = {};
@@ -52,72 +52,119 @@ class InlineVariantSelector {
 		this.$root = $root;
 		this.item_code = item_code;
 		this.item_name = item_name;
+
+		// Selection-in-progress state (top picker)
 		this.selected_attributes = {};
 		this.selected_box_type = '';
 		this.exact_match_item = null;
 		this._per_stem_rate = null;
 		this._currency = '€';
-		this._moq = 0; // MOQ expressed in stems
+		this._moq = 0;
 		this._moq_bunches = 0;
 		this._pack_rate = null;
-		this._user_edited_bunches = false;
-		this.bunch_size = 1;
-		this.bunch_uom = null; // sales UOM (e.g. "Bunch (12)") — sent to update_cart
-		this._in_stock = null; // null=unknown, true/false once resolved
+		this._in_stock = null;
 		this._stock_qty = null;
 		this._show_stock_qty = false;
 		this._on_backorder = false;
+		this.bunch_size = 1;
+		this.bunch_uom = null;
+
+		// Map<row_key, row_state> — keyed by `${item_code}|${box_type}`.
+		// row_state: {
+		//   item_code, box_type, length_cm, per_stem_rate, currency, bunch_size,
+		//   bunch_uom, stock_qty, pack_rate, moq_bunches, num_bunches,
+		//   user_edited, attribute_label, specs_snapshot
+		// }
+		this.variant_rows = new Map();
 
 		this.$attr_area = $root.find('.variant-attributes-area');
 		this.$box_area = $root.find('.box-type-area');
 		this.$box_toggle = $root.find('.box-type-toggle');
 		this.$pack_rate_display = $root.find('.pack-rate-display');
-		this.$totals_area = $root.find('.totals-area');
-		this.$bunch_size_input = $root.find('.bunch-size-input');
-		this.$bunches_display = $root.find('.bunches-display');
-		this.$total_stems_display = $root.find('.total-stems-display');
-		this.$validation_msg = $root.find('.stems-validation-msg');
+		this.$rows_area = $root.find('.variant-rows-area');
+		this.$rows = $root.find('.variant-rows');
+		this.$grand_totals = $root.find('.grand-totals');
+		this.$grand_bunches = $root.find('.grand-bunches');
+		this.$grand_stems = $root.find('.grand-stems');
 		this.$price_display = $root.find('.price-display');
 		this.$status_area = $root.find('.variant-status-area');
 		this.$add_to_cart = $root.find('.btn-add-to-cart-variant');
-		this.$clear = $root.find('.btn-clear-variant');
 		this.$moq_label = $root.find('.moq-label');
 
 		fetch_bunch_size(this.item_code).then((info) => {
 			this.bunch_size = info.size;
 			this.bunch_uom = info.uom;
-			this.$bunch_size_input.val(info.size);
 		});
 		this.init();
 	}
 
 	init() {
+		this._value_stock = {}; // { attribute: { value: qty } }
 		this.load_attributes()
 			.then(attrs => {
 				this.attribute_data = attrs;
-				this.render_attribute_toggles();
-				this.restore_from_cache();
+				return this.load_attribute_value_stock(attrs).then(() => {
+					this.render_attribute_toggles();
+				});
 			});
 
 		this.load_box_types();
 		this.bind_events();
 	}
 
+	load_attribute_value_stock(attrs) {
+		// Pull per-attribute-value storefront stock so the picker can render
+		// out-of-stock values with a strikethrough (matches the non-variant flow).
+		const calls = (attrs || []).map((attr) =>
+			new Promise((resolve) => {
+				frappe.call({
+					method: 'upande_webshop.upande_webshop.variant_selector.utils.get_attribute_value_stock',
+					args: { template_item_code: this.item_code, attribute: attr.attribute },
+					callback: (r) => {
+						this._value_stock[attr.attribute] = (r && r.message) || {};
+						resolve();
+					},
+					error: () => resolve(),
+				});
+			})
+		);
+		return Promise.all(calls);
+	}
+
 	bind_events() {
 		this.$root.on('click', '.attr-toggle .attr-btn', (e) => {
 			e.preventDefault();
 			const $btn = $(e.currentTarget);
+			if ($btn.is(':disabled') || $btn.hasClass('oos')) return;
 			const attribute = $btn.data('attribute');
 			const value = String($btn.data('value'));
-			if (this.selected_attributes[attribute] === value) return;
+
+			// Single-attribute items: button-active reflects "row staged" and a
+			// re-click toggles the row off. (Non-variant flow's behavior.)
+			const single_attr = (this.attribute_data || []).length === 1;
+			if (single_attr && $btn.hasClass('active')) {
+				const row_key = this._find_row_key_for_attr_value(attribute, value);
+				if (row_key) {
+					this.variant_rows.delete(row_key);
+					this.render_rows();
+					this.update_grand_totals();
+					this.update_addable_state();
+				}
+				$btn.removeClass('active');
+				return;
+			}
+
 			this.selected_attributes[attribute] = value;
-			this._user_edited_bunches = false;
-			$btn.siblings('.attr-btn').removeClass('active');
+			// In single-attribute mode, every active button represents one staged
+			// row — don't clear siblings. Multi-attribute mode keeps the previous
+			// "one active per attribute group" radio behavior.
+			if (!single_attr) {
+				$btn.siblings('.attr-btn').removeClass('active');
+			}
 			$btn.addClass('active');
 			if (this.range_values) delete this.range_values[attribute];
 			this.remove_range_input(attribute);
 			this.maybe_show_range_input(attribute, value);
-			this.persist_cache();
 			this.refresh_attribute_state();
 			if (this.selected_box_type) {
 				this.refresh_moq_for_box();
@@ -130,36 +177,55 @@ class InlineVariantSelector {
 			const value = String($btn.data('value'));
 			if (this.selected_box_type === value) return;
 			this.selected_box_type = value;
-			this._user_edited_bunches = false;
 			$btn.siblings('.box-btn').removeClass('active');
 			$btn.addClass('active');
 			this.refresh_moq_for_box().then(() => {
-				this.update_pack_rate_and_totals();
+				this.update_pack_rate_display();
+				this.update_addable_state();
 			});
 		});
 
-		this.$root.on('input', '.bunches-display', () => {
-			this._user_edited_bunches = true;
-			// Clamp typed/pasted values at the stock cap before recalc, so total
-			// stems and validation messages reflect what the user can actually add.
-			const max_attr = parseInt(this.$bunches_display.attr('max'));
-			if (!isNaN(max_attr) && max_attr >= 0) {
-				const val = parseInt(this.$bunches_display.val()) || 0;
-				if (val > max_attr) {
-					this.$bunches_display.val(max_attr);
-				}
+		this.$root.on('input', '.variant-row .bunches-input', (e) => {
+			const $input = $(e.currentTarget);
+			const key = String($input.closest('.variant-row').data('key'));
+			const state = this.variant_rows.get(key);
+			if (!state) return;
+			let raw = Math.max(parseInt($input.val()) || 0, 0);
+			const maxAttr = parseInt($input.attr('data-max-bunches'));
+			if (!isNaN(maxAttr) && maxAttr >= 0 && raw > maxAttr) {
+				raw = maxAttr;
+				$input.val(raw);
 			}
-			this.recalculate_totals();
+			state.num_bunches = raw;
+			state.user_edited = true;
+			this.update_row(key);
+			this.update_grand_totals();
+			this.update_addable_state();
+		});
+
+		this.$root.on('click', '.variant-row .btn-remove-row', (e) => {
+			e.preventDefault();
+			const key = String($(e.currentTarget).closest('.variant-row').data('key'));
+			const state = this.variant_rows.get(key);
+			this.variant_rows.delete(key);
+			// Single-attribute mode: clear the matching attr-btn highlight so
+			// the picker reflects what's still staged.
+			if (state && state.selected_attrs) {
+				Object.entries(state.selected_attrs).forEach(([attr, val]) => {
+					this.$root.find(
+						`.attr-toggle[data-attribute="${$.escapeSelector(attr)}"] ` +
+						`.attr-btn[data-value="${$.escapeSelector(String(val))}"]`
+					).removeClass('active');
+				});
+			}
+			this.render_rows();
+			this.update_grand_totals();
+			this.update_addable_state();
 		});
 
 		this.$add_to_cart.on('click', (e) => {
 			e.preventDefault();
 			this.add_to_cart();
-		});
-
-		this.$clear.on('click', (e) => {
-			e.preventDefault();
-			this.clear_all();
 		});
 	}
 
@@ -217,11 +283,16 @@ class InlineVariantSelector {
 				</div>
 			`);
 			const $toggle = $group.find('.attr-toggle');
+			const stock_map = this._value_stock[attr.attribute] || {};
 			(attr.values || []).forEach(v => {
+				const qty = Number(stock_map[v] || 0);
+				const oos = qty <= 0;
 				$toggle.append(`
-					<button type="button" class="btn attr-btn"
+					<button type="button" class="btn attr-btn${oos ? ' oos' : ''}"
 						data-attribute="${frappe.utils.escape_html(attr.attribute)}"
-						data-value="${frappe.utils.escape_html(v)}">
+						data-value="${frappe.utils.escape_html(v)}"
+						data-stock-qty="${qty}"
+						${oos ? 'disabled aria-disabled="true" title="' + __('Out of stock') + '"' : ''}>
 						${frappe.utils.escape_html(v)}
 					</button>
 				`);
@@ -231,8 +302,6 @@ class InlineVariantSelector {
 	}
 
 	maybe_show_range_input(attribute, value) {
-		// Some attribute values are stored as "60 to 70" — let the user pick
-		// a specific number within that range.
 		this.remove_range_input(attribute);
 		if (!value || !value.includes(' to ')) return;
 		const numbers = value.split(' to ').map(n => parseFloat(n));
@@ -255,8 +324,8 @@ class InlineVariantSelector {
 			if (val >= numbers[0] && val <= numbers[1]) {
 				this.range_values = this.range_values || {};
 				this.range_values[attribute] = val;
-				this._user_edited_bunches = false;
-				this.update_pack_rate_and_totals();
+				this.update_pack_rate_display();
+				this.update_addable_state();
 			}
 		});
 	}
@@ -275,7 +344,7 @@ class InlineVariantSelector {
 			this._in_stock = null;
 			this.clear_status();
 			this.update_addable_state();
-			this.update_pack_rate_and_totals();
+			this.update_pack_rate_display();
 			return;
 		}
 
@@ -291,50 +360,101 @@ class InlineVariantSelector {
 				this.fetch_per_stem_rate(this.exact_match_item);
 				this.refresh_bunch_size_for(this.exact_match_item);
 				this.fetch_stock_status(this.exact_match_item);
+				this.auto_stage_variant();
 			} else {
 				this.exact_match_item = null;
 				this._per_stem_rate = null;
 				this._in_stock = null;
-				this.update_price_display();
 			}
 
 			this.update_addable_state();
-			this.update_pack_rate_and_totals();
+			this.update_pack_rate_display();
 		});
 	}
 
+	auto_stage_variant() {
+		// Called as soon as the picker resolves to a single variant. Snapshots
+		// what we know now; fetch_per_stem_rate / fetch_stock_status / pack-rate
+		// callbacks update the staged row as those async lookups complete.
+		const item_code = this.exact_match_item;
+		if (!item_code) return;
+		const box_type = this.selected_box_type || '';
+		const key = `${item_code}|${box_type}`;
+		// Snapshot the attribute selection that produced this row, so re-clicking
+		// the same attribute button later can find and unstage it.
+		const selected_attrs_snapshot = { ...this.selected_attributes };
+
+		if (this.variant_rows.has(key)) {
+			this.flash_row(key);
+			this.reset_picker_after_stage();
+			return;
+		}
+
+		// Seed stock_qty from the attribute-value stock map when available
+		// (avoids "0 stems" appearing in the row until fetch_stock_status returns).
+		let seeded_stock = this._stock_qty;
+		if (seeded_stock == null) {
+			for (const [attr, val] of Object.entries(selected_attrs_snapshot)) {
+				const map = this._value_stock[attr];
+				if (map && map[val] != null) {
+					seeded_stock = Number(map[val]);
+					break;
+				}
+			}
+		}
+
+		this.variant_rows.set(key, {
+			item_code,
+			box_type,
+			length_cm: this.get_selected_length(),
+			per_stem_rate: this._per_stem_rate,
+			currency: this._currency,
+			bunch_size: this.bunch_size || 1,
+			bunch_uom: this.bunch_uom,
+			stock_qty: seeded_stock,
+			on_backorder: this._on_backorder,
+			pack_rate: this._pack_rate,
+			moq_bunches: this._moq_bunches || 0,
+			num_bunches: 1,
+			user_edited: false,
+			attribute_label: Object.entries(selected_attrs_snapshot).map(([k, v]) => `${k}: ${v}`).join(', '),
+			selected_attrs: selected_attrs_snapshot,
+		});
+		this.reset_picker_after_stage();
+		this.render_rows();
+		this.update_grand_totals();
+		this.update_addable_state();
+	}
+
+	_find_row_key_for_attr_value(attribute, value) {
+		for (const [key, state] of this.variant_rows) {
+			if (state.selected_attrs && state.selected_attrs[attribute] === value) {
+				return key;
+			}
+		}
+		return null;
+	}
+
 	fetch_stock_status(item_code) {
+		// Capture box_type at call time — the picker resets right after staging,
+		// so the staged row's key is `${item_code}|${box_type_when_staged}`.
+		const box_type = this.selected_box_type || '';
+		const row_key = `${item_code}|${box_type}`;
 		frappe.call({
 			method: 'upande_webshop.upande_webshop.shopping_cart.product_info.get_product_info_for_website',
 			args: { item_code, skip_quotation_creation: 1 },
 			callback: (r) => {
-				if (this.exact_match_item !== item_code) return;
 				const info = (r && r.message && r.message.product_info) || {};
-				this._on_backorder = !!info.on_backorder;
-				this._stock_qty = (info.stock_qty != null) ? Number(info.stock_qty) : null;
-				this._show_stock_qty = !!info.show_stock_qty;
-				if (this._on_backorder) {
-					this._in_stock = true;
-				} else if (info.in_stock === 1 || info.in_stock === true) {
-					this._in_stock = true;
-				} else if (info.in_stock === 0 || info.in_stock === false) {
-					this._in_stock = false;
-				} else {
-					this._in_stock = null;
+				const stock_qty = (info.stock_qty != null) ? Number(info.stock_qty) : null;
+				const state = this.variant_rows.get(row_key);
+				if (state) {
+					state.stock_qty = stock_qty;
+					state.on_backorder = !!info.on_backorder;
+					this.render_rows();
+					this.update_grand_totals();
+					this.update_addable_state();
 				}
-				this.set_item_found_status_with_stock();
-				this.apply_stock_cap_to_bunches();
-				this.update_addable_state();
 			},
-			error: () => {
-				if (this.exact_match_item !== item_code) return;
-				this._in_stock = null;
-				this._stock_qty = null;
-				this._show_stock_qty = false;
-				this._on_backorder = false;
-				this.apply_stock_cap_to_bunches();
-				this.update_addable_state();
-			}
 		});
 	}
 
@@ -358,8 +478,6 @@ class InlineVariantSelector {
 		}
 		const suffix = this.stock_suffix();
 		if (!suffix) return;
-		// Append stock info to the existing green item-found banner without
-		// losing its price suffix.
 		const $banner = this.$status_area.find('div[role="status"]').first();
 		if ($banner.length) {
 			$banner.append(document.createTextNode(' — ' + suffix));
@@ -367,37 +485,59 @@ class InlineVariantSelector {
 	}
 
 	fetch_per_stem_rate(item_code) {
+		const box_type = this.selected_box_type || '';
+		const row_key = `${item_code}|${box_type}`;
 		frappe.call({
 			method: 'upande_webshop.upande_webshop.shopping_cart.cart.get_item_price_for_configure',
 			args: { item_code },
 			callback: (r) => {
-				if (r.message) {
-					this._per_stem_rate = r.message.price_list_rate;
-					this._currency = r.message.currency || '€';
-					this.update_price_display();
+				const rate = r && r.message && r.message.price_list_rate;
+				if (!rate) {
+					if (this.variant_rows.has(row_key)) {
+						this.variant_rows.delete(row_key);
+						this.render_rows();
+						this.update_grand_totals();
+						this.update_addable_state();
+					}
+					return;
+				}
+				this._currency = r.message.currency || this._currency || '€';
+				const state = this.variant_rows.get(row_key);
+				if (state) {
+					state.per_stem_rate = rate;
+					state.currency = r.message.currency || state.currency;
+					this.update_row(row_key);
+					this.update_grand_totals();
 				}
 			}
 		});
 	}
 
 	refresh_bunch_size_for(item_code) {
+		const box_type = this.selected_box_type || '';
+		const row_key = `${item_code}|${box_type}`;
 		fetch_bunch_size(item_code).then((info) => {
-			if (this.exact_match_item !== item_code) return;
-			this.bunch_size = Math.max(parseInt(info.size) || 1, 1);
-			this.bunch_uom = info.uom || null;
-			this.$bunch_size_input.val(this.bunch_size);
-			// MOQ bunches->stems depends on bunch_size; refresh moq line if a box is picked
-			if (this.selected_box_type) {
-				this._moq = this._moq_bunches * this.bunch_size;
+			const size = Math.max(parseInt(info.size) || 1, 1);
+			const uom = info.uom || null;
+			const state = this.variant_rows.get(row_key);
+			if (state) {
+				state.bunch_size = size;
+				state.bunch_uom = uom;
+				// If pack-rate is known, seed default bunches = floor(pack_rate / bunch_size)
+				if (!state.user_edited && state.pack_rate && size) {
+					const bunches = Math.floor(state.pack_rate / size);
+					if (bunches > 0) state.num_bunches = bunches;
+				} else if (!state.user_edited && state.moq_bunches) {
+					state.num_bunches = state.moq_bunches;
+				}
+				this.render_rows();
+				this.update_grand_totals();
+				this.update_addable_state();
 			}
-			this.autofill_bunches_from_pack_rate();
-			this.recalculate_totals();
 		});
 	}
 
 	get_selected_length() {
-		// Look for a Length / Stem Length attribute among the selected values
-		// (the dialog used the field name 'Length', so keep that as primary).
 		const candidates = ['Length', 'Stem Length'];
 		for (const attr of candidates) {
 			if (this.range_values && this.range_values[attr]) {
@@ -432,9 +572,6 @@ class InlineVariantSelector {
 							? ` — MOQ: ${this._moq_bunches} bunch${this._moq_bunches > 1 ? 'es' : ''}`
 							: ''
 					);
-					if (this._moq_bunches && !this._user_edited_bunches) {
-						this.$bunches_display.val(this._moq_bunches);
-					}
 					resolve();
 				},
 				error: () => {
@@ -447,18 +584,13 @@ class InlineVariantSelector {
 		});
 	}
 
-	update_pack_rate_and_totals() {
+	update_pack_rate_display() {
 		const length = this.get_selected_length();
 		const box = this.selected_box_type;
-
-		if (this.exact_match_item) {
-			this.$totals_area.css('display', 'flex');
-		}
 
 		if (!(box && length)) {
 			this._pack_rate = null;
 			this.$pack_rate_display.html('');
-			this.recalculate_totals();
 			return;
 		}
 
@@ -481,100 +613,189 @@ class InlineVariantSelector {
 					`<small style="color:var(--gray-500);">${__('No pack rate data for this combination')}</small>`
 				);
 			}
-			this.autofill_bunches_from_pack_rate();
-			this.recalculate_totals();
 		});
 	}
 
-	autofill_bunches_from_pack_rate() {
-		// One box's worth of bunches = pack_rate / bunch_size.
-		// Only seed if the user hasn't manually overridden the value.
-		if (this._user_edited_bunches) return;
-		if (!this._pack_rate || !this.bunch_size) return;
-		const bunches = Math.floor(this._pack_rate / this.bunch_size);
-		if (bunches > 0) {
-			this.$bunches_display.val(bunches);
+	reset_picker_after_stage() {
+		// Clear the top picker so the user can pick another variant. The
+		// staged row keeps its own snapshot of price/stock/etc.
+		const single_attr = (this.attribute_data || []).length === 1;
+		this.selected_attributes = {};
+		this.range_values = {};
+		this.exact_match_item = null;
+		this._per_stem_rate = null;
+		this._pack_rate = null;
+		this._in_stock = null;
+		this._stock_qty = null;
+		this._show_stock_qty = false;
+		this._on_backorder = false;
+		// For single-attribute items the active class doubles as the "row staged"
+		// indicator (non-variant flow's behavior). For multi-attribute items the
+		// staged row encodes the full combo, so we clear the picker entirely.
+		if (!single_attr) {
+			this.$root.find('.attr-btn').removeClass('active');
+			this.$root.find('.range-selector').remove();
 		}
+		this.$pack_rate_display.html('');
+		this.clear_status();
 	}
 
-	recalculate_totals() {
-		const num_bunches = parseInt(this.$bunches_display.val()) || 0;
-		const bunch_size = this.bunch_size || 1;
-		const total_stems = num_bunches * bunch_size;
-		this.$total_stems_display.val(total_stems);
-
-		this.apply_stock_cap_to_bunches();
-		this.validate_moq(total_stems, num_bunches);
-		this.update_price_display();
-		this.update_addable_state();
+	flash_row(key) {
+		const $row = this.$rows.find(`.variant-row[data-key="${$.escapeSelector(key)}"]`);
+		if (!$row.length) return;
+		const original_bg = $row.css('background');
+		$row.css('background', '#fff8d6');
+		setTimeout(() => $row.css('background', original_bg), 600);
 	}
 
-	apply_stock_cap_to_bunches() {
-		// Cap the bunches input at floor(stock_qty / bunch_size). Setting `max`
-		// on a native <input type="number"> stops the up-arrow at the cap and
-		// prevents the spinner from exceeding stock. We also clamp typed values
-		// in the `input` handler below for keyboard entry.
-		const bunch_size = this.bunch_size || 1;
-		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
-		if (stock_qty == null || stock_qty < 0 || !this._in_stock) {
-			this.$bunches_display.removeAttr('max');
+	render_rows() {
+		this.$rows.empty();
+		if (!this.variant_rows.size) {
+			this.$rows_area.hide();
+			this.$grand_totals.hide();
 			return;
 		}
-		const max_bunches = Math.floor(stock_qty / bunch_size);
-		this.$bunches_display.attr('max', max_bunches);
-		const current = parseInt(this.$bunches_display.val()) || 0;
-		if (max_bunches >= 0 && current > max_bunches) {
-			this.$bunches_display.val(max_bunches);
-			this.$total_stems_display.val(max_bunches * bunch_size);
+		this.$rows_area.css('display', 'block');
+		this.$grand_totals.css('display', 'flex');
+
+		const tpl = (key, state) => {
+			const stockText = (state.stock_qty != null)
+				? `${__('Stock')}: ${Number(state.stock_qty).toLocaleString()}`
+				: '';
+			const bunchSize = state.bunch_size || 1;
+			const maxBunches = (state.stock_qty != null && state.stock_qty >= 0)
+				? Math.floor(Number(state.stock_qty) / bunchSize)
+				: '';
+			const maxAttr = maxBunches !== '' ? `max="${maxBunches}"` : '';
+			const dataMaxAttr = maxBunches !== '' ? `data-max-bunches="${maxBunches}"` : '';
+			const boxText = state.box_type
+				? `<span class="variant-stock">${__('Box')}: ${frappe.utils.escape_html(state.box_type)}</span>`
+				: '';
+			return `
+				<div class="variant-row" data-key="${frappe.utils.escape_html(key)}">
+					<div>
+						<span class="variant-tag">${frappe.utils.escape_html(state.item_code)}</span>
+						${stockText ? `<span class="variant-stock">${frappe.utils.escape_html(stockText)}</span>` : ''}
+						${boxText}
+					</div>
+					<div>
+						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
+							${__('Bunch Size')}
+						</label>
+						<input type="number" class="form-control bunch-size-display" value="${bunchSize}" readonly>
+					</div>
+					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">×</div>
+					<div>
+						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
+							${__('No. of Bunches')}
+						</label>
+						<input type="number" class="form-control bunches-input" value="${state.num_bunches || 0}" min="0" ${maxAttr} ${dataMaxAttr}>
+					</div>
+					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">=</div>
+					<div>
+						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
+							${__('Total Stems')}
+						</label>
+						<input type="number" class="form-control total-stems" value="0" readonly>
+					</div>
+					<div class="row-line-price ml-auto" style="font-size:13px; color:var(--gray-700); align-self:center;"></div>
+					<button type="button" class="btn-remove-row" title="${__('Remove')}">×</button>
+					<div class="row-msg"></div>
+				</div>
+			`;
+		};
+
+		this.variant_rows.forEach((state, key) => {
+			this.$rows.append(tpl(key, state));
+		});
+
+		this.variant_rows.forEach((_, key) => this.update_row(key));
+	}
+
+	update_row(key) {
+		const state = this.variant_rows.get(key);
+		const $row = this.$rows.find(`.variant-row[data-key="${$.escapeSelector(key)}"]`);
+		if (!state || !$row.length) return;
+
+		const bunchSize = state.bunch_size || 1;
+		const total_stems = (state.num_bunches || 0) * bunchSize;
+		$row.find('.total-stems').val(total_stems);
+
+		const $msg = $row.find('.row-msg');
+		const $line_price = $row.find('.row-line-price');
+		const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
+		const moq_bunches = state.moq_bunches || 0;
+
+		let msg = '';
+		if (total_stems > 0 && moq_bunches > 0 && (state.num_bunches || 0) < moq_bunches) {
+			msg = `<small style="color:#e8a000; font-weight:500;">⚠️ ${__(
+				'Minimum order is {0} bunch{1} for this box type.',
+				[moq_bunches, moq_bunches > 1 ? 'es' : '']
+			)}</small>`;
+		} else if (total_stems > 0 && stock_qty != null && stock_qty >= 0 && total_stems > stock_qty) {
+			msg = `<small style="color:#c0392b; font-weight:500;">⚠️ ${__(
+				'Only {0} stems available — reduce bunches.',
+				[stock_qty.toLocaleString()]
+			)}</small>`;
+		}
+		$msg.html(msg);
+
+		if (state.per_stem_rate && total_stems > 0) {
+			const total = (state.per_stem_rate * total_stems).toFixed(2);
+			$line_price.html(`<strong>${state.currency || this._currency} ${total}</strong>`);
+		} else if (!state.per_stem_rate && total_stems > 0) {
+			$line_price.html(
+				`<span style="color:var(--red-500);">${__('No price configured')}</span>`
+			);
+		} else {
+			$line_price.empty();
 		}
 	}
 
-	validate_moq(total_stems, num_bunches) {
-		const moq_bunches = this._moq_bunches;
-		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
-
-		if (total_stems > 0 && moq_bunches > 0 && (num_bunches || 0) < moq_bunches) {
-			this.$validation_msg.html(`
-				<small style="color:#e8a000; font-weight:500;">
-					⚠️ ${__('Minimum order is {0} bunch{1} for this box type.', [moq_bunches, moq_bunches > 1 ? 'es' : ''])}
-				</small>
-			`);
-		} else if (total_stems > 0 && stock_qty != null && stock_qty >= 0 && total_stems > stock_qty) {
-			this.$validation_msg.html(`
-				<small style="color:#c0392b; font-weight:500;">
-					⚠️ ${__('Only {0} stems available in stock — reduce the number of bunches.', [stock_qty.toLocaleString()])}
-				</small>
-			`);
+	update_grand_totals() {
+		let bunches = 0;
+		let stems = 0;
+		let grand_price = 0;
+		let currency = this._currency;
+		this.variant_rows.forEach((state) => {
+			const nb = state.num_bunches || 0;
+			const ts = nb * (state.bunch_size || 1);
+			bunches += nb;
+			stems += ts;
+			if (state.per_stem_rate) grand_price += state.per_stem_rate * ts;
+			if (state.currency) currency = state.currency;
+		});
+		this.$grand_bunches.text(bunches.toLocaleString());
+		this.$grand_stems.text(stems.toLocaleString());
+		if (grand_price > 0) {
+			this.$price_display.html(
+				`<div style="font-size:14px; color:var(--gray-700);">
+					${__('Order total')}: <strong style="font-size:16px;">${currency} ${grand_price.toFixed(2)}</strong>
+				</div>`
+			);
 		} else {
-			this.$validation_msg.html('');
+			this.$price_display.empty();
 		}
 	}
 
 	update_addable_state() {
-		const stems = parseInt(this.$total_stems_display.val()) || 0;
-		const has_stock = this._in_stock !== false;
-		const stock_qty = (this._stock_qty != null) ? Number(this._stock_qty) : null;
-		const within_stock = (stock_qty == null) || stems <= stock_qty;
-		const can_add = !!(this.exact_match_item && stems > 0 && stems >= (this._moq || 0) && has_stock && within_stock);
-		this.$add_to_cart.prop('disabled', !can_add);
-	}
-
-	update_price_display() {
-		const stems = parseInt(this.$total_stems_display.val()) || 0;
-		if (this._per_stem_rate && stems > 0) {
-			const total = (this._per_stem_rate * stems).toFixed(2);
-			this.$price_display.html(`
-				<div class="d-flex align-items-center" style="font-size:14px; color:var(--gray-700);">
-					<span>${this._currency} ${this._per_stem_rate.toFixed(3)} / stem</span>
-					<span class="mx-2">×</span>
-					<span>${stems} stems</span>
-					<span class="mx-2">=</span>
-					<strong style="font-size:16px;">${this._currency} ${total}</strong>
-				</div>
-			`);
-		} else {
-			this.$price_display.empty();
+		// "Add to Cart" enabled when at least one staged row is valid and none are blocked.
+		if (!this.variant_rows.size) {
+			this.$add_to_cart.prop('disabled', true);
+			return;
 		}
+		let ok = false;
+		let blocked = false;
+		this.variant_rows.forEach((state) => {
+			const stems = (state.num_bunches || 0) * (state.bunch_size || 1);
+			if (stems <= 0) return;
+			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
+			const within_stock = (stock_qty == null) || stems <= stock_qty;
+			const meets_moq = !state.moq_bunches || state.num_bunches >= state.moq_bunches;
+			if (within_stock && meets_moq) ok = true;
+			else blocked = true;
+		});
+		this.$add_to_cart.prop('disabled', !ok || blocked);
 	}
 
 	set_loading_status() {
@@ -610,85 +831,8 @@ class InlineVariantSelector {
 		this.$status_area.html(html);
 	}
 
-	clear_all() {
-		this.selected_attributes = {};
-		this.range_values = {};
-		this.selected_box_type = '';
-		this.exact_match_item = null;
-		this._per_stem_rate = null;
-		this._pack_rate = null;
-		this._moq = 0;
-		this._moq_bunches = 0;
-		this._in_stock = null;
-		this._user_edited_bunches = false;
-
-		this.$root.find('.attr-btn').removeClass('active').prop('disabled', false);
-		this.$root.find('.box-btn').removeClass('active');
-		this.$root.find('.range-selector').remove();
-		this.$bunch_size_input.val(this.bunch_size || 1);
-		this.$bunches_display.val(0);
-		this.$total_stems_display.val(0);
-		this.$pack_rate_display.html('');
-		this.$validation_msg.html('');
-		this.$moq_label.text('');
-		this.clear_status();
-		this.update_price_display();
-		this.update_addable_state();
-		this.$totals_area.css('display', 'none');
-		localStorage.removeItem(this.get_cache_key());
-	}
-
-	persist_cache() {
-		if (Object.keys(this.selected_attributes).length === 0) {
-			localStorage.removeItem(this.get_cache_key());
-			return;
-		}
-		localStorage.setItem(this.get_cache_key(), JSON.stringify(this.selected_attributes));
-	}
-
-	restore_from_cache() {
-		try {
-			const raw = localStorage.getItem(this.get_cache_key());
-			if (!raw) return;
-			const saved = JSON.parse(raw);
-			if (!saved || typeof saved !== 'object') return;
-			Object.entries(saved).forEach(([attr, val]) => {
-				const $btn = this.$root.find(
-					`.attr-toggle[data-attribute="${$.escapeSelector(attr)}"] ` +
-					`.attr-btn[data-value="${$.escapeSelector(String(val))}"]`
-				);
-				if ($btn.length) {
-					this.selected_attributes[attr] = String(val);
-					$btn.addClass('active');
-					this.maybe_show_range_input(attr, String(val));
-				}
-			});
-			if (Object.keys(this.selected_attributes).length) {
-				this.refresh_attribute_state();
-			}
-		} catch (e) {
-			// ignore corrupted cache
-		}
-	}
-
 	add_to_cart() {
-		const item_code = this.exact_match_item;
-		if (!item_code) return;
-
-		const box_type = this.selected_box_type || '';
-		const total_stems = parseInt(this.$total_stems_display.val()) || 0;
-		const num_bunches = parseInt(this.$bunches_display.val()) || 0;
-		const bunch_size = this.bunch_size || 1;
-		const pack_rate = this._pack_rate || 0;
-
-		if (!total_stems) {
-			frappe.msgprint({
-				title: __('Select Variant'),
-				message: __('Enter the number of bunches before adding to quote.'),
-				indicator: 'orange',
-			});
-			return;
-		}
+		if (!this.variant_rows.size) return;
 
 		if (frappe.session.user === 'Guest') {
 			if (localStorage) {
@@ -700,44 +844,82 @@ class InlineVariantSelector {
 			return;
 		}
 
-		localStorage.removeItem(this.get_cache_key());
-
 		const specs = [];
-		$(".item-website-specification table tr").each(function() {
-			const label = $(this).find(".spec-label").text().trim();
-			const val = $(this).find(".spec-content").text().trim();
+		$('.item-website-specification table tr').each(function () {
+			const label = $(this).find('.spec-label').text().trim();
+			const val = $(this).find('.spec-content').text().trim();
 			if (label && val) specs.push(`${label}: ${val}`);
 		});
 
-		const additional_notes = [
-			box_type ? `Box: ${box_type}` : '',
-			pack_rate ? `Pack Rate: ${pack_rate} stems/box` : '',
-			`Total Stems: ${total_stems} (${num_bunches} bunches × ${bunch_size} stems)`,
-			specs.length ? `Specs: ${specs.join(", ")}` : '',
-		].filter(Boolean).join(' | ');
+		// Snapshot rows to post; each remains posted independently so a single
+		// failure doesn't drop the others. We don't pass custom_length —
+		// the variant item_code already encodes length (Stem Length is a Link,
+		// and "80cm" isn't a valid LEN-… name; see project memory).
+		const entries = [];
+		this.variant_rows.forEach((state) => {
+			const stems = (state.num_bunches || 0) * (state.bunch_size || 1);
+			if (stems <= 0) return;
+			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
+			if (stock_qty != null && stems > stock_qty) return;
+			if (state.moq_bunches && (state.num_bunches || 0) < state.moq_bunches) return;
+			entries.push({ state, stems });
+		});
+
+		if (!entries.length) {
+			frappe.msgprint({
+				title: __('Nothing to add'),
+				message: __('Enter the number of bunches for at least one variant.'),
+				indicator: 'orange',
+			});
+			return;
+		}
 
 		this.$add_to_cart.prop('disabled', true);
 
-		upande_webshop.upande_webshop.shopping_cart.update_cart({
-			item_code,
-			qty: num_bunches,
-			uom: this.bunch_uom || undefined,
-			additional_notes,
-			box_type,
-			callback: (r) => {
-				this.update_addable_state();
-				if (r && !r.exc) {
-					frappe.show_alert({
-						message: __('Added {0} bunch{1} of {2} to your quote.', [num_bunches, num_bunches === 1 ? '' : 'es', item_code]),
-						indicator: 'green',
-					});
-				}
-			},
-		});
-	}
+		const post_one = ({ state, stems }) => new Promise((resolve) => {
+			const additional_notes = [
+				state.box_type ? `Box: ${state.box_type}` : '',
+				state.pack_rate ? `Pack Rate: ${state.pack_rate} stems/box` : '',
+				`Total Stems: ${stems} (${state.num_bunches} bunches × ${state.bunch_size} stems)`,
+				state.attribute_label ? `Attrs: ${state.attribute_label}` : '',
+				specs.length ? `Specs: ${specs.join(', ')}` : '',
+			].filter(Boolean).join(' | ');
 
-	get_cache_key() {
-		return `configure:${this.item_code}`;
+			upande_webshop.upande_webshop.shopping_cart.update_cart({
+				item_code: state.item_code,
+				qty: state.num_bunches,
+				uom: state.bunch_uom || undefined,
+				additional_notes,
+				custom_box_type: state.box_type || undefined,
+				callback: (r) => resolve({ ok: !(r && r.exc), state }),
+			});
+		});
+
+		const run = async () => {
+			let ok_count = 0;
+			const succeeded_keys = [];
+			for (const entry of entries) {
+				const { ok, state } = await post_one(entry);
+				if (ok) {
+					ok_count += 1;
+					succeeded_keys.push(`${state.item_code}|${state.box_type || ''}`);
+				}
+			}
+			// Drop successfully posted rows; leave failed ones so the user can retry.
+			succeeded_keys.forEach((k) => this.variant_rows.delete(k));
+			this.render_rows();
+			this.update_grand_totals();
+			this.update_addable_state();
+
+			if (ok_count) {
+				frappe.show_alert({
+					message: __('Added {0} variant{1} to your cart.', [ok_count, ok_count === 1 ? '' : 's']),
+					indicator: 'green',
+				});
+				$('.btn-view-in-cart').removeClass('hidden');
+			}
+		};
+		run();
 	}
 
 	call(method, args) {
