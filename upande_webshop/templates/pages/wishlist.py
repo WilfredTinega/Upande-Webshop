@@ -24,28 +24,38 @@ def get_context(context):
 
 	items = set_stock_price_details(items, settings, selling_price_list)
 	items = set_default_stem_bunch(items)
+	items = set_variant_flag(items)
 
 	context.body_class = "product-page"
 	context.items = items
 	context.settings = settings
+	# The inline variant selector markup keys off `shopping_cart.cart_settings`
+	# exactly like the product detail page, so reuse the same shape here.
+	context.shopping_cart = frappe._dict({"cart_settings": settings})
 	context.no_cache = 1
 
 
 def get_stock_availability(item_code, warehouse):
-	from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
+	"""Whether `item_code` has any stock for the storefront.
 
-	if warehouse and frappe.get_cached_value("Warehouse", warehouse, "is_group") == 1:
-		warehouses = get_child_warehouses(warehouse)
+	Mirrors the product listing/detail logic in
+	`upande_webshop.product_data_engine.query`: plain items read summed
+	`Stem Length Bin` qty, templates aggregate their variants' `Bin` qty, and
+	variants read `Bin` directly — all across the configured storefront
+	warehouse set rather than a single `website_warehouse`. Reading only the
+	per-item Bin here previously flagged in-stock plain items as out of stock.
+	"""
+	from upande_webshop.upande_webshop.product_data_engine.query import (
+		get_item_total_qty,
+		get_variants_total_qty,
+	)
+
+	if frappe.get_cached_value("Item", item_code, "has_variants"):
+		stock_qty = get_variants_total_qty(item_code, warehouse)
 	else:
-		warehouses = [warehouse] if warehouse else []
+		stock_qty = get_item_total_qty(item_code, warehouse)
 
-	stock_qty = 0.0
-	for warehouse in warehouses:
-		stock_qty += frappe.utils.flt(
-			frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "actual_qty")
-		)
-
-	return bool(stock_qty)
+	return frappe.utils.flt(stock_qty) > 0
 
 
 def get_wishlist_items():
@@ -93,6 +103,20 @@ def set_stock_price_details(items, settings, selling_price_list):
 					"formatted_discount_percent"
 				) or price_details.get("formatted_discount_rate")
 
+	return items
+
+
+def set_variant_flag(items):
+	"""Mark wished items that are variant templates.
+
+	Templates can't be added to cart directly — the user must pick a length
+	first — so the card renders the same inline variant selector the product
+	detail page uses instead of a plain "Add to Quote" button.
+	"""
+	for item in items:
+		item.has_variants = bool(
+			frappe.get_cached_value("Item", item.item_code, "has_variants")
+		)
 	return items
 
 

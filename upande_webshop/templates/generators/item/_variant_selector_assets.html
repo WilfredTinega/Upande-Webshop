@@ -1,0 +1,99 @@
+{# Shared CSS + JS for the inline variant selector.
+
+Included on the product detail page (item_configure.html) and the wishlist page
+so both render the identical InlineVariantSelector. The markup root
+(`.inline-variant-selector` with data-item-code / data-item-name) is supplied by
+the including page; this partial only ships styles + the class definition, plus
+`window.upande_webshop.mount_variant_selectors(scope)` to mount roots on demand. #}
+<style>
+	.inline-variant-selector .attr-toggle .btn,
+	.inline-variant-selector .box-type-toggle .btn {
+		border-radius: 6px;
+		font-size: 13px;
+		padding: 6px 14px;
+		border: 1px solid var(--gray-300);
+		background: #fff;
+		color: var(--gray-800);
+	}
+	.inline-variant-selector .attr-toggle .btn:hover:not(:disabled),
+	.inline-variant-selector .box-type-toggle .btn:hover:not(:disabled) {
+		border-color: var(--gray-500);
+	}
+	.inline-variant-selector .attr-toggle .btn.active,
+	.inline-variant-selector .box-type-toggle .btn.active {
+		background: var(--primary-color, #2490ef);
+		color: #fff;
+		border-color: var(--primary-color, #2490ef);
+	}
+	.inline-variant-selector .attr-toggle .btn:disabled,
+	.inline-variant-selector .box-type-toggle .btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+		text-decoration: line-through;
+	}
+	.inline-variant-selector .attr-toggle .btn.oos {
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+		color: var(--gray-500);
+		background: #f7f7f9;
+		cursor: not-allowed;
+	}
+	.inline-variant-selector .attr-toggle .btn.oos:hover {
+		border-color: var(--gray-300);
+	}
+	.inline-variant-selector .attr-group { margin-bottom: 12px; }
+	.inline-variant-selector .attr-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+	.inline-variant-selector .variant-rows-area,
+	.inline-variant-selector .variant-rows { width: 100%; }
+	.inline-variant-selector .variant-row {
+		display: flex; gap: 12px; align-items: flex-end; flex-wrap: nowrap;
+		padding: 8px 14px; border: 1px solid var(--gray-200); border-radius: 6px;
+		background: #fafbfc; width: 100%;
+	}
+	.inline-variant-selector .variant-row > div { flex-shrink: 0; }
+	.inline-variant-selector .variant-row label { white-space: nowrap; }
+	.inline-variant-selector .variant-row .variant-cell {
+		display: flex; flex-direction: column; align-self: stretch;
+		justify-content: flex-start; gap: 4px;
+	}
+	.inline-variant-selector .variant-row .row-end {
+		flex-shrink: 0; align-self: center;
+		display: flex; align-items: baseline; gap: 8px; white-space: nowrap;
+	}
+	.inline-variant-selector .variant-row .variant-tag {
+		font-weight: 600; font-size: 13px; color: var(--gray-800);
+		padding: 6px 10px; background: #fff; border: 1px solid var(--gray-300);
+		border-radius: 6px; white-space: nowrap;
+	}
+	.inline-variant-selector .variant-row .variant-stock {
+		font-weight: 400; color: var(--gray-500); font-size: 11px;
+	}
+	.inline-variant-selector .variant-row .form-control { max-width: 100px; font-size: 14px; }
+	.inline-variant-selector .variant-row .total-stems { font-weight: 700; background: #f4f5f6; }
+	.inline-variant-selector .variant-row .row-msg { font-size: 12px; }
+	.inline-variant-selector .variant-row .btn-remove-row {
+		color: var(--red-500);
+		font-size: 18px;
+		line-height: 1;
+		padding: 4px 8px;
+		border: none;
+		background: transparent;
+		cursor: pointer;
+		align-self: center;
+	}
+	.inline-variant-selector .variant-row .btn-remove-row:hover { color: var(--red-700); }
+
+	/* Compact mode (wishlist): drop the "Selected variants" heading and keep the
+	   per-variant green lines tight so they don't wrap on the narrow card. */
+	.inline-variant-selector[data-compact="1"] .variant-rows-area > label { display: none; }
+	.inline-variant-selector[data-compact="1"] .variant-compact-row {
+		font-size: 11px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+</style>
+
+<script>
+{% include "templates/generators/item/item_configure.js" %}
+</script>

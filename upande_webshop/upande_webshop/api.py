@@ -168,6 +168,10 @@ def get_box_min_order_qty(box_name):
 	if not box_name:
 		return {"min_order_qty": 0}
 
+	# Box Type may not carry min_order_qty on every site — guard the read.
+	if not frappe.get_meta("Box Type").has_field("min_order_qty"):
+		return {"min_order_qty": 0}
+
 	moq = frappe.db.get_value("Box Type", box_name, "min_order_qty")
 	if moq is None:
 		moq = frappe.db.get_value("Box Type", {"box_type_name": box_name}, "min_order_qty")

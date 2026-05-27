@@ -53,10 +53,6 @@ class ProductFiltersBuilder:
 							]
 						)
 
-				# exclude variants unless explicitly shown in settings
-				if not frappe.db.get_single_value("Webshop Settings", "show_variants"):
-					item_filters["variant_of"] = ["is", "not set"]
-
 				# Get link field values attached to published items
 				item_values = frappe.get_all(
 					"Website Item",

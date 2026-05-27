@@ -35,9 +35,16 @@ def get_context(context):
 			if parent_customer and parent_customer not in customer_names:
 				customer_names.append(parent_customer)
 
+		default_currency = frappe.db.get_default("currency") or ''
 		for cust_name in customer_names:
 			customer = frappe.get_doc("Customer", cust_name)
-			currency = customer.default_currency or getattr(customer, "billing_currency", "") or ''
+			# Fall back to the system default currency when the customer has none set,
+			# so a currency is always shown.
+			currency = (
+				customer.default_currency
+				or getattr(customer, "billing_currency", "")
+				or default_currency
+			)
 			context.linked_customers.append({
 				'name': customer.customer_name or customer.name,
 				'currency': currency

@@ -85,6 +85,50 @@ def redirect_customer_after_login(response, request):
 		response.set_data(json.dumps(data))
 
 
+def _redirect(location, code=302):
+	"""Raise a werkzeug-style redirect that frappe.app turns into a response.
+
+	frappe.Redirect is only interpreted by the website page renderer, which runs
+	*after* before_request — raising it that early bubbles up as a 500. A werkzeug
+	HTTPException, by contrast, is converted to its response by frappe.app at the
+	init_request level, so a redirect raised here actually works.
+	"""
+	from werkzeug.exceptions import HTTPException
+	from werkzeug.utils import redirect as _wz_redirect
+
+	class RedirectException(HTTPException):
+		code = 302
+
+		def get_response(self, environ=None, scope=None):
+			return _wz_redirect(location, code=code)
+
+	raise RedirectException()
+
+
+def redirect_non_desk_users_from_desk():
+	"""before_request hook — if a logged-in user without Desk access hits a desk
+	route (/app, /desk), send them to /webshop instead of Frappe's bare
+	"Not Permitted" page.
+
+	Desk access = user_type 'System User'. Website-only users (Customers) get the
+	storefront. Guests are left alone (they should log in normally).
+	"""
+	user = getattr(frappe.session, "user", None)
+	if not user or user == "Guest":
+		return
+
+	path = (frappe.request.path or "").strip("/") if frappe.request else ""
+	# Only intercept the desk app routes.
+	if not (path == "app" or path.startswith("app/") or path == "desk" or path.startswith("desk/")):
+		return
+
+	# System Users can use the desk — leave them be.
+	if frappe.db.get_value("User", user, "user_type") == "System User":
+		return
+
+	_redirect("/webshop")
+
+
 def redirect_after_login(login_manager):
 	pass
 
@@ -115,8 +159,12 @@ def update_website_context(context):
 	customer_is_linked = is_customer()
 	context["webshop_user_is_customer"] = customer_is_linked
 
-	user_image = frappe.session.user_image if getattr(frappe.session, "user_image", None) else ""
+	user_image = ""
 	user_fullname = frappe.session.user_fullname or frappe.session.user or ""
+	if frappe.session.user and frappe.session.user != "Guest":
+		# Read the live User image so a freshly-uploaded photo shows immediately,
+		# rather than the (possibly stale) value cached on the session.
+		user_image = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
 	context["webshop_user_image"] = user_image
 	context["webshop_user_fullname"] = user_fullname
 

@@ -6,12 +6,17 @@
 {% endblock header %}
 
 {% block page_content %}
+<style>
+	.profile-image-uploader:hover .profile-image-edit {
+		opacity: 1 !important;
+	}
+</style>
 <div class="row">
 	<div class="col-12 col-md-8 offset-md-2">
 		<div class="frappe-card p-4 mb-4">
 			<h4>{{ _("Your Account") }}</h4>
 			<div class="d-flex flex-wrap align-items-center mb-4">
-				<div id="profile-image-uploader" class="me-4 mb-3 position-relative" style="min-width:96px;width:96px;height:96px;cursor:pointer;">
+				<div id="profile-image-uploader" class="me-4 mb-3 position-relative profile-image-uploader" style="min-width:96px;width:96px;height:96px;margin-right:24px;cursor:pointer;">
 					{% if current_user_image %}
 						<img id="profile-image-preview" src="{{ current_user_image }}" alt="{{ _("Profile photo") }}" style="width:96px;height:96px;border-radius:8px;object-fit:cover;">
 					{% else %}
@@ -19,14 +24,14 @@
 							{{ full_name[0] if full_name else (user_id[0] if user_id else "U") }}
 						</div>
 					{% endif %}
-					<div class="position-absolute top-0 end-0 m-2 d-flex align-items-center justify-content-center" style="width:28px;height:28px;background:rgba(0,0,0,0.65);border-radius:50%;color:#fff;font-size:0.95rem;">
+					<div class="profile-image-edit d-flex align-items-center justify-content-center" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;background:rgba(0,0,0,0.65);border-radius:50%;color:#fff;font-size:1rem;opacity:0;transition:opacity 0.15s ease;">
 						✎
 					</div>
 					<input type="file" id="profile-image-upload" accept="image/*" style="display:none;">
 				</div>
 			<div class="flex-grow-1">
-				<p class="mb-1"><strong>{{ _("Full name") }}:</strong> {{ full_name or user_id }}</p>
-				<p class="mb-1"><strong>{{ _("User ID") }}:</strong> {{ user_id }}</p>
+				<p class="mb-1">{{ full_name or user_id }}</p>
+				<p class="mb-1 text-muted">{{ user_id }}</p>
 				</div>
 			</div>
 			<div id="profile-upload-message" class="form-text text-muted mt-3"></div>

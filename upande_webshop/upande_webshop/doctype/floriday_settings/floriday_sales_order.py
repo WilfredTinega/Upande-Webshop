@@ -467,9 +467,9 @@ def create_sales_orders_from_floriday():
         if not WAREHOUSE:
             frappe.throw("Warehouse not configured in Floriday Settings")
 
-        # Set date range for last 1 hour
+        # Set date range for last 24 hours
         end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(hours=1)
+        start_date = end_date - timedelta(hours=24)
 
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",

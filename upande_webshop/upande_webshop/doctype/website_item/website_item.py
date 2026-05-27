@@ -258,6 +258,14 @@ class WebsiteItem(WebsiteGenerator):
 				self.thumbnail = file_doc.thumbnail_url
 
 	def get_context(self, context):
+		from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+			apply_webshop_setup_guard,
+		)
+
+		# Missing required fields → friendly setup block instead of erroring.
+		if apply_webshop_setup_guard(context):
+			return context
+
 		context.show_search = True
 		context.search_link = "/search"
 		context.body_class = "product-page"

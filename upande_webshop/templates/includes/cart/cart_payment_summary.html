@@ -36,6 +36,13 @@
 					<td class="bill-content net-total text-right">{{ doc.get_formatted("grand_total") }}</td>
 				</tr>
 			</table>
+		{% else %}
+			<table class="table w-100 grand-total">
+				<tr>
+					<td class="bill-content net-total">{{ _("Grand Total") }}</td>
+					<td class="bill-content net-total text-right">{{ doc.get_formatted("grand_total") }}</td>
+				</tr>
+			</table>
 		{% endif %}
 	</div>
 </div>

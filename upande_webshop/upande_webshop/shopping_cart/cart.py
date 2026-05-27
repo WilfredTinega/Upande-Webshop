@@ -58,17 +58,6 @@ def set_cart_count(quotation=None):
 
 
 
-def _get_transit_days_for_party(party=None):
-        """Get transit days from Customer record. Returns int (default 1 — next-day delivery to JKIA)."""
-        if not party:
-                party = get_party()
-        if party and party.doctype == "Customer":
-                transit_days = frappe.db.get_value("Customer", party.name, "custom_transit_days")
-                if transit_days:
-                        return cint(transit_days)
-        return 1
-
-
 @frappe.whitelist()
 def get_cart_quotation(doc=None):
 	party = get_party()
@@ -92,7 +81,6 @@ def get_cart_quotation(doc=None):
 		"billing_addresses": get_billing_addresses(party),
 		"shipping_rules": get_applicable_shipping_rules(party),
 		"cart_settings": frappe.get_cached_doc("Webshop Settings"),
-		"transit_days": _get_transit_days_for_party(party),
 	}
 
 
@@ -167,6 +155,11 @@ def _check_box_type_min_order_qty(quotation):
 	Box Type is optional — lines without one skip the minimum-order check entirely
 	(no Box Type → no min qty to enforce).
 	"""
+	# Box Type may not carry a min_order_qty field on every site — guard the read
+	# so a missing column can't 500 the cart.
+	if not frappe.get_meta("Box Type").has_field("min_order_qty"):
+		return None
+
 	min_qty_cache = {}
 	for item in quotation.get("items") or []:
 		box_type = getattr(item, "custom_box_type", None)
@@ -301,9 +294,15 @@ def _check_required_cart_fields(quotation):
 	"""Cart-level required fields (Delivery Point, Line Code). Returns an error
 	dict the place_order / request_for_quotation endpoints surface to the UI,
 	or None when everything is filled in."""
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
 	if quotation.meta.has_field("custom_delivery_point") and not (quotation.get("custom_delivery_point") or "").strip():
 		return _("Please select a Delivery Point before placing your order.")
-	if quotation.meta.has_field("custom_line_code") and not (quotation.get("custom_line_code") or "").strip():
+	# Line Code is only required when the cart shows it.
+	if (
+		cint(cart_settings.get("show_cart_line_code", 1))
+		and quotation.meta.has_field("custom_line_code")
+		and not (quotation.get("custom_line_code") or "").strip()
+	):
 		return _("Please enter a Line Code before placing your order.")
 	return None
 
@@ -338,6 +337,11 @@ def place_order():
 	sales_order.payment_schedule = []
 	_assign_sequential_box_ids(sales_order)
 
+	# Copy custom_delivery_date from quotation if present
+	# ERPNext's _make_sales_order may not copy this custom field
+	if quotation.meta.has_field("custom_delivery_date") and quotation.custom_delivery_date:
+		sales_order.delivery_date = quotation.custom_delivery_date
+
 	# Ensure delivery_date is at least tomorrow (next day from today).
 	# Sales Order requires a future date; if the quotation didn't carry a fresh
 	# date, fall back to tomorrow on both the header and every line item.
@@ -345,7 +349,9 @@ def place_order():
 	if not sales_order.delivery_date or getdate(sales_order.delivery_date) < getdate(tomorrow):
 		sales_order.delivery_date = tomorrow
 	for so_item in sales_order.get("items") or []:
-		if not so_item.delivery_date or getdate(so_item.delivery_date) < getdate(tomorrow):
+		if not so_item.delivery_date:
+			so_item.delivery_date = sales_order.delivery_date
+		if getdate(so_item.delivery_date) < getdate(tomorrow):
 			so_item.delivery_date = tomorrow
 
 	if not cint(cart_settings.get("allow_items_not_in_stock")):
@@ -400,14 +406,24 @@ def request_for_quotation():
 
 
 def _get_per_stem_rate(item_code, custom_length, currency, price_list, uom=None):
-	"""Fetch per-stem price from Item Price.
-	First tries matching by uom (bunch-specific price), then falls back to stock_uom (Stems) price.
+	"""Fetch per-stem price from Item Price, converted to `currency`.
+
+	The catalog is priced in one base currency (the price list's currency). We
+	read the base rate and convert to the requested `currency` via exchange
+	rates, so customers transact in their own currency without per-currency
+	Item Prices.
+	First tries matching by uom (bunch-specific price), then stock_uom (per-stem).
 	"""
+	base_currency = frappe.db.get_value("Price List", price_list, "currency")
+	# Filter by price list only — the currency is the price list's currency.
 	base_filters = {
 		"item_code": item_code,
 		"price_list": price_list,
-		"currency": currency,
 	}
+
+	def conv(rate):
+		return _convert_rate(flt(rate), base_currency, currency)
+
 	# Try bunch-specific price first
 	if uom:
 		price_records = frappe.db.get_all(
@@ -423,7 +439,8 @@ def _get_per_stem_rate(item_code, custom_length, currency, price_list, uom=None)
 				{"parent": item_code, "uom": uom},
 				"conversion_factor"
 			) or 1)
-			return flt(price_records[0].price_list_rate) / conversion_factor if conversion_factor else flt(price_records[0].price_list_rate)
+			per_stem = flt(price_records[0].price_list_rate) / conversion_factor if conversion_factor else flt(price_records[0].price_list_rate)
+			return conv(per_stem)
 
 	# Fall back to stock UOM (Stems) price — already per-stem
 	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
@@ -434,7 +451,7 @@ def _get_per_stem_rate(item_code, custom_length, currency, price_list, uom=None)
 		limit=1,
 	)
 	if price_records:
-		return flt(price_records[0].price_list_rate)
+		return conv(price_records[0].price_list_rate)
 
 	# Last resort: any price for this item
 	price_records = frappe.db.get_all(
@@ -444,7 +461,7 @@ def _get_per_stem_rate(item_code, custom_length, currency, price_list, uom=None)
 		limit=1,
 	)
 	if price_records:
-		return flt(price_records[0].price_list_rate)
+		return conv(price_records[0].price_list_rate)
 	return None
 
 
@@ -544,7 +561,6 @@ def _apply_length_price_db(quotation):
 	price_list = quotation.selling_price_list
 	currency = quotation.currency
 	net_total = flt(0)
-	any_changed = False
 	# Sites without the rose/length flow (mona, tambuzi) won't have custom_length /
 	# custom_total_stems on Quotation/Sales Order Item. Drop those keys from the
 	# DB write so we don't 1146 the cart on a missing column.
@@ -571,20 +587,28 @@ def _apply_length_price_db(quotation):
 				db_fields.update({"rate": per_stem, "amount": amount})
 				item.rate = per_stem
 				item.amount = amount
-				any_changed = True
 			frappe.db.set_value(child_dt, item.name, db_fields, update_modified=False)
 		net_total += flt(item.amount)
 
-	if any_changed:
-		# Update parent totals in DB and in-memory so template context is correct
-		frappe.db.set_value(
-			parent_dt, quotation.name,
-			{"total": net_total, "net_total": net_total, "grand_total": net_total},
-			update_modified=False
-		)
-		quotation.total = net_total
-		quotation.net_total = net_total
-		quotation.grand_total = net_total
+	# Always re-derive parent totals from the per-stem amounts we just computed and
+	# persist + sync them, even when no rate changed. ERPNext's calculate_taxes_and_totals
+	# (run during quotation.save() before this) leaves grand_total based on qty×rate, which
+	# diverges from our per-stem net_total. Gating this on `any_changed` left grand_total
+	# stale on qty-only updates — the Net Total ("total") refreshed while Grand Total didn't.
+	frappe.db.set_value(
+		parent_dt, quotation.name,
+		{
+			"total": net_total,
+			"net_total": net_total,
+			"grand_total": net_total,
+			"rounded_total": net_total,
+		},
+		update_modified=False
+	)
+	quotation.total = net_total
+	quotation.net_total = net_total
+	quotation.grand_total = net_total
+	quotation.rounded_total = net_total
 
 
 @frappe.whitelist()
@@ -968,6 +992,35 @@ def _get_cart_quotation(party=None):
 	return _get_cart_doc(party=party)
 
 
+def _ensure_contact_linked_to_customer(contact_name, customer_name):
+	"""Link a Contact to a Customer if not already linked.
+
+	The webshop authorizes a user against a Customer via Portal User. ERPNext's
+	Sales Order validation additionally requires the contact_person to be a
+	Contact *of* that customer (a Dynamic Link). When a portal user's Contact
+	isn't linked, the cart save fails with "Contact Person does not belong to
+	the {customer}". We add the missing link so authorized portal users can
+	place orders for their customer.
+	"""
+	if not contact_name or not customer_name:
+		return
+	already = frappe.db.exists(
+		"Dynamic Link",
+		{
+			"parent": contact_name,
+			"parenttype": "Contact",
+			"link_doctype": "Customer",
+			"link_name": customer_name,
+		},
+	)
+	if already:
+		return
+	contact = frappe.get_doc("Contact", contact_name)
+	contact.append("links", {"link_doctype": "Customer", "link_name": customer_name})
+	contact.flags.ignore_permissions = True
+	contact.save()
+
+
 def _get_cart_doc(party=None):
 	"""Return the open draft cart document of the configured doctype.
 
@@ -985,6 +1038,16 @@ def _get_cart_doc(party=None):
 	# degrade to Quotation for this request so the cart still works.
 	if target_doctype == "Sales Order" and (not party or party.doctype != "Customer"):
 		target_doctype = "Quotation"
+
+	# A portal user authorized on the Customer must be able to order for it.
+	# ERPNext validates contact_person belongs to the customer, so ensure the
+	# session user's Contact is linked before any cart save (new or existing).
+	if target_doctype == "Sales Order" and party and party.doctype == "Customer":
+		_session_contact = frappe.db.get_value(
+			"Contact", {"email_id": frappe.session.user}
+		)
+		if _session_contact:
+			_ensure_contact_linked_to_customer(_session_contact, party.name)
 
 	if target_doctype == "Sales Order":
 		filters = {
@@ -1124,6 +1187,36 @@ def set_price_list_and_rate(quotation, cart_settings):
 	# refetch values
 	quotation.run_method("set_price_list_and_item_details")
 
+	# Force the order currency to the customer's accounting currency. ERPNext
+	# derives currency from the price list, but the receivable entry must be in
+	# the customer's default_currency — otherwise posting fails with
+	# "Accounting Entry ... can only be made in currency: X".
+	#
+	# We set currency + conversion rates directly rather than via
+	# set_missing_values(): on a Sales Order that method calls
+	# set_missing_lead_customer_details → _get_party_details, which does a
+	# throwing has_permission("Customer") check that portal/Website users fail.
+	party_name = _cart_party_name(quotation)
+	if party_name and frappe.db.exists("Customer", party_name):
+		customer_currency = frappe.db.get_value("Customer", party_name, "default_currency")
+		if customer_currency and quotation.currency != customer_currency:
+			from erpnext.setup.utils import get_exchange_rate
+
+			company_currency = frappe.get_cached_value(
+				"Company", quotation.company, "default_currency"
+			)
+			conv = 1.0
+			if company_currency and company_currency != customer_currency:
+				conv = flt(
+					get_exchange_rate(customer_currency, company_currency, args="for_selling")
+				) or 1.0
+
+			quotation.currency = customer_currency
+			quotation.price_list_currency = customer_currency
+			quotation.conversion_rate = conv
+			quotation.plc_conversion_rate = conv
+			quotation.run_method("calculate_taxes_and_totals")
+
 	if hasattr(frappe.local, "cookie_manager"):
 		# set it in cookies for using in product page
 		frappe.local.cookie_manager.set_cookie(
@@ -1131,22 +1224,85 @@ def set_price_list_and_rate(quotation, cart_settings):
 		)
 
 
-def _set_price_list(cart_settings, quotation=None):
-	"""Set price list based on customer or shopping cart default"""
-	from erpnext.accounts.party import get_default_price_list
+def _price_list_has_items(price_list):
+	"""True if the price list has at least one Item Price (i.e. it can price the catalog)."""
+	return bool(price_list) and frappe.db.exists("Item Price", {"price_list": price_list})
 
+
+def _base_price_list():
+	"""The catalog's base selling price list — the populated one the webshop
+	prices from. Its rate is converted to the customer's currency via exchange
+	rates, so item prices don't need to be duplicated per currency.
+
+	We pick the enabled selling price list with the most Item Prices (the real
+	catalog), cached per request. Falls back to the USD resolver if no list has
+	any prices.
+	"""
+	cached = getattr(frappe.local, "_upande_base_price_list", None)
+	if cached:
+		return cached
+
+	rows = frappe.db.sql(
+		"""
+		SELECT ip.price_list AS price_list, COUNT(*) AS c
+		FROM `tabItem Price` ip
+		JOIN `tabPrice List` pl ON pl.name = ip.price_list
+		WHERE pl.selling = 1 AND pl.enabled = 1
+		GROUP BY ip.price_list
+		ORDER BY c DESC
+		LIMIT 1
+		""",
+		as_dict=True,
+	)
+	if rows:
+		frappe.local._upande_base_price_list = rows[0].price_list
+		return rows[0].price_list
+
+	from upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices import (
+		_resolve_price_list,
+	)
+
+	return _resolve_price_list()
+
+
+def _customer_default_price_list(customer_name):
+	"""Customer's default price list (or its Customer Group's), read without a
+	permission check. Portal/Website users can't `get_doc("Customer")`, so we
+	read fields directly via the DB.
+	"""
+	if not customer_name:
+		return None
+	pl, group = frappe.db.get_value(
+		"Customer", customer_name, ["default_price_list", "customer_group"]
+	) or (None, None)
+	if pl:
+		return pl
+	if group:
+		return frappe.db.get_value("Customer Group", group, "default_price_list")
+	return None
+
+
+def _set_price_list(cart_settings, quotation=None):
+	"""Resolve the selling price list used to *read* item rates.
+
+	Currency is handled separately (the order currency is forced to the
+	customer's accounting currency and ERPNext converts via exchange rates).
+	So here we want the price list that actually has prices:
+
+	  1. Customer's explicit default_price_list — only if it carries Item Prices.
+	  2. The base catalog price list (the populated one), converted by FX.
+	"""
 	party_name = _cart_party_name(quotation) if quotation else get_party().get("name")
 	selling_price_list = None
 
-	# check if default customer price list exists
 	if party_name and frappe.db.exists("Customer", party_name):
-		selling_price_list = get_default_price_list(
-			frappe.get_doc("Customer", party_name)
-		)
+		customer_pl = _customer_default_price_list(party_name)
+		if _price_list_has_items(customer_pl):
+			selling_price_list = customer_pl
 
-	# check default price list in shopping cart
+	# Fall back to the populated base catalog (FX converts to customer currency).
 	if not selling_price_list:
-		selling_price_list = cart_settings.price_list
+		selling_price_list = _base_price_list()
 
 	if quotation:
 		quotation.selling_price_list = selling_price_list
@@ -1509,9 +1665,13 @@ def update_cart_line_code(line_code=None):
 	document. Sidebar-style edit, no pricing/stock revalidation needed."""
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_line_code"):
-		frappe.throw(_("Line Code field is not configured on this cart."))
+		frappe.throw(
+			_("Line Code is not set up yet. Open the Webshop Setup page to add it: {0}").format(
+				'<a href="/webshop-setup">/webshop-setup</a>'
+			)
+		)
 
-	value = (line_code or "").strip() or None
+	value = ((line_code or "").strip().upper()) or None
 	frappe.db.set_value(
 		quotation.doctype, quotation.name, "custom_line_code", value, update_modified=False
 	)
@@ -1522,9 +1682,13 @@ def update_cart_line_code(line_code=None):
 def update_cart_delivery_point(delivery_point):
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_delivery_point"):
-		frappe.throw(_("Delivery Point field is not configured on this cart."))
+		frappe.throw(
+			_("Delivery Point is not set up yet. Open the Webshop Setup page to add it: {0}").format(
+				'<a href="/webshop-setup">/webshop-setup</a>'
+			)
+		)
 
-	if delivery_point and not frappe.db.exists("Delivery Points", delivery_point):
+	if delivery_point and not frappe.db.exists("Delivery Point", delivery_point):
 		frappe.throw(_("Delivery Point {0} does not exist.").format(delivery_point))
 
 	quotation.custom_delivery_point = delivery_point or None
@@ -1538,7 +1702,7 @@ def search_delivery_points(txt=None, limit=20):
 	"""Storefront Link-search for the cart's Delivery Point field.
 
 	Customers logging in via the webshop don't usually have any role with read
-	access to Delivery Points, so the standard Link autocomplete returns nothing.
+	access to Delivery Point, so the standard Link autocomplete returns nothing.
 	This whitelisted helper ignores permissions and returns name + label."""
 	if not _get_cart_quotation():
 		return []
@@ -1550,7 +1714,7 @@ def search_delivery_points(txt=None, limit=20):
 
 	rows = frappe.db.sql(
 		f"""
-		SELECT name FROM `tabDelivery Points`
+		SELECT name FROM `tabDelivery Point`
 		{conditions}
 		ORDER BY name ASC
 		LIMIT %(limit)s
@@ -1562,13 +1726,23 @@ def search_delivery_points(txt=None, limit=20):
 
 
 @frappe.whitelist()
+def search_delivery_points_link(doctype, txt=None, searchfield=None, start=0, page_length=10, filters=None, as_dict=False, reference_doctype=None, ignore_user_permissions=False, link_fieldname=None):
+	"""Link field search wrapper for Delivery Point, compatible with frappe.desk.search.search_link."""
+	return search_delivery_points(txt=txt, limit=page_length)
+
+
+@frappe.whitelist()
 def update_cart_box_type(box_type):
 	"""Cart-level Box Type. Saves on Quotation.custom_box_type and overwrites
 	every Quotation Item's custom_box_type so pricing / min_order_qty derive
 	from the single cart-level choice."""
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_box_type"):
-		frappe.throw(_("Box Type field is not configured on this cart."))
+		frappe.throw(
+			_("Box Type is not set up yet. Open the Webshop Setup page to add it: {0}").format(
+				'<a href="/webshop-setup">/webshop-setup</a>'
+			)
+		)
 
 	if box_type and not frappe.db.exists("Box Type", box_type):
 		frappe.throw(_("Box Type {0} does not exist.").format(box_type))
@@ -1616,20 +1790,72 @@ def search_box_types(txt=None, limit=20):
 
 
 @frappe.whitelist()
-def get_item_price_for_configure(item_code):
-	"""Return per-stem price for a variant item, used in the configure dialog."""
-	cart_settings = frappe.get_cached_doc("Webshop Settings")
-	price_list = cart_settings.price_list
+def search_box_types_link(doctype, txt=None, searchfield=None, start=0, page_length=10, filters=None, as_dict=False, reference_doctype=None, ignore_user_permissions=False, link_fieldname=None):
+	"""Link field search wrapper for Box Type, compatible with frappe.desk.search.search_link."""
+	return search_box_types(txt=txt, limit=page_length)
 
-	try:
-		party = get_party()
-		if party:
-			from erpnext.accounts.party import get_default_price_list
-			customer_pl = get_default_price_list(party)
-			if customer_pl:
-				price_list = customer_pl
-	except Exception:
-		pass
+
+def _session_customer_name():
+	"""Customer linked to the current user, read without permission checks
+	(portal users can't get_doc Customer/Contact). Mirrors how get_party()
+	resolves the party: Portal User first, then Contact's Dynamic Link.
+	"""
+	user = frappe.session.user
+	if not user or user == "Guest":
+		return None
+
+	# Portal User is how the cart links a web user to a Customer.
+	customer = frappe.db.get_value(
+		"Portal User", {"user": user, "parenttype": "Customer"}, "parent"
+	)
+	if customer:
+		return customer
+
+	contact = frappe.db.get_value("Contact", {"email_id": user}, "name") or frappe.db.get_value(
+		"Contact", {"user": user}, "name"
+	)
+	if not contact:
+		return None
+	return frappe.db.get_value(
+		"Dynamic Link",
+		{"parent": contact, "parenttype": "Contact", "link_doctype": "Customer"},
+		"link_name",
+	)
+
+
+def _session_display_currency(base_currency):
+	"""Currency to show the current session. Logged-in customer's
+	default_currency if set, else the base catalog currency.
+	"""
+	customer = _session_customer_name()
+	if customer:
+		currency = frappe.db.get_value("Customer", customer, "default_currency")
+		if currency:
+			return currency
+	return base_currency
+
+
+def _convert_rate(rate, from_currency, to_currency):
+	"""Convert a rate between currencies via ERPNext selling exchange rates."""
+	if not rate or not from_currency or not to_currency or from_currency == to_currency:
+		return rate
+	from erpnext.setup.utils import get_exchange_rate
+
+	fx = flt(get_exchange_rate(from_currency, to_currency, args="for_selling"))
+	return flt(rate) * fx if fx else rate
+
+
+@frappe.whitelist()
+def get_item_price_for_configure(item_code):
+	"""Return per-stem price for a variant item, used in the configure dialog.
+
+	Reads the rate from the populated base catalog, then converts to the
+	customer's display currency via exchange rates so the storefront shows each
+	customer their own currency — matching what the cart will charge.
+	"""
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	price_list = _set_price_list(cart_settings, None)
+	base_currency = frappe.db.get_value("Price List", price_list, "currency")
 
 	stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
 
@@ -1648,4 +1874,13 @@ def get_item_price_for_configure(item_code):
 			as_dict=True,
 		)
 
-	return price or {}
+	if not price:
+		return {}
+
+	from_currency = price.get("currency") or base_currency
+	to_currency = _session_display_currency(from_currency)
+	price["price_list_rate"] = _convert_rate(
+		price.get("price_list_rate"), from_currency, to_currency
+	)
+	price["currency"] = to_currency
+	return price

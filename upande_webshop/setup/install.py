@@ -70,17 +70,15 @@ def resync_app_resources():
 				)
 
 
-def _has_quotation_business_unit():
-	"""The Quotation Item length fields depend on `Quotation.custom_business_unit == "Roses"`.
-	On sites that don't have that driver field (e.g. mona, tambuzi) the eval is
-	always falsy, so creating these fields would just leak hidden columns that
-	core code might still try to populate. Skip them when the driver is absent.
-	"""
-	return bool(
-		frappe.db.get_value(
-			"Custom Field", {"dt": "Quotation", "fieldname": "custom_business_unit"}, "name"
-		)
-	)
+def remove_legacy_pages():
+	"""Delete Page records this app once shipped but no longer does.
+
+	The "Bulk Publish Items" feature moved from a standalone Desk Page into the
+	Webshop Settings dialog; its backend now lives in webshop_settings.py. The
+	on-disk page was deleted, but the DB record lingers on already-installed
+	sites, so drop it explicitly. Safe to run repeatedly."""
+	if frappe.db.exists("Page", "bulk-publish-items"):
+		frappe.delete_doc("Page", "bulk-publish-items", force=True, ignore_permissions=True)
 
 
 def add_custom_fields():
@@ -90,7 +88,7 @@ def add_custom_fields():
 				"fieldname": "custom_delivery_point",
 				"fieldtype": "Link",
 				"label": "Delivery Point",
-				"options": "Delivery Points",
+				"options": "Delivery Point",
 				"insert_after": "shipping_address_name",
 			},
 			{
@@ -251,31 +249,10 @@ def add_custom_fields():
 				"fieldname": "enable_variants",
 				"fieldtype": "Check",
 				"label": "Enable Variant Selector",
-				"insert_after": "show_variants",
-				"description": "Render the variant selector (Stem Length / Box Type pills) on product pages of items with has_variants=1.",
+				"insert_after": "show_stem_length",
 			},
 		],
 	}
-
-	if _has_quotation_business_unit():
-		custom_fields["Quotation Item"] = [
-			{
-				"fieldname": "custom_length",
-				"fieldtype": "Link",
-				"label": "Length",
-				"options": "Stem Length",
-				"insert_after": "stock_uom",
-				"depends_on": "eval: parent.custom_business_unit == \"Roses\"",
-				"mandatory_depends_on": "eval: parent.custom_business_unit == \"Roses\"",
-			},
-			{
-				"fieldname": "custom_total_stems",
-				"fieldtype": "Float",
-				"label": "Total Stems",
-				"insert_after": "custom_length",
-				"read_only": 1,
-			},
-		]
 
 	frappe.make_property_setter(
 		{

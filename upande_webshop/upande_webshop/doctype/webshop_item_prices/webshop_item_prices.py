@@ -132,7 +132,12 @@ USD_PRICE_LIST = "USD Price List"
 
 
 def _resolve_price_list():
-	configured = frappe.db.get_single_value("Webshop Settings", "price_list")
+	# Webshop Settings.price_list was removed — currency now follows the
+	# customer's own price list, with USD as the guest/sync fallback. Guard the
+	# read so a leftover value (pre-migration) is still honored if present.
+	configured = None
+	if frappe.get_meta("Webshop Settings").has_field("price_list"):
+		configured = frappe.db.get_single_value("Webshop Settings", "price_list")
 	if configured and frappe.db.exists("Price List", configured):
 		return configured
 	if frappe.db.exists("Price List", USD_PRICE_LIST):
@@ -817,6 +822,94 @@ def enqueue_repost_for_website_items(run_async=True):
 		queue="long",
 		timeout=3600,
 		job_name="Webshop Repost Bin (all Website Items)",
+		progress_user=user,
+		enqueue_after_commit=True,
+	)
+	return {"enqueued": True}
+
+
+def _non_variant_rose_items():
+	"""All enabled non-variant rose / David Austin item_codes.
+
+	Mirrors the item set the retired ``backfill_per_length_item_prices`` patch
+	walked: plain items (not templates, not variants) whose item group matches
+	the rose regexp. Per-length Item Prices only apply to this set; variants
+	encode their length in the item code instead.
+	"""
+	return frappe.db.sql(
+		"""
+		SELECT name
+		FROM tabItem
+		WHERE disabled = 0
+		  AND has_variants = 0
+		  AND (variant_of IS NULL OR variant_of = '')
+		  AND item_group REGEXP %s
+		""",
+		(_ROSE_ITEM_GROUP_REGEXP,),
+		pluck="name",
+	)
+
+
+def _backfill_per_length_prices(progress_user=None):
+	"""Seed per-length Item Price rows for every non-variant rose item.
+
+	On-demand replacement for the retired backfill patch: loops the rose item
+	set and calls ``ensure_per_length_item_prices`` on each. Idempotent — items
+	that already have per-length rows produce no new rows. Returns a summary.
+	"""
+	if not frappe.db.has_column("Item Price", "custom_length"):
+		_publish_repost(progress_user, 100, "Skipped: Item Price.custom_length field is missing.")
+		return {"items": 0, "created": 0, "reason": "custom_length field missing"}
+
+	items = _non_variant_rose_items()
+	total = len(items)
+	if not total:
+		_publish_repost(progress_user, 100, "No non-variant rose items found.")
+		return {"items": 0, "created": 0}
+
+	_publish_repost(progress_user, 1, f"Backfilling per-length prices for {total} item(s)...")
+
+	created_total = 0
+	processed = 0
+	for item_code in items:
+		processed += 1
+		try:
+			created_total += ensure_per_length_item_prices(item_code)
+		except Exception as e:
+			frappe.log_error(
+				title="Webshop Per-Length Backfill",
+				message=f"backfill failed for {item_code}: {e}",
+			)
+		if processed % 10 == 0 or processed == total:
+			pct = max(1, int((processed / total) * 100))
+			_publish_repost(progress_user, pct, f"Created {created_total} row(s) ({processed}/{total})")
+
+	_publish_repost(progress_user, 100, f"Done. Created {created_total} per-length price row(s) across {total} item(s).")
+	frappe.db.commit()
+	return {"items": total, "created": created_total}
+
+
+@frappe.whitelist()
+def enqueue_backfill_per_length_prices(run_async=True):
+	"""First-run seeding of per-length Item Prices for non-variant rose items.
+
+	Triggered manually from Webshop Settings — NOT on install/migrate. The
+	ongoing per-item maintenance still runs via the Item ``validate`` hook;
+	this only fills in items that pre-date that hook. Publishes progress on the
+	shared ``webshop_prices_sync_progress`` channel.
+	"""
+	if isinstance(run_async, str):
+		run_async = run_async.lower() not in ("0", "false", "no", "")
+
+	if not run_async:
+		return _backfill_per_length_prices(progress_user=None)
+
+	user = frappe.session.user
+	frappe.enqueue(
+		"upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices._backfill_per_length_prices",
+		queue="long",
+		timeout=3600,
+		job_name="Webshop Backfill Per-Length Prices",
 		progress_user=user,
 		enqueue_after_commit=True,
 	)

@@ -1,0 +1,48 @@
+{# Inline variant selector root markup. Mounted by
+`window.upande_webshop.mount_variant_selectors`. Caller must set:
+  - vsel_item_code  : template item_code
+  - vsel_item_name  : display name (data-item-name)
+  - cart_settings   : shopping cart settings (enable_variants / show_bunch / ...)
+Used by the product detail page and the wishlist so both share one markup. #}
+<div class="mt-3 inline-variant-selector"
+	data-item-code="{{ vsel_item_code }}"
+	data-item-name="{{ vsel_item_name }}"
+	{% if vsel_compact %}data-compact="1"{% endif %}>
+
+	{% if cart_settings.enable_variants | int %}
+	<div class="variant-attributes-area">
+		<div class="variant-attributes-loading" style="color:var(--gray-500); font-size:13px;">
+			{{ _('Loading variant options...') }}
+		</div>
+	</div>
+
+	<div class="pack-rate-display mt-3" style="min-height:20px;"></div>
+
+	<div class="variant-status-area mt-2"></div>
+
+	{% if cart_settings.show_bunch | int %}
+	<div class="mt-4 variant-rows-area" style="display:none;">
+		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
+			{{ _('Selected variants') }}
+		</label>
+		<div class="variant-rows" style="display:flex; flex-direction:column; gap:10px;"></div>
+		<div class="grand-totals mt-3" style="display:none; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--gray-700);">
+			<div><strong class="grand-bunches">0</strong> {{ _('bunches') }}</div>
+			<div><strong class="grand-stems">0</strong> {{ _('stems') }}</div>
+		</div>
+	</div>
+	{% endif %}
+
+	<div class="price-display mt-2 p-2" style="min-height:28px; border-radius:6px;"></div>
+
+	<div class="d-flex flex-wrap mt-3" style="gap:8px;">
+		<button class="btn btn-primary btn-add-to-cart-variant" disabled>
+			{{ _('Add to Cart') }}
+		</button>
+
+		{% if cart_settings.show_contact_us_button %}
+			{% include "templates/generators/item/item_inquiry.html" %}
+		{% endif %}
+	</div>
+	{% endif %}
+</div>
