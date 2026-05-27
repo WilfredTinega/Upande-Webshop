@@ -6,17 +6,15 @@ import math
 from datetime import datetime
 from frappe.utils import now_datetime, add_to_date
 
-# ================= SAFE LOGGING UTILITY =================
 def safe_log(message, title=None, log_type="info"):
-    """
-    Safe logging that prevents CharacterLengthExceededError
-    """
+    """Log via the logger, truncating to avoid CharacterLengthExceededError;
+    errors are also written to the Error Log."""
     message_str = str(message)
     if len(message_str) > 200:
         message_str = message_str[:200] + "..."
-    
+
     logger = frappe.logger()
-    
+
     if log_type == "error":
         logger.error(f"{title or 'ERROR'}: {message_str}")
         if title and "Error" in title:
@@ -29,13 +27,9 @@ def safe_log(message, title=None, log_type="info"):
         logger.debug(f"{title or 'DEBUG'}: {message_str}")
     else:
         logger.info(f"{title or 'INFO'}: {message_str}")
-# =========================================================
 
 def get_delivery_gln_from_sales_order(sales_order):
-    """
-    Get the Floriday delivery GLN for a Sales Order from its
-    custom_floriday_delivery_id field. Returns None if missing.
-    """
+    """Return the Sales Order's custom_floriday_delivery_id, or None if missing."""
     try:
         gln = sales_order.get('custom_floriday_delivery_id')
         if gln:
@@ -58,25 +52,25 @@ def get_delivery_remarks(sales_order):
     remarks = ""
     if hasattr(sales_order, 'delivery_notes') and sales_order.delivery_notes:
         remarks = sales_order.delivery_notes
-    
+
     if not remarks or len(remarks.strip()) == 0:
         remarks = "Standard delivery"
-    
+
     if len(remarks) > 100:
         remarks = remarks[:97] + "..."
-    
+
     return remarks
 
 def get_commercial_invoice_reference(floriday_order_id, sales_order_name):
     """Generate commercial invoice reference with max length of 26 characters"""
     short_uuid = floriday_order_id[-10:] if len(floriday_order_id) > 10 else floriday_order_id
     short_so = sales_order_name[-8:] if len(sales_order_name) > 8 else sales_order_name
-    
+
     reference = f"{short_uuid}-{short_so}"
-    
+
     if len(reference) > 26:
         reference = reference[:26]
-    
+
     return reference
 
 def get_load_carrier_reference(sales_order_name):
@@ -85,7 +79,7 @@ def get_load_carrier_reference(sales_order_name):
         reference = sales_order_name[-14:]
     else:
         reference = sales_order_name.zfill(14)
-    
+
     return reference
 
 def get_fulfillment_request_id(base_url, headers, sales_order_id):
@@ -134,7 +128,7 @@ def update_delivery_note_with_fulfillment(sales_order_name, fulfillment_id):
             fields=["name"],
             limit=1
         )
-        
+
         if delivery_notes:
             delivery_note = frappe.get_doc("Delivery Note", delivery_notes[0].name)
             current_remarks = delivery_note.remarks or ""
@@ -143,16 +137,14 @@ def update_delivery_note_with_fulfillment(sales_order_name, fulfillment_id):
             delivery_note.save()
             frappe.db.commit()
             safe_log(f"Updated Delivery Note {delivery_note.name} with fulfillment ID", "Delivery Note Update", "info")
-            
+
     except Exception as e:
         safe_log(f"Could not update delivery note: {str(e)}", "Delivery Note Update Error", "warning")
 
 @frappe.whitelist()
 def order_fullment():
-    """
-    Creates fulfillment orders in Floriday for Sales Orders created in the last 1 hour.
-    Uses POST /fulfillment-orders endpoint.
-    """
+    """Create Floriday fulfillment orders (POST /fulfillment-orders) for Sales
+    Orders submitted in the last 24 hours."""
     logger = frappe.logger()
 
     def step(msg):
@@ -160,7 +152,7 @@ def order_fullment():
 
     try:
         now = now_datetime()
-        start_time = add_to_date(now, hours=-1)
+        start_time = add_to_date(now, hours=-24)
         step(f"STEP 1: Started. now={now}, looking back to {start_time}")
 
         # ── Settings ────────────────────────────────────────────────────────
@@ -185,7 +177,7 @@ def order_fullment():
             "Accept": "text/plain"
         }
 
-        # ── Query Sales Orders (Last 1 hour) ────────────────────────────────
+        # ── Query Sales Orders (Last 24 hours) ──────────────────────────────
         # Identify Floriday-sourced orders by the customer having a custom_floriday_id.
         # Every customer created or matched by create_sales_order_from_floriday has this set.
         # Pull the Sales Order's own custom_floriday_delivery_id if the column exists,
@@ -205,15 +197,15 @@ def order_fullment():
               AND c.custom_floriday_id != ''
             ORDER BY so.creation DESC
         """, {"start_time": start_time}, as_dict=True)
-        step(f"STEP 3: Orders in last 1 hour: {len(sales_orders)}")
+        step(f"STEP 3: Orders in last 24 hours: {len(sales_orders)}")
 
         if not sales_orders:
-            step("STEP 3: No orders in last 1 hour — nothing to fulfill")
+            step("STEP 3: No orders in last 24 hours — nothing to fulfill")
             return {
                 "status": "success",
                 "message": (
-                    "No Floriday Sales Orders found in the last 1 hour. "
-                    "Tip: only orders submitted within the past hour, with a customer "
+                    "No Floriday Sales Orders found in the last 24 hours. "
+                    "Tip: only orders submitted within the past 24 hours, with a customer "
                     "tagged with custom_floriday_id, are eligible."
                 ),
                 "results": [],
@@ -258,7 +250,7 @@ def order_fullment():
                     float(item.stock_qty or (item.qty or 0) * (item.conversion_factor or 1))
                     for item in sales_order.items
                 )
-                
+
                 if total_stems <= 0:
                     step(f"  STEP 4b ERROR: Total stems is 0 for {sales_order_name}")
                     error_count += 1
@@ -268,31 +260,28 @@ def order_fullment():
                         "message": "Total stems quantity is 0"
                     })
                     continue
-                
+
                 number_of_packages = math.ceil(total_stems / 200)
                 step(f"  STEP 4b: Total stems = {total_stems}, Packages = {number_of_packages}")
-                
-                # Get delivery GLN
+
                 delivery_gln = get_delivery_gln_from_sales_order(sales_order)
                 if not delivery_gln:
                     delivery_gln = get_default_gln()
                     safe_log(f"Using default GLN {delivery_gln}", "Default GLN Used", "warning")
-                
-                # In Floriday's DIRECT_SALES flow, the fulfillmentRequestId = salesOrderId (po_no).
-                # There is no separate lookup endpoint needed.
+
+                # In Floriday's DIRECT_SALES flow the fulfillmentRequestId is the
+                # salesOrderId (po_no) — no separate lookup endpoint is needed.
                 fulfillment_request_id = floriday_order_id
 
-                # Generate references
                 load_carrier_reference = get_load_carrier_reference(sales_order_name)
                 commercial_invoice_ref = get_commercial_invoice_reference(floriday_order_id, sales_order_name)
                 delivery_remarks = get_delivery_remarks(sales_order)
-                
+
                 # Generate a new UUID for the fulfillmentOrderId — this is OUR identifier for this fulfillment,
                 # NOT the buyer's salesOrderId (floriday_order_id). Reusing po_no causes the 400 error.
                 new_fulfillment_order_id = str(uuid.uuid4())
                 step(f"  STEP 4c: fulfillmentRequestId={fulfillment_request_id}, new fulfillmentOrderId={new_fulfillment_order_id}")
 
-                # Build the fulfillment order payload exactly as per curl example
                 fulfillment_payload = {
                     "fulfillmentOrderId": new_fulfillment_order_id,
                     "carrierOrganizationId": SUPPLIER_ORG_ID,
@@ -324,13 +313,12 @@ def order_fullment():
                 response = requests.post(endpoint, headers=headers, json=fulfillment_payload, timeout=30)
 
                 step(f"  STEP 4e: Response status={response.status_code}")
-                
+
                 if response.status_code in (200, 201):
                     response_data = response.json() if response.text else {}
                     fulfillment_id = response_data.get("fulfillmentOrderId", new_fulfillment_order_id)
                     step(f"  STEP 4f SUCCESS: fulfillment_id={fulfillment_id}")
 
-                    # Update Sales Order
                     current_remarks = sales_order.get("remarks") or ""
                     sales_order.remarks = (
                         current_remarks

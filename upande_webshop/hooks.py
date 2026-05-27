@@ -1,7 +1,7 @@
 from . import __version__ as _version
 
 app_name = "upande_webshop"
-app_title = "Webshop"
+app_title = "Upande Webshop"
 app_publisher = "Upande LTD"
 app_description = "Upande Webshop"
 app_email = "wilfred@upande.com"
@@ -250,6 +250,10 @@ before_migrate = [
 #      skips files whose `modified` is older than the DB record, so once the
 #      workspace is edited in the UI new shortcuts in the JSON never reach the
 #      site. We bypass that with reload_doc(..., force=True).
+#   1b. normalize_webshop_workspace — runs right after the resync so the
+#      reloaded JSON can't leave name/title/label out of sync. Forces them all
+#      to "Upande Webshop" and clears any self-referential parent_page, so the
+#      Desk icon always opens /app/upande-webshop instead of a 404.
 #   2. add_custom_fields — re-applies custom field definitions (Item Group,
 #      Item Price, Website Item, Quotation Item, …) so additions show up
 #      without reinstall.
@@ -269,6 +273,8 @@ before_migrate = [
 after_migrate = [
 	"upande_webshop.setup.install.remove_legacy_pages",
 	"upande_webshop.setup.install.resync_app_resources",
+	"upande_webshop.setup.install.normalize_webshop_workspace",
+	"upande_webshop.setup.install.ensure_desktop_icon",
 	"upande_webshop.setup.install.add_custom_fields",
 	"upande_webshop.setup.install.ensure_variant_attributes",
 	"upande_webshop.setup.install.apply_webshop_settings_defaults",

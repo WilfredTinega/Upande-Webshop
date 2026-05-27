@@ -15,16 +15,11 @@ def log_short(msg, title="Floriday", is_error=True):
         _logger.info(f"[{title}] {msg}")
 
 def generate_custom_order_name(customer_name):
-    """
-    Generates a custom order name in format: CustomerName-XXX
-    where XXX is a sequential number for that customer
-    """
+    """Generate a sequential per-customer order name: CustomerName-XXX."""
     try:
-        # Clean customer name
         clean_name = ''.join(c for c in customer_name if c.isalnum() or c == ' ').strip()
         clean_name = clean_name.replace(' ', '-')[:20]
 
-        # Find the latest order for this customer
         latest_order = frappe.db.sql("""
             SELECT custom_order_name
             FROM `tabSales Order`
@@ -447,10 +442,7 @@ def _force_floriday_amounts_in_db(sales_order):
 
 @frappe.whitelist()
 def create_sales_orders_from_floriday():
-    """
-    Fetches orders from Floriday API and creates corresponding Sales Orders in ERPNext.
-    Only processes orders from the last 2 hours.
-    """
+    """Fetch Floriday orders from the last 24 hours and create matching Sales Orders."""
     try:
         settings = frappe.get_single("Floriday Settings")
 
@@ -460,14 +452,12 @@ def create_sales_orders_from_floriday():
         SUPPLIER_ORG_ID = settings.organization_supplier_id
         WAREHOUSE = settings.warehouse
 
-        # Validate required settings
         if not all([API_KEY, BASE_URL, ACCESS_TOKEN, SUPPLIER_ORG_ID]):
             frappe.throw("Floriday Settings incomplete")
 
         if not WAREHOUSE:
             frappe.throw("Warehouse not configured in Floriday Settings")
 
-        # Set date range for last 24 hours
         end_date = datetime.now(timezone.utc)
         start_date = end_date - timedelta(hours=24)
 
@@ -502,19 +492,20 @@ def create_sales_orders_from_floriday():
 
         orders = response.json()
 
-        # Log first sales order JSON for examination
+        # Dump the first order's raw JSON to the error log so the payload shape
+        # can be inspected when mappings change.
         if orders and len(orders) > 0:
             first_order = orders[0]
             first_order_json = json.dumps(first_order, indent=2, default=str)
-            
+
             frappe.log_error(
                 title="Floriday - First Sales Order JSON",
                 message=f"First sales order received from Floriday API:\n\n{first_order_json}\n\n"
                         f"Total orders received: {len(orders)}\n"
                         f"Date range: {start_date.isoformat()} to {end_date.isoformat()}"
             )
-            
-            log_short(f"First order ID: {first_order.get('salesOrderId', 'N/A')} - Total orders: {len(orders)}", 
+
+            log_short(f"First order ID: {first_order.get('salesOrderId', 'N/A')} - Total orders: {len(orders)}",
                      "Floriday First Order", False)
 
         if len(orders) >= 1000:
@@ -568,8 +559,6 @@ def create_sales_orders_from_floriday():
             try:
                 sales_order = create_sales_order_from_floriday(order, WAREHOUSE, settings)
                 processed_count += 1
-
-                # Log successful sales order creation
                 log_short(f"SO {sales_order.name} created for Floriday order {order_id}", "Floriday Success", False)
 
                 results.append({
@@ -589,14 +578,12 @@ def create_sales_orders_from_floriday():
                     "error": str(e)
                 })
 
-        # Log summary only if there are errors or no orders
         if error_count > 0 or processed_count == 0:
             log_short(
                 f"Sync: P={processed_count}, F={date_filtered_count}, S={skipped_count}, D={duplicate_count}, E={error_count}",
                 "Floriday Summary", True,
             )
         else:
-            # Log success summary when orders were created
             log_short(f"Success: {processed_count} orders created", "Floriday Success", False)
 
         return {
@@ -621,10 +608,8 @@ def create_sales_orders_from_floriday():
 
 
 def create_sales_order_from_floriday(floriday_order, warehouse, settings=None):
-    """
-    Creates a Sales Order in ERPNext from a Floriday order.
-    Extracts and saves delivery location GLN to custom_delivery_point field.
-    """
+    """Create one ERPNext Sales Order from a Floriday order, resolving the
+    delivery GLN to a Delivery Point and writing per-bunch amounts directly."""
     floriday_order_id = floriday_order.get("salesOrderId")
     if not floriday_order_id:
         frappe.throw("Floriday order missing salesOrderId")
@@ -639,33 +624,29 @@ def create_sales_order_from_floriday(floriday_order, warehouse, settings=None):
         # The outer sync loop catches this and counts it.
         raise Exception(f"Sales Order already exists for Floriday order {floriday_order_id}")
 
-    # Get or create customer using Floriday ID mapping
     customer = get_or_create_customer(floriday_order, settings=settings)
 
     delivery_datetime = parse_floriday_datetime(floriday_order.get("delivery", {}).get("latestDeliveryDateTime"), default=datetime.now(timezone.utc) + timedelta(days=1))
     order_datetime = parse_floriday_datetime(floriday_order.get("orderDateTime"))
 
-    # Extract delivery location GLN from Floriday order
     delivery_gln = None
     delivery_address = None
     delivery_city = None
     delivery_country = None
     delivery_postal_code = None
-    
+
     delivery_info = floriday_order.get("delivery", {})
     if delivery_info:
         location_info = delivery_info.get("location", {})
         if location_info:
             delivery_gln = location_info.get("gln")
-            
-            # Extract address details if available
             address_info = location_info.get("address", {})
             if address_info:
                 delivery_address = address_info.get("addressLine")
                 delivery_city = address_info.get("city")
                 delivery_country = address_info.get("countryCode")
                 delivery_postal_code = address_info.get("postalCode")
-    
+
     sales_order = frappe.new_doc("Sales Order")
     sales_order.customer = customer
     sales_order.transaction_date = order_datetime.date()
@@ -697,7 +678,7 @@ def create_sales_order_from_floriday(floriday_order, warehouse, settings=None):
     if delivery_gln and frappe.db.has_column("Sales Order", "custom_floriday_delivery_id"):
         sales_order.custom_floriday_delivery_id = delivery_gln
 
-    # Optionally save address details if you have custom fields for them
+    # Save address details to their Custom Fields when present on this site.
     if hasattr(sales_order, 'custom_delivery_address') and delivery_address:
         sales_order.custom_delivery_address = delivery_address
     if hasattr(sales_order, 'custom_delivery_city') and delivery_city:
@@ -707,7 +688,6 @@ def create_sales_order_from_floriday(floriday_order, warehouse, settings=None):
     if hasattr(sales_order, 'custom_delivery_postal_code') and delivery_postal_code:
         sales_order.custom_delivery_postal_code = delivery_postal_code
 
-    # Set currency
     price_info = floriday_order.get("pricePerPiece", {})
     transaction_currency = price_info.get("currency", "EUR")
     sales_order.currency = transaction_currency
@@ -718,7 +698,6 @@ Supplier: {floriday_order.get("supplierOrganizationId")}
 Delivery GLN: {delivery_gln if delivery_gln else 'Not provided'}
 Delivery Point: {delivery_point_name or 'Not resolved'}"""
 
-    # Add items
     trade_item_id = floriday_order.get("tradeItemId")
 
     if trade_item_id:
@@ -731,7 +710,6 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
 
             farm, business_unit, company_from_stock_entry = get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code)
 
-            # Set company
             if company_from_stock_entry:
                 sales_order.company = company_from_stock_entry
             elif settings and settings.company:
@@ -741,7 +719,6 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
                 if companies:
                     sales_order.company = companies[0].name
 
-            # Use warehouse from Floriday Settings
             item_warehouse = warehouse
 
             if not item_warehouse:
@@ -764,11 +741,10 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
                     else:
                         frappe.throw(f"No warehouse found for item {item_code}")
 
-            # qty is in the Item's default sales UOM (e.g. 'Bunch (10)'), rate is per that
-            # qty in bunches, rate per bunch — read both from the Item's master data.
-            # The site override would compute amount = rate × stock_qty (wrong here);
-            # we let it run, then overwrite the per-line amounts and order totals in
-            # the DB via _force_floriday_amounts_in_db() after submit.
+            # Sell in the Item's default sales UOM (e.g. 'Bunch (10)'): qty in bunches,
+            # rate per bunch. The site override computes amount = rate × stock_qty
+            # (wrong here), so we let it run and overwrite the amounts afterwards via
+            # _force_floriday_amounts_in_db().
             sales_uom, conversion_factor = get_item_sales_uom_and_factor(item_code)
             if conversion_factor <= 0:
                 raise Exception(
@@ -793,7 +769,6 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
             item.custom_ordered_quantity = number_of_pieces
             item.custom_source_warehouse = item_warehouse
 
-            # Set farm and business unit
             if farm:
                 sales_order.custom_farm = farm
             if business_unit:
@@ -811,7 +786,6 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
     if hasattr(sales_order, 'custom_ordered_stems'):
         sales_order.custom_ordered_stems = total_ordered_stems
 
-    # Set conversion rate
     if sales_order.company:
         company_currency = frappe.get_cached_value('Company', sales_order.company, 'default_currency')
 
@@ -882,9 +856,7 @@ def get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code):
 
 
 def get_exchange_rate(from_currency, to_currency, date):
-    """
-    Get exchange rate between currencies
-    """
+    """Latest Currency Exchange rate on or before `date`, or None."""
     try:
         exchange_rate = frappe.db.sql("""
             SELECT exchange_rate
@@ -1037,9 +1009,7 @@ def create_new_customer(floriday_order, customer_org_id, settings=None, resolved
 
 
 def get_default_customer():
-    """
-    Returns a default customer for orders without valid customer mapping
-    """
+    """Get/create the fallback customer used when no Floriday mapping resolves."""
     default_customer = "Floriday-Default-Customer"
     try:
         customer = frappe.get_doc({
@@ -1098,9 +1068,7 @@ def parse_floriday_datetime(date_str, default=None):
 
 @frappe.whitelist()
 def get_sync_status():
-    """
-    Returns the status of the last Floriday sync operation
-    """
+    """Return the most recent Floriday-related Error Log entry."""
     try:
         latest_log = frappe.get_all("Error Log",
             filters={"method": ["like", "%Floriday%"]},
@@ -1117,40 +1085,31 @@ def get_sync_status():
         return {"status": "error", "message": str(e)}
 
 
-# Helper function to manually map a Floriday GLN to a Delivery Point
 @frappe.whitelist()
 def map_delivery_point(floriday_gln, delivery_point_name):
-    """
-    Manually map a Floriday GLN to an ERPNext Delivery Point.
-    This updates the Delivery Point doctype with the custom_floriday_delivery_id field.
-    """
+    """Manually tag a Delivery Point with a Floriday GLN (custom_floriday_delivery_id)."""
     try:
         if not floriday_gln or not delivery_point_name:
             return {"status": "error", "message": "Missing GLN or Delivery Point name"}
-        
-        # Check if delivery point exists
+
         if not frappe.db.exists("Delivery Point", delivery_point_name):
             return {"status": "error", "message": f"Delivery Point {delivery_point_name} not found"}
-        
-        # Update the delivery point with the Floriday GLN
+
         frappe.db.set_value("Delivery Point", delivery_point_name, "custom_floriday_delivery_id", floriday_gln)
-        
-        log_short(f"Mapped Floriday GLN {floriday_gln} to Delivery Point {delivery_point_name}", 
+
+        log_short(f"Mapped Floriday GLN {floriday_gln} to Delivery Point {delivery_point_name}",
                  "Floriday Delivery Point Mapping", False)
-        
+
         return {"status": "success", "message": f"Mapped GLN {floriday_gln} to {delivery_point_name}"}
-        
+
     except Exception as e:
         log_short(f"Error mapping delivery point: {str(e)[:50]}", "Floriday Mapping Error", True)
         return {"status": "error", "message": str(e)}
 
 
-# Helper function to check what GLNs are currently mapped
 @frappe.whitelist()
 def get_mapped_delivery_points():
-    """
-    Returns all Delivery Points that have custom_floriday_delivery_id set
-    """
+    """Return all Delivery Points that have custom_floriday_delivery_id set."""
     try:
         delivery_points = frappe.get_all(
             "Delivery Point",
