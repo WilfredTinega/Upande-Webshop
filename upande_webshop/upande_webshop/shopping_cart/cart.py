@@ -36,6 +36,25 @@ def _cart_item_doctype():
 	return "Sales Order Item" if _cart_doctype() == "Sales Order" else "Quotation Item"
 
 
+def _delivery_point_doctype():
+	"""Return the Delivery Point doctype name as it exists on THIS site.
+
+	The doctype is named "Delivery Point" (singular) in upande_webshop and
+	upande_kaitet, but "Delivery Points" (plural) in upande_tambuzi. Some sites
+	(e.g. tambuzi) have BOTH installed — one empty, one populated — so we prefer
+	whichever actually holds records, then fall back to whichever exists. The
+	cart dropdown query and link validation then target the right table on every
+	site. Returns None if neither exists.
+	"""
+	existing = [n for n in ("Delivery Point", "Delivery Points") if frappe.db.exists("DocType", n)]
+	if not existing:
+		return None
+	# Prefer the doctype that has data — on dual-install sites the records live
+	# in only one of them.
+	populated = [n for n in existing if frappe.db.count(n)]
+	return (populated or existing)[0]
+
+
 def _cart_party_name(quotation):
 	"""Return the party name from a cart doc, regardless of doctype.
 
@@ -1688,7 +1707,8 @@ def update_cart_delivery_point(delivery_point):
 			)
 		)
 
-	if delivery_point and not frappe.db.exists("Delivery Point", delivery_point):
+	dp_doctype = _delivery_point_doctype()
+	if delivery_point and not (dp_doctype and frappe.db.exists(dp_doctype, delivery_point)):
 		frappe.throw(_("Delivery Point {0} does not exist.").format(delivery_point))
 
 	quotation.custom_delivery_point = delivery_point or None
@@ -1707,14 +1727,19 @@ def search_delivery_points(txt=None, limit=20):
 	if not _get_cart_quotation():
 		return []
 
+	dp_doctype = _delivery_point_doctype()
+	if not dp_doctype:
+		return []
+
 	conditions = ""
 	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
 	if txt:
 		conditions = "WHERE name LIKE %(txt)s"
 
+	# Table name is `tab` + doctype name — singular or plural per site.
 	rows = frappe.db.sql(
 		f"""
-		SELECT name FROM `tabDelivery Point`
+		SELECT name FROM `tab{dp_doctype}`
 		{conditions}
 		ORDER BY name ASC
 		LIMIT %(limit)s

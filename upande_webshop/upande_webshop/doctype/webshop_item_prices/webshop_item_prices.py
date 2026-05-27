@@ -164,18 +164,25 @@ class WebshopItemPrices(Document):
 		return _sync_item_prices_and_stock(self.item_code)
 
 	@frappe.whitelist()
-	def fetch_stem_length_prices(self):
+	def fetch_stem_length_prices(self, price_list=None):
 		if not self.item_code:
 			_alert("Item Code is required to fetch prices.", "red")
 			return 0
 
-		price_list = _resolve_price_list()
+		configured = _resolve_price_list()
 
 		has_variants = frappe.db.get_value("Item", self.item_code, "has_variants")
 		if has_variants:
-			latest_rate = _stem_length_rates_from_variants(self.item_code, price_list)
+			# Variant pricing resolves per variant code; the dialog's price-list
+			# choice applies to non-variant items only, so use the configured list.
+			latest_rate = _stem_length_rates_from_variants(self.item_code, configured)
 		else:
-			latest_rate = _stem_length_rates_from_item_prices(self.item_code, price_list)
+			# Non-variant: read from the selected price list (if any) and fall back
+			# per-length to the configured list. No selection → configured only.
+			primary = price_list or configured
+			latest_rate = _stem_length_rates_from_item_prices(
+				self.item_code, primary, fallback_price_list=configured
+			)
 
 		existing = {row.stem_length: row for row in self.stem_length_prices if row.stem_length}
 
@@ -240,7 +247,7 @@ def _normalize_source(source):
 
 
 @frappe.whitelist()
-def sync_prices(run_async=True, source="both"):
+def sync_prices(run_async=True, source="both", price_list=None):
 	"""Trigger a sync. By default enqueues a background job and returns immediately;
 	pass run_async=False to run inline (used by the scheduler hook).
 
@@ -248,14 +255,22 @@ def sync_prices(run_async=True, source="both"):
 	  - "item_price"         → refresh stem-length rates from Item Price only
 	  - "stock_ledger_entry" → refresh stem-length stock_qty from SLE only
 	  - "both" (default)     → refresh both in one pass
+
+	`price_list` (optional) is the primary Price List to read NON-VARIANT
+	per-length rates from (e.g. a Customer Price List chosen in the dialog); any
+	length it lacks falls back to the configured Item price list. Blank → use the
+	configured list only (original behaviour). Ignored for variant items.
 	"""
 	if isinstance(run_async, str):
 		run_async = run_async.lower() not in ("0", "false", "no", "")
 
 	source = _normalize_source(source)
+	price_list = _validate_price_list(price_list)
 
 	if not run_async:
-		return _sync_webshop_item_prices(publish_progress=False, source=source)
+		return _sync_webshop_item_prices(
+			publish_progress=False, source=source, price_list=price_list
+		)
 
 	user = frappe.session.user
 	frappe.enqueue(
@@ -266,9 +281,23 @@ def sync_prices(run_async=True, source="both"):
 		publish_progress=True,
 		progress_user=user,
 		source=source,
+		price_list=price_list,
 		enqueue_after_commit=True,
 	)
-	return {"enqueued": True, "source": source}
+	return {"enqueued": True, "source": source, "price_list": price_list}
+
+
+def _validate_price_list(price_list):
+	"""Return a usable Price List name or None. Rejects unknown values so a bad
+	dialog input doesn't silently sync from nothing."""
+	if not price_list:
+		return None
+	price_list = str(price_list).strip()
+	if not price_list:
+		return None
+	if not frappe.db.exists("Price List", price_list):
+		frappe.throw(frappe._("Price List {0} does not exist.").format(price_list))
+	return price_list
 
 
 # Back-compat alias for the original name.
@@ -332,13 +361,15 @@ def _write_stock_qty(wip_doc, qty_by_length):
 			row.stock_qty = 0
 
 
-def _sync_item_prices_and_stock(item_code, source="both"):
+def _sync_item_prices_and_stock(item_code, source="both", price_list=None):
 	"""Refresh rate and/or stock_qty for a single item.
 
 	`source`:
 	  - "item_price"         → only run fetch_stem_length_prices (rates from Item Price)
 	  - "stock_ledger_entry" → only sum SLE into Stem Length Price.stock_qty
 	  - "both"               → both, in one save
+
+	`price_list`: primary list for non-variant rate reads (see fetch_stem_length_prices).
 	"""
 	if not item_code:
 		return None
@@ -355,7 +386,7 @@ def _sync_item_prices_and_stock(item_code, source="both"):
 	doc, was_created = _find_or_create_webshop_item_prices(item)
 
 	if source in ("item_price", "both"):
-		doc.fetch_stem_length_prices()
+		doc.fetch_stem_length_prices(price_list=price_list)
 		doc.reload()
 
 	if source in ("stock_ledger_entry", "both"):
@@ -373,10 +404,12 @@ _SOURCE_LABELS = {
 }
 
 
-def _sync_webshop_item_prices(publish_progress=False, progress_user=None, source="both"):
+def _sync_webshop_item_prices(publish_progress=False, progress_user=None, source="both", price_list=None):
 	user = progress_user or (frappe.session.user if publish_progress else None)
 	source = _normalize_source(source)
 	source_label = _SOURCE_LABELS[source]
+	if price_list:
+		source_label = f"{source_label} · {price_list}"
 
 	_publish(user, 0, f"Finding website items (source: {source_label})...")
 	items = _website_items()
@@ -389,7 +422,7 @@ def _sync_webshop_item_prices(publish_progress=False, progress_user=None, source
 
 	for idx, item in enumerate(items, start=1):
 		try:
-			result = _sync_item_prices_and_stock(item.item_code, source=source)
+			result = _sync_item_prices_and_stock(item.item_code, source=source, price_list=price_list)
 			if result and result.get("created"):
 				created += 1
 			updated += 1
@@ -412,6 +445,7 @@ def _sync_webshop_item_prices(publish_progress=False, progress_user=None, source
 		"price_refreshes": updated,
 		"skipped": skipped,
 		"source": source,
+		"price_list": price_list,
 	}
 
 

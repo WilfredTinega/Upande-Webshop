@@ -214,18 +214,21 @@
 			{% include "templates/generators/item/_variant_selector_root.html" %}
 		</div>
 	{% else %}
-		<button data-item-code="{{ item.item_code }}"
-			data-custom-length="{{ item.get('default_length') or '' }}"
-			data-uom="{{ item.get('default_bunch') or '' }}"
-			{% if is_out_of_stock %}disabled{% endif %}
-			class="btn btn-primary btn-add-to-cart-list btn-add-to-cart mt-2 w-100">
-			<span class="mr-2">
-				<svg class="icon icon-md">
-					<use href="#icon-assets"></use>
-				</svg>
-			</span>
-			{{ _("Add to Quote") }}
+		{# Non-variant items pick a stem length first too — same compact selector
+		   flow as variant templates, just the non-variant picker. #}
+		<button type="button"
+			class="btn btn-primary btn-wishlist-select-length mt-2 w-100"
+			data-item-code="{{ item.item_code }}">
+			{{ _("Select length") }}
 		</button>
+		<div class="wishlist-non-variant-selector mt-3" style="display:none;">
+			{% set cart_settings = settings %}
+			{% set nvsel_item_code = item.item_code %}
+			{% set nvsel_item_name = item.web_item_name or item.item_name or item.item_code %}
+			{% set nvsel_stem_rows = item.get('stem_rows') or [] %}
+			{% set nvsel_compact = True %}
+			{% include "templates/generators/item/_non_variant_selector_root.html" %}
+		</div>
 	{% endif %}
 </div>
 {%- endmacro -%}

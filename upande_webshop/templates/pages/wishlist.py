@@ -25,6 +25,7 @@ def get_context(context):
 	items = set_stock_price_details(items, settings, selling_price_list)
 	items = set_default_stem_bunch(items)
 	items = set_variant_flag(items)
+	items = set_stem_rows(items)
 
 	context.body_class = "product-page"
 	context.items = items
@@ -117,6 +118,38 @@ def set_variant_flag(items):
 		item.has_variants = bool(
 			frappe.get_cached_value("Item", item.item_code, "has_variants")
 		)
+	return items
+
+
+def set_stem_rows(items):
+	"""Attach per-length {stem_length, stock_qty} rows for non-variant items.
+
+	Mirrors the product detail page (item_non_variant.html): show every globally
+	defined Stem Length, with per-length storefront stock so the wishlist's
+	compact non-variant selector strikes out out-of-stock lengths exactly like
+	the detail page. Variant templates use the variant selector and don't need
+	this.
+	"""
+	from upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin import (
+		get_stock_by_length,
+	)
+
+	stem_master = frappe.get_all(
+		"Stem Length",
+		fields=["name", "length"],
+		filters={"length": ["!=", ""]},
+		order_by="length asc",
+	)
+	for item in items:
+		if item.get("has_variants"):
+			item.stem_rows = []
+			continue
+		qty_by_sl = get_stock_by_length(item.item_code)
+		item.stem_rows = [
+			{"stem_length": row.length, "stock_qty": qty_by_sl.get(row.name, 0)}
+			for row in stem_master
+			if row.length
+		]
 	return items
 
 

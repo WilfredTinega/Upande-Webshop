@@ -68,14 +68,17 @@ def _normalize_stem_length(value):
 	return f"{int(m.group(0))}cm"
 
 
-def _stem_length_rates_from_item_prices(item_code, price_list):
-	# Non-variant items differentiate per-length Item Price rows via the
-	# custom_length field. On sites that ship the Custom Field, read it.
-	# On sites without it, fall back to the single Item Price rate and
-	# apply it to every Stem Length master value.
-	filters = {"item_code": item_code}
-	if price_list:
-		filters["price_list"] = price_list
+def _item_price_rates_for_list(item_code, price_list):
+	"""Return {canonical_stem_length: rate} for one item on one price list.
+
+	Non-variant items differentiate per-length Item Price rows via the
+	custom_length field. On sites that ship the Custom Field, read it. On sites
+	without it, fall back to the single Item Price rate and apply it to every
+	Stem Length master value. Returns {} if the price list yields no usable rate.
+	"""
+	if not price_list:
+		return {}
+	filters = {"item_code": item_code, "price_list": price_list}
 
 	has_length_col = frappe.db.has_column("Item Price", "custom_length")
 	fields = ["price_list_rate"] + (["custom_length"] if has_length_col else [])
@@ -94,8 +97,8 @@ def _stem_length_rates_from_item_prices(item_code, price_list):
 	if latest_rate:
 		return latest_rate
 
-	# Fallback: no per-length rows usable. Apply the single Item Price rate
-	# (prefer one with no custom_length) across every master Stem Length.
+	# No per-length rows usable. Apply the single Item Price rate (prefer one
+	# with no custom_length) across every master Stem Length.
 	flat_rate = None
 	for row in rows:
 		if has_length_col and row.get("custom_length"):
@@ -121,6 +124,30 @@ def _stem_length_rates_from_item_prices(item_code, price_list):
 		if norm:
 			latest_rate[norm] = flat_rate
 	return latest_rate
+
+
+def _stem_length_rates_from_item_prices(item_code, price_list, fallback_price_list=None):
+	"""Per-length rates for a non-variant item.
+
+	`price_list` is the primary (e.g. a Customer Price List chosen in the sync
+	dialog). `fallback_price_list` (typically the configured Item price list)
+	fills in any stem length the primary list has no rate for — a per-length
+	fallback, so each length resolves independently. When the two are the same
+	(or no fallback given), this behaves exactly as before.
+	"""
+	primary = _item_price_rates_for_list(item_code, price_list)
+	if not fallback_price_list or fallback_price_list == price_list:
+		return primary
+
+	fallback = _item_price_rates_for_list(item_code, fallback_price_list)
+	if not fallback:
+		return primary
+
+	# Per-length fallback: start from fallback, override with whatever the
+	# primary list provides.
+	merged = dict(fallback)
+	merged.update(primary)
+	return merged
 
 
 def _stem_length_rates_from_variants(template_item_code, price_list):

@@ -25,23 +25,33 @@
 	</div>
 {% endif %}
 
-{# Same CSS + InlineVariantSelector class the product detail page uses, so a
-   wished template can be configured (pick length → add to cart) right here. #}
+{# Same CSS + selector classes the product detail page uses, so a wished item
+   — template (variant) or plain (non-variant) — can be configured
+   (pick length → add to cart) right here. #}
 {% include "templates/generators/item/_variant_selector_assets.html" %}
+{% include "templates/generators/item/_non_variant_selector_assets.html" %}
 
 <script>
 frappe.ready(function () {
-	// Reveal the inline variant selector for a wished template and mount it
-	// once (lazily) using the shared product-page machinery.
+	// Reveal the inline selector for a wished item and mount it once (lazily)
+	// using the shared product-page machinery. Variant templates use the variant
+	// selector; plain items use the non-variant selector.
 	$('.page_content').on('click', '.btn-wishlist-select-length', function () {
 		var $btn = $(this);
-		var $panel = $btn.closest('.wishlist-card').find('.wishlist-variant-selector');
+		var $card = $btn.closest('.wishlist-card');
+		var $panel = $card.find('.wishlist-variant-selector, .wishlist-non-variant-selector').first();
 		if (!$panel.length) return;
 		var visible = $panel.is(':visible');
 		$panel.toggle(!visible);
 		$btn.text(visible ? __('Select length') : __('Hide'));
-		if (!visible && window.upande_webshop && window.upande_webshop.mount_variant_selectors) {
-			window.upande_webshop.mount_variant_selectors($panel);
+		if (!visible && window.upande_webshop) {
+			if ($panel.hasClass('wishlist-variant-selector')
+				&& window.upande_webshop.mount_variant_selectors) {
+				window.upande_webshop.mount_variant_selectors($panel);
+			} else if ($panel.hasClass('wishlist-non-variant-selector')
+				&& window.upande_webshop.mount_non_variant_selectors) {
+				window.upande_webshop.mount_non_variant_selectors($panel);
+			}
 		}
 	});
 });
