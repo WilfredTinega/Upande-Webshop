@@ -214,8 +214,7 @@
    "fieldname": "quotation_series",
    "fieldtype": "Select",
    "hidden": 1,
-   "label": "Quotation Series",
-   "mandatory_depends_on": "eval: doc.enabled === 1"
+   "label": "Quotation Series"
   },
   {
    "default": "1",
