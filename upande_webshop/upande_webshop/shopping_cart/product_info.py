@@ -1,6 +1,3 @@
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
-
 import frappe
 
 from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (

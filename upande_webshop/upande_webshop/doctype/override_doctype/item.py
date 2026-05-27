@@ -11,7 +11,6 @@ class WebshopItem(Item):
 	def on_update(self):
 		super(WebshopItem, self).on_update()
 		invalidate_cache_for_item(self)
-		super(WebshopItem, self).on_update()
 
 	def before_rename(self, old_name, new_name, merge=False):
 		self.validate_duplicate_website_item_before_merge(old_name, new_name)

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and contributors
+# Copyright (c) 2026, Upande LTD and contributors
 # For license information, please see license.txt
 
 import json
@@ -61,6 +61,7 @@ class WebsiteItem(WebsiteGenerator):
 		self.validate_duplicate_website_item()
 		self.validate_website_image()
 		self.make_thumbnail()
+		self.set_default_warehouse()
 		self.publish_unpublish_desk_item(publish=True)
 
 		if not self.get("__islocal"):
@@ -96,6 +97,36 @@ class WebsiteItem(WebsiteGenerator):
 				frappe.bold(self.item_code)
 			)
 			frappe.throw(message, title=_("Already Published"))
+
+	def set_default_warehouse(self):
+		if self.website_warehouse or not self.item_code:
+			return
+
+		webshop_company = frappe.db.get_single_value("Webshop Settings", "company")
+		item_default_filters = {"parent": self.item_code, "parenttype": "Item"}
+		if webshop_company:
+			item_default_filters["company"] = webshop_company
+
+		default_warehouse = frappe.db.get_value(
+			"Item Default", item_default_filters, "default_warehouse"
+		)
+		if not default_warehouse and webshop_company:
+			default_warehouse = frappe.db.get_value(
+				"Item Default",
+				{"parent": self.item_code, "parenttype": "Item"},
+				"default_warehouse",
+			)
+
+		if not default_warehouse:
+			from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+				get_configured_warehouses,
+			)
+
+			configured = get_configured_warehouses()
+			default_warehouse = configured[0] if configured else None
+
+		if default_warehouse:
+			self.website_warehouse = default_warehouse
 
 	def publish_unpublish_desk_item(self, publish=True):
 		if (
@@ -227,6 +258,14 @@ class WebsiteItem(WebsiteGenerator):
 				self.thumbnail = file_doc.thumbnail_url
 
 	def get_context(self, context):
+		from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+			apply_webshop_setup_guard,
+		)
+
+		# Missing required fields → friendly setup block instead of erroring.
+		if apply_webshop_setup_guard(context):
+			return context
+
 		context.show_search = True
 		context.search_link = "/search"
 		context.body_class = "product-page"

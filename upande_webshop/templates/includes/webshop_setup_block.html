@@ -1,0 +1,65 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _("Webshop Setup Needed") }}{% endblock %}
+
+{% block page_content %}
+<div class="container my-5" style="max-width: 760px;">
+
+	<div class="frappe-card p-5 text-center" style="background: var(--card-bg);">
+		<div style="font-size: 40px; line-height: 1;">🛠️</div>
+		<h4 class="mt-3 mb-2">{{ _("The shop needs a quick setup") }}</h4>
+		<p class="text-muted mb-0">
+			{{ _("A few required fields are missing. An administrator needs to add them, then this page will work. Nothing is broken — it just isn't configured yet.") }}
+		</p>
+	</div>
+
+	{% for doctype, fields in webshop_setup_groups.items() %}
+	<div class="frappe-card p-4 mt-3">
+		<div class="d-flex justify-content-between align-items-center mb-2">
+			<h6 class="mb-0">{{ _("Add these to") }} <b>{{ doctype }}</b></h6>
+			<a class="btn btn-default btn-sm" href="/app/customize-form?doc_type={{ doctype | urlencode }}" target="_blank">
+				{{ _("Customize {0}").format(doctype) }}
+			</a>
+		</div>
+		<table class="table table-bordered mb-0" style="font-size: 14px;">
+			<thead>
+				<tr>
+					<th>{{ _("Field") }}</th>
+					<th>{{ _("Type") }}</th>
+					<th>{{ _("What it's for") }}</th>
+					<th style="width: 110px;"></th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for f in fields %}
+				<tr>
+					<td><b>{{ f.label }}</b><div class="text-muted" style="font-size: 12px;">{{ f.fieldname }}</div></td>
+					<td>
+						{{ f.fieldtype }}
+						{% if f.options %}<div class="text-muted" style="font-size: 12px;">{{ _("Options") }}: {{ f.options }}</div>{% endif %}
+					</td>
+					<td class="text-muted">{{ f.why }}</td>
+					<td>
+						<a class="btn btn-primary btn-sm" href="{{ f.new_custom_field_url }}" target="_blank">
+							{{ _("Add field") }}
+						</a>
+					</td>
+				</tr>
+				{% endfor %}
+			</tbody>
+		</table>
+	</div>
+	{% endfor %}
+
+	<div class="frappe-card p-4 mt-3">
+		<h6 class="mb-2">{{ _("Steps") }}</h6>
+		<ol class="mb-0 text-muted" style="font-size: 14px;">
+			<li>{{ _("Click 'Add field' (or 'Customize') above — it opens the doctype with all its fields.") }}</li>
+			<li>{{ _("Add a Custom Field with the Name, Label, Type and Options shown.") }}</li>
+			<li>{{ _("Save, then click Refresh below.") }}</li>
+		</ol>
+		<button class="btn btn-primary btn-sm mt-3" onclick="window.location.reload()">{{ _("Refresh") }}</button>
+	</div>
+
+</div>
+{% endblock %}

@@ -25,4 +25,26 @@
 	</div>
 {% endif %}
 
+{# Same CSS + InlineVariantSelector class the product detail page uses, so a
+   wished template can be configured (pick length → add to cart) right here. #}
+{% include "templates/generators/item/_variant_selector_assets.html" %}
+
+<script>
+frappe.ready(function () {
+	// Reveal the inline variant selector for a wished template and mount it
+	// once (lazily) using the shared product-page machinery.
+	$('.page_content').on('click', '.btn-wishlist-select-length', function () {
+		var $btn = $(this);
+		var $panel = $btn.closest('.wishlist-card').find('.wishlist-variant-selector');
+		if (!$panel.length) return;
+		var visible = $panel.is(':visible');
+		$panel.toggle(!visible);
+		$btn.text(visible ? __('Select length') : __('Hide'));
+		if (!visible && window.upande_webshop && window.upande_webshop.mount_variant_selectors) {
+			window.upande_webshop.mount_variant_selectors($panel);
+		}
+	});
+});
+</script>
+
 {% endblock %}

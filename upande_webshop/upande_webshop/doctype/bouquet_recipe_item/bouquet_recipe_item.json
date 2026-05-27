@@ -1,0 +1,59 @@
+{
+ "actions": [],
+ "creation": "2026-05-25 00:00:00",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "bouquet",
+  "item_group",
+  "stem_length",
+  "quantity"
+ ],
+ "fields": [
+  {
+   "fieldname": "bouquet",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Bouquet",
+   "options": "Website Item",
+   "reqd": 1
+  },
+  {
+   "fieldname": "item_group",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Item Group",
+   "options": "Item Group",
+   "reqd": 1
+  },
+  {
+   "fieldname": "stem_length",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Stem Length",
+   "options": "Stem Length"
+  },
+  {
+   "fieldname": "quantity",
+   "fieldtype": "Int",
+   "in_list_view": 1,
+   "label": "Quantity",
+   "non_negative": 1,
+   "reqd": 1
+  }
+ ],
+ "grid_page_length": 50,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-05-25 00:00:00",
+ "modified_by": "Administrator",
+ "module": "Upande Webshop",
+ "name": "Bouquet Recipe Item",
+ "owner": "Administrator",
+ "permissions": [],
+ "row_format": "Dynamic",
+ "sort_field": "bouquet",
+ "sort_order": "ASC",
+ "states": []
+}

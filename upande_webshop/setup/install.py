@@ -1,69 +1,219 @@
+import os
+
 import frappe
 import click
 
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.modules.utils import reload_doc
 
-from upande_webshop.upande_webshop.utils.setup import has_ecommerce_fields
 
 def after_install():
-	run_patches()
-	copy_from_ecommerce_settings()
-	drop_ecommerce_settings()
-	remove_ecommerce_settings_doctype()
 	add_custom_fields()
 	navbar_add_products_link()
+	resync_app_resources()
+	normalize_webshop_workspace()
+	ensure_desktop_icon()
+	ensure_variant_attributes()
+	apply_webshop_settings_defaults()
+	cleanup_blocking_property_setters()
 	say_thanks()
 
 
-def copy_from_ecommerce_settings():
-	if not has_ecommerce_fields():
+# Frappe's migrate skips JSON resources when the DB record's `modified` is newer
+# than the file (see frappe/modules/import_file.py). UI edits or other apps'
+# after_migrate hooks bump that timestamp, so workspace/page/etc. updates we
+# ship in upande_webshop silently never reach the site. This helper force-reloads
+# every JSON resource the app owns, bypassing the timestamp + hash check.
+_RESOURCE_DIRS = (
+	"doctype",
+	"page",
+	"report",
+	"print_format",
+	"notification",
+	"workspace",
+	"web_template",
+	"web_form",
+	"web_page",
+	"dashboard",
+	"dashboard_chart",
+	"number_card",
+	"module_onboarding",
+	"onboarding_step",
+	"form_tour",
+	"client_script",
+	"server_script",
+	"custom",
+)
+
+
+def resync_app_resources():
+	"""Force-reload every JSON resource (doctype, workspace, page, ...) that
+	upande_webshop ships, ignoring DB-vs-file timestamps. Safe to run repeatedly."""
+	module_root = frappe.get_app_path("upande_webshop", "upande_webshop")
+	module_name = "Upande Webshop"
+
+	for dt in _RESOURCE_DIRS:
+		dt_root = os.path.join(module_root, dt)
+		if not os.path.isdir(dt_root):
+			continue
+		for dn in os.listdir(dt_root):
+			doc_dir = os.path.join(dt_root, dn)
+			if not os.path.isdir(doc_dir):
+				continue
+			if not os.path.exists(os.path.join(doc_dir, f"{dn}.json")):
+				continue
+			try:
+				reload_doc(module_name, dt, dn, force=True)
+			except Exception:
+				frappe.log_error(
+					title=f"upande_webshop resync_app_resources: {dt}/{dn}",
+					message=frappe.get_traceback(),
+				)
+
+
+# Workspace identity field we standardise on. Frappe requires a Workspace's
+# name == title == label, and derives the Desk route from slug(name)
+# (frappe/public/js/frappe/views/workspace/workspace.js). We want the admin
+# workspace to live at /app/upande-webshop (slug of "Upande Webshop"), distinct
+# from the /webshop storefront URL shortcut inside it. A stale install/UI edit
+# can leave title or label out of sync (showing the wrong text) or set
+# parent_page to the workspace itself (nesting it under a missing parent, which
+# 404s the icon). Normalise all of that here so every install/migrate lands the
+# same working state. Safe to run repeatedly.
+_WORKSPACE_NAME = "Upande Webshop"
+
+
+def normalize_webshop_workspace():
+	"""Force the webshop Workspace's name/title/label consistent and clear any
+	self-referential parent_page so the Desk icon opens /app/upande-webshop."""
+	if not frappe.db.exists("Workspace", _WORKSPACE_NAME):
 		return
 
-	frappe.reload_doc("webshop", "doctype", "webshop_settings")
-
-	qb = frappe.qb
-	table = frappe.qb.Table("tabSingles")
-	old_doctype = "E Commerce Settings"
-	new_doctype = "Webshop Settings"
-
-	entries = (
-		qb.from_(table)
-		.select(table.field, table.value)
-		.where((table.doctype == old_doctype) & (table.field != "name"))
-		.run(as_dict=True)
+	current = frappe.db.get_value(
+		"Workspace",
+		_WORKSPACE_NAME,
+		["title", "label", "parent_page"],
+		as_dict=True,
 	)
+	needs_fix = (
+		current.title != _WORKSPACE_NAME
+		or current.label != _WORKSPACE_NAME
+		or current.parent_page == _WORKSPACE_NAME
+	)
+	if not needs_fix:
+		return
 
-	for e in entries:
-		qb.into(table).insert(new_doctype, e.field, e.value).run()
-
-	for doctype in ["Website Filter Field", "Website Attribute"]:
-		table = qb.DocType(doctype)
-		query = (
-			qb.update(table)
-			.set(table.parent, new_doctype)
-			.set(table.parenttype, new_doctype)
-			.where(table.parent == old_doctype)
+	try:
+		# Write the identity fields directly. Going through doc.save() risks
+		# Workspace's on_update rename trigger (it collapses name->title when
+		# label == name), which would fight us; a db_set keeps name stable.
+		frappe.db.set_value(
+			"Workspace",
+			_WORKSPACE_NAME,
+			{"title": _WORKSPACE_NAME, "label": _WORKSPACE_NAME, "parent_page": ""},
+			update_modified=False,
+		)
+		# The sidebar header (Workspace Sidebar) mirrors the title; keep it in step.
+		if frappe.db.exists("Workspace Sidebar", _WORKSPACE_NAME):
+			frappe.db.set_value(
+				"Workspace Sidebar", _WORKSPACE_NAME, "title", _WORKSPACE_NAME,
+				update_modified=False,
+			)
+	except Exception:
+		frappe.log_error(
+			title="upande_webshop normalize_webshop_workspace",
+			message=frappe.get_traceback(),
 		)
 
-		query.run()
 
-def drop_ecommerce_settings():
-	frappe.delete_doc_if_exists("DocType", "E Commerce Settings", force=True)
+# The launcher tile on /desk and /apps is a Desktop Icon. We ship one as a
+# standard fixture (desktop_icon/upande_webshop.json), but Frappe also
+# auto-generates a Desktop Icon from the public Workspace (labelled with the
+# workspace name "Upande Webshop", linking to the bare "/upande-webshop" route
+# that 404s). That auto-row shadows our fixture. Mirror upande_ta's approach:
+# upsert our External-link icon every install/migrate and drop the stale
+# auto-generated one, so the tile always reads "Webshop" and opens
+# /app/upande-webshop. (See upande_ta/install.py::ensure_desktop_icon.)
+_DESKTOP_ICON_NAME = "Webshop"
+_STALE_DESKTOP_ICON_NAME = "Upande Webshop"
 
 
-def remove_ecommerce_settings_doctype():
-	if not has_ecommerce_fields():
-		return
+def ensure_desktop_icon():
+	"""Create / refresh the launcher Desktop Icon for the webshop workspace."""
+	# Drop the auto-generated workspace icon that links to the broken route.
+	if frappe.db.exists("Desktop Icon", _STALE_DESKTOP_ICON_NAME):
+		frappe.delete_doc(
+			"Desktop Icon", _STALE_DESKTOP_ICON_NAME,
+			ignore_permissions=True, force=True,
+		)
 
-	table = frappe.qb.Table("tabSingles")
-	old_doctype = "E Commerce Settings"
+	payload = {
+		"doctype": "Desktop Icon",
+		"name": _DESKTOP_ICON_NAME,
+		"label": _DESKTOP_ICON_NAME,
+		"app": "upande_webshop",
+		"icon_type": "App",
+		"link_type": "External",
+		"link": "/app/upande-webshop",
+		"logo_url": "/assets/upande_webshop/images/UpandeLogo.png",
+		"force_show": 1,
+		"hidden": 0,
+		"standard": 1,
+	}
 
-	frappe.qb.from_(table).delete().where(table.doctype == old_doctype).run()
+	if frappe.db.exists("Desktop Icon", _DESKTOP_ICON_NAME):
+		doc = frappe.get_doc("Desktop Icon", _DESKTOP_ICON_NAME)
+		for k, v in payload.items():
+			if k in ("doctype", "name"):
+				continue
+			doc.set(k, v)
+		doc.save(ignore_permissions=True)
+	else:
+		frappe.get_doc(payload).insert(ignore_permissions=True, ignore_if_duplicate=True)
+
+	frappe.clear_cache()
+
+
+def remove_legacy_pages():
+	"""Delete Page records this app once shipped but no longer does.
+
+	The "Bulk Publish Items" feature moved from a standalone Desk Page into the
+	Webshop Settings dialog; its backend now lives in webshop_settings.py. The
+	on-disk page was deleted, but the DB record lingers on already-installed
+	sites, so drop it explicitly. Safe to run repeatedly."""
+	if frappe.db.exists("Page", "bulk-publish-items"):
+		frappe.delete_doc("Page", "bulk-publish-items", force=True, ignore_permissions=True)
 
 
 def add_custom_fields():
 	custom_fields = {
+		"Quotation": [
+			{
+				"fieldname": "custom_delivery_point",
+				"fieldtype": "Link",
+				"label": "Delivery Point",
+				"options": "Delivery Point",
+				"insert_after": "shipping_address_name",
+			},
+			{
+				"fieldname": "custom_box_type",
+				"fieldtype": "Link",
+				"label": "Box Type",
+				"options": "Box Type",
+				"insert_after": "custom_delivery_point",
+			},
+		],
+		"Item Price": [
+			{
+				"fieldname": "custom_length",
+				"fieldtype": "Link",
+				"label": "Stem Length",
+				"options": "Stem Length",
+				"insert_after": "item_name",
+				"description": "Set for non-variant rose items priced per stem length. Variants leave this blank.",
+			},
+		],
 		"Item": [
 			{
 				"default": 0,
@@ -177,14 +327,34 @@ def add_custom_fields():
 				"insert_after": "filter_fields",
 			},
 		],
-		"Quotation Item": [
+		"Website Item": [
+			{
+				"fieldname": "custom_length",
+				"fieldtype": "Link",
+				"label": "Stem Length",
+				"options": "Stem Length",
+				"insert_after": "item_name",
+				"description": "Stem length variant. Drives storefront stem-length filter.",
+			},
 			{
 				"fieldname": "custom_box_type",
 				"fieldtype": "Link",
 				"label": "Box Type",
 				"options": "Box Type",
-				"insert_after": "custom_total_stems",
-				"in_list_view": 1,
+				"insert_after": "custom_length",
+				"description": "Box type variant. Drives storefront box-type filter.",
+			},
+		],
+		# enable_variants ships as a Custom Field rather than a DocField because
+		# editing the Webshop Settings doctype JSON gets reverted on migrate when
+		# developer_mode=1 (Frappe re-exports DocType JSON from DB state).
+		"Webshop Settings": [
+			{
+				"default": "1",
+				"fieldname": "enable_variants",
+				"fieldtype": "Check",
+				"label": "Enable Variant Selector",
+				"insert_after": "show_stem_length",
 			},
 		],
 	}
@@ -203,6 +373,7 @@ def add_custom_fields():
 
 	return create_custom_fields(custom_fields)
 
+
 def navbar_add_products_link():
 	website_settings = frappe.get_doc("Website Settings")
 	if website_settings.top_bar_items:
@@ -220,32 +391,81 @@ def navbar_add_products_link():
 	website_settings.save()
 
 
+# Stem Length / Box Type Item Attributes need to exist before variant Items can
+# be created against them. The storefront variant selector reads Item Variant
+# Attribute rows on the parent Item to render the pill rows on the product page.
+_VARIANT_ATTRIBUTES = ("Stem Length", "Box Type")
+
+
+def ensure_variant_attributes():
+	"""Create the Item Attribute records used by the variant selector if missing.
+	Does not touch existing attribute values — admins curate those per site."""
+	for attr in _VARIANT_ATTRIBUTES:
+		if frappe.db.exists("Item Attribute", attr):
+			continue
+		doc = frappe.new_doc("Item Attribute")
+		doc.attribute_name = attr
+		doc.numeric_values = 0
+		doc.insert(ignore_permissions=True)
+
+
+# Storefront defaults we want every site to start from. The values here only
+# get applied when the field is currently 0/None (falsy) — we never overwrite
+# an explicit admin choice. Run on after_install AND after_migrate so that
+# sites configured before these defaults existed (e.g. mona, tambuzi) get
+# upgraded the next time migrate runs.
+_WEBSHOP_SETTINGS_DEFAULTS = {
+	"enable_field_filters": 1,
+	"enable_variants": 1,
+	"show_stem_length": 1,
+	"show_box_type": 1,
+	"show_bunch": 1,
+}
+
+
+def apply_webshop_settings_defaults():
+	"""Fill in Webshop Settings flags that haven't been set yet. Never overwrites
+	a value the admin has explicitly turned off."""
+	if not frappe.db.exists("DocType", "Webshop Settings"):
+		return
+	settings = frappe.get_single("Webshop Settings")
+	dirty = False
+	for fieldname, value in _WEBSHOP_SETTINGS_DEFAULTS.items():
+		if not settings.meta.has_field(fieldname):
+			continue
+		current = settings.get(fieldname)
+		if not current:
+			settings.set(fieldname, value)
+			dirty = True
+	if dirty:
+		settings.flags.ignore_permissions = True
+		settings.flags.ignore_mandatory = True
+		settings.save()
+
+
+# Property Setters that we know break the storefront cart flow. The cart
+# enforces shipping/billing presence at the cart page (see
+# upande_webshop/shopping_cart/cart.py::place_order); making the SO field
+# itself `reqd=1` blocks add-to-cart for guests and new customers before they
+# even reach checkout. Drop these every migrate so a stray Customize Form
+# tweak can't break checkout again.
+_PROPERTY_SETTERS_TO_REMOVE = (
+	# (doc_type, field_name, property)
+	("Sales Order", "shipping_address_name", "reqd"),
+)
+
+
+def cleanup_blocking_property_setters():
+	"""Remove Property Setters known to break the storefront checkout flow."""
+	for doc_type, field_name, property_ in _PROPERTY_SETTERS_TO_REMOVE:
+		rows = frappe.get_all(
+			"Property Setter",
+			filters={"doc_type": doc_type, "field_name": field_name, "property": property_},
+			pluck="name",
+		)
+		for name in rows:
+			frappe.delete_doc("Property Setter", name, ignore_permissions=True, force=True)
+
+
 def say_thanks():
 	click.secho("Thank you for installing Upande Webshop!", color="green")
-
-
-patches = [
-	"create_website_items",
-	"populate_e_commerce_settings",
-	"add_homepage_field",
-	"make_homepage_products_website_items",
-	"fetch_thumbnail_in_website_items",
-	"convert_to_website_item_in_item_card_group_template",
-	"shopping_cart_to_ecommerce",
-	"copy_custom_field_filters_to_website_item",
-]
-
-def run_patches():
-	# Customers migrating from v13 to v15 directly need to run all below patches
-
-	frappe.flags.in_patch = True
-
-	try:
-		for patch in patches:
-			frappe.get_attr(f"upande_webshop.patches.{patch}.execute")()
-
-	finally:
-		frappe.flags.in_patch = False
-
-
-		

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -9,12 +10,27 @@ class Wishlist(Document):
 	pass
 
 
+def _check_wishlist_enabled():
+	if not frappe.db.get_single_value("Webshop Settings", "enable_wishlist"):
+		frappe.throw(_("Wishlist is disabled"), frappe.PermissionError)
+
+
+def _set_wish_count_cookie(user=None):
+	user = user or frappe.session.user
+	count = frappe.db.count("Wishlist Item", filters={"parent": user})
+	if hasattr(frappe.local, "cookie_manager"):
+		frappe.local.cookie_manager.set_cookie("wish_count", str(count))
+	return count
+
+
 @frappe.whitelist()
 def add_to_wishlist(item_code):
 	"""Insert Item into wishlist."""
+	_check_wishlist_enabled()
 
 	if frappe.db.exists("Wishlist Item", {"item_code": item_code, "parent": frappe.session.user}):
-		return
+		# Already wished — still refresh the cookie so the UI count is accurate.
+		return {"wish_count": _set_wish_count_cookie()}
 
 	web_item_data = frappe.db.get_value(
 		"Website Item",
@@ -53,17 +69,14 @@ def add_to_wishlist(item_code):
 		item = wishlist.append("items", wished_item_dict)
 		item.db_insert()
 
-	if hasattr(frappe.local, "cookie_manager"):
-		frappe.local.cookie_manager.set_cookie("wish_count", str(len(wishlist.items)))
+	return {"wish_count": _set_wish_count_cookie()}
 
 
 @frappe.whitelist()
 def remove_from_wishlist(item_code):
+	_check_wishlist_enabled()
 	if frappe.db.exists("Wishlist Item", {"item_code": item_code, "parent": frappe.session.user}):
 		frappe.db.delete("Wishlist Item", {"item_code": item_code, "parent": frappe.session.user})
 		frappe.db.commit()  # nosemgrep
 
-		wishlist_items = frappe.db.get_values("Wishlist Item", filters={"parent": frappe.session.user})
-
-		if hasattr(frappe.local, "cookie_manager"):
-			frappe.local.cookie_manager.set_cookie("wish_count", str(len(wishlist_items)))
+	return {"wish_count": _set_wish_count_cookie()}

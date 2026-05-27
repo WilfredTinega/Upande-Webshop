@@ -24,9 +24,9 @@ webshop.ProductGrid = class {
 			let title = item.web_item_name || item.item_name || item.item_code || "";
 			title =  title.length > 90 ? title.substr(0, 90) + "..." : title;
 
-			html += `<div class="col-sm-4 item-card" style="position:relative;">`;
-			if (!item.has_variants && me.settings.enabled) {
-				html += me.get_cart_indicator(item);
+			html += `<div class="col-6 col-md-4 col-lg-3 item-card" style="position:relative;">`;
+			if (me.settings.enable_wishlist) {
+				html += me.get_wishlist_icon(item);
 			}
 			html += `<a href="/${ item.route || '#' }" style="text-decoration: none; color: inherit; display: block;"><div class="card text-left">`;
 			html += me.get_image_html(item, title);
@@ -61,7 +61,7 @@ webshop.ProductGrid = class {
 	get_card_body_html(item, title, settings) {
 		let body_html = `
 			<div class="card-body text-left card-body-flex" style="width:100%">
-				<div style="margin-top: 1rem; display: flex;">
+				<div style="display: flex;">
 		`;
 		body_html += this.get_title(title);
 
@@ -88,24 +88,13 @@ webshop.ProductGrid = class {
 	}
 
 	get_wishlist_icon(item) {
-		let icon_class = item.wished ? "wished-green" : "not-wished-fp";
+		let icon_class = item.wished ? "wished" : "not-wished";
 		return `
 			<div class="like-action ${ item.wished ? "like-action-wished" : ''}"
 				data-item-code="${ item.item_code }">
 				<svg class="icon sm">
 					<use class="${ icon_class } wish-icon" href="#icon-heart"></use>
 				</svg>
-			</div>
-		`;
-	}
-
-	get_cart_indicator(item) {
-		return `
-			<div class="cart-indicator ${item.in_cart ? '' : 'hidden'}" data-item-code="${ item.item_code }"
-				style="position:absolute;top:8px;right:20px;z-index:10;background:#fff;border-radius:50px;padding:2px 8px;box-shadow:0 1px 4px rgba(0,0,0,0.15);display:flex;align-items:center;gap:4px;">
-				<span>1</span>
-				<span class="remove-from-cart-grid" data-item-code="${ item.item_code }"
-					style="cursor:pointer;font-weight:bold;color:#e74c3c;font-size:14px;line-height:1;" title="${ __('Remove from Quote') }">&times;</span>
 			</div>
 		`;
 	}
@@ -131,7 +120,7 @@ webshop.ProductGrid = class {
 	}
 
 	get_stock_availability(item, settings) {
-		if (settings.show_stock_availability && !item.has_variants) {
+		if (settings.show_stock_availability) {
 			if (item.on_backorder) {
 				return `
 					<span class="out-of-stock mb-2 mt-1" style="color: var(--primary-color)">
@@ -143,6 +132,15 @@ webshop.ProductGrid = class {
 					<span class="out-of-stock mb-2 mt-1">
 						${ __("Out of stock") }
 					</span>
+				`;
+			} else {
+				let qty_suffix = "";
+				if (settings.show_quantity_in_website && item.stock_qty != null && Number(item.stock_qty) > 0) {
+					qty_suffix = ` (${ Number(item.stock_qty).toLocaleString() })`;
+				}
+				return `
+					<span class="in-stock in-green has-stock mb-2 mt-1"
+						style="font-size: 14px;">${ __("In stock") }${ qty_suffix }</span>
 				`;
 			}
 		}

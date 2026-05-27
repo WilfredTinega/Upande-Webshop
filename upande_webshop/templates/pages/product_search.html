@@ -5,28 +5,70 @@
 {% block header %}<h2>{{ _("Product Search") }}</h2>{% endblock %}
 
 {% block page_content %}
-<script>{% include "templates/includes/product_list.js" %}</script>
+<div class="product-search-content">
+	<h3 class="search-results">{{ _("Search Results") }}</h3>
+	<div id="search-list" class="row"></div>
+	<div style="text-align: center;">
+		<div class="more-btn" style="display: none; text-align: center;">
+			<button class="btn btn-light">{{ _("More...") }}</button>
+		</div>
+	</div>
+	<div class="empty-results text-muted" style="display: none; text-align: center; padding: 2rem 0;"></div>
+</div>
 
 <script>
 frappe.ready(function() {
-	var txt = frappe.utils.get_url_arg("search");
-	$(".search-results").html('{{ _("Search results for") + ": " + html2text(frappe.form_dict.search or "") | e | trim }}');
-	window.search = txt;
-	window.start = 0;
-	window.get_product_list();
+	const PAGE_SIZE = 12;
+	const search_term = frappe.utils.get_url_arg("search") || "";
+	let start = 0;
+	let finished = false;
+
+	const heading = $(".search-results");
+	if (search_term) {
+		heading.text(__("Search results for") + ": " + search_term);
+	}
+
+	function fetch_page() {
+		if (finished) return;
+		frappe.call({
+			method: "upande_webshop.templates.pages.product_search.get_product_list",
+			args: {
+				search: search_term,
+				start: start,
+				limit: PAGE_SIZE,
+			},
+			callback: function(r) {
+				const items = (r && r.message) || [];
+				render_items(items);
+				start += items.length;
+
+				if (items.length < PAGE_SIZE) {
+					finished = true;
+					$(".more-btn").hide();
+					if (start === 0) {
+						$(".empty-results")
+							.text(__("No products found."))
+							.show();
+					}
+				} else {
+					$(".more-btn").show();
+				}
+			},
+		});
+	}
+
+	function render_items(items) {
+		const $list = $("#search-list");
+		items.forEach(function(html) {
+			$list.append(html);
+		});
+	}
+
+	$(document).on("click", ".more-btn .btn", function() {
+		fetch_page();
+	});
+
+	fetch_page();
 });
 </script>
-
-<div class="product-search-content">
-    <h3 class="search-results">{{ _("Search Results") }}</h3>
-	<div id="search-list" class="row">
-
-	</div>
-	<div style="text-align: center;">
-		<div class="more-btn"
-			style="display: none; text-align: center;">
-            <button class="btn btn-light">{{ _("More...") }}</button>
-		</div>
-	</div>
-</div>
 {% endblock %}

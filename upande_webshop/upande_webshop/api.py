@@ -1,10 +1,7 @@
-# -*- coding: utf-8 -*-
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and contributors
-# For license information, please see license.txt
-
 import json
 
 import frappe
+from frappe import _
 from frappe.utils import cint
 
 from upande_webshop.upande_webshop.product_data_engine.filters import ProductFiltersBuilder
@@ -89,15 +86,6 @@ def get_guest_redirect_on_action():
 	return frappe.db.get_single_value("Webshop Settings", "redirect_on_action")
 
 
-@frappe.whitelist()
-def get_post_login_redirect():
-	"""Return the correct redirect URL after login based on the user's role.
-	Customers go to /upande-webshop; all other roles go to /app (desk).
-	"""
-	if "Customer" in frappe.get_roles(frappe.session.user):
-		return "/upande-webshop"
-	return "/app"
-
 @frappe.whitelist(allow_guest=True)
 def get_box_items():
 	"""Return only BOX items from PACKAGING group for the box type dropdown."""
@@ -108,36 +96,6 @@ def get_box_items():
 		order_by="item_name asc"
 	)
 	return items
-
-@frappe.whitelist(allow_guest=True)
-def get_pack_rate(item_code):
-	"""Return default_pack_rate for a variant item."""
-	rate = frappe.db.get_value("Item", item_code, "default_pack_rate")
-	return {"default_pack_rate": rate or 0}
-
-
-@frappe.whitelist(allow_guest=True)
-def get_pack_rates_map():
-	"""
-	Return all Pack Rate records as a nested map:
-	    { variety_lowercase: { box_key: { length_cm: stems_per_box } } }
-	box_key is 'std' for Standard, 'zim' for Zim — matching item_configure.js.
-	"""
-	rows = frappe.get_all(
-		"Pack Rate",
-		fields=["variety", "box_group", "length_cm", "stems_per_box"],
-	)
-	box_key_map = {"Standard": "std", "Zim": "zim"}
-	result = {}
-	for r in rows:
-		variety = (r.variety or "").lower().strip()
-		box_key = box_key_map.get(r.box_group)
-		if not variety or not box_key or not r.length_cm:
-			continue
-		result.setdefault(variety, {}).setdefault(box_key, {})[int(r.length_cm)] = int(
-			r.stems_per_box or 0
-		)
-	return result
 
 @frappe.whitelist()
 def get_customer_boxes():
@@ -181,3 +139,45 @@ def get_customer_boxes():
 		fields=["name", "item_name"],
 		order_by="item_name asc"
 	)
+
+
+@frappe.whitelist()
+def set_user_profile_image(file_url):
+	"""Store a profile image URL on the currently logged-in User."""
+	if not frappe.session.user or frappe.session.user == "Guest":
+		frappe.throw(_("You must be logged in to update your profile image."), frappe.PermissionError)
+
+	if not file_url:
+		frappe.throw(_("No profile image was provided."))
+
+	frappe.db.set_value("User", frappe.session.user, "user_image", file_url, update_modified=False)
+	frappe.db.commit()
+	return {"user_image": file_url}
+
+
+@frappe.whitelist(allow_guest=True)
+def get_box_min_order_qty(box_name):
+	"""
+	Resolve the MOQ (in bunches) for a box, sourced from Box Type.min_order_qty.
+
+	`box_name` is the value selected in the configurator dropdown — currently the
+	Item item_name (e.g. 'STD-EB BOX'). Match by Box Type primary key first,
+	then by box_type_name; finally try a startswith match so 'STD-EB BOX' resolves
+	to Box Type 'STD-EB'. Returns {min_order_qty: float} (0 if no match).
+	"""
+	if not box_name:
+		return {"min_order_qty": 0}
+
+	# Box Type may not carry min_order_qty on every site — guard the read.
+	if not frappe.get_meta("Box Type").has_field("min_order_qty"):
+		return {"min_order_qty": 0}
+
+	moq = frappe.db.get_value("Box Type", box_name, "min_order_qty")
+	if moq is None:
+		moq = frappe.db.get_value("Box Type", {"box_type_name": box_name}, "min_order_qty")
+	if moq is None:
+		first_token = box_name.split()[0] if box_name else ""
+		if first_token:
+			moq = frappe.db.get_value("Box Type", first_token, "min_order_qty")
+
+	return {"min_order_qty": float(moq or 0)}

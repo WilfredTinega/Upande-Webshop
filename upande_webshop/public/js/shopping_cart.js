@@ -18,8 +18,17 @@ var getParams = function (url) {
 frappe.ready(function() {
 	$(document).on('click', 'a[href*="/logout"]', function(e) {
 		e.preventDefault();
+		// Honor ?redirect-to= on the logout link so Customer-only users land on /webshop
+		// (set by the webshop nav dropdown) instead of /index.
+		var href = $(this).attr('href') || '';
+		var redirect_to = '/index';
+		try {
+			var qs = href.split('?')[1] || '';
+			var match = qs.split('&').find(function(p) { return p.indexOf('redirect-to=') === 0; });
+			if (match) redirect_to = decodeURIComponent(match.split('=')[1] || '/index');
+		} catch (err) { /* keep default */ }
 		frappe.call({ method: 'logout' }).then(function() {
-			window.location.href = '/index';
+			window.location.href = redirect_to;
 		});
 	});
 
@@ -45,9 +54,6 @@ frappe.ready(function() {
 	referral_coupon_code=frappe.get_cookie("referral_coupon_code");
 	referral_sales_partner=frappe.get_cookie("referral_sales_partner");
 
-	if (referral_coupon_code && $(".tot_quotation_discount").val()==undefined ) {
-		$(".txtcoupon").val(referral_coupon_code);
-	}
 	if (referral_sales_partner) {
 		$(".txtreferral_sales_partner").val(referral_sales_partner);
 	}
@@ -68,7 +74,7 @@ frappe.ready(function() {
 	}
 
 	var webshop_prefixes = [
-		'/upande-webshop', '/cart', '/quotations', '/invoices',
+		'/webshop', '/cart', '/invoices',
 		'/orders', '/shipments', '/issues', '/contact', '/wishlist'
 	];
 	var is_webshop_page = webshop_prefixes.some(function(prefix) {
@@ -138,23 +144,32 @@ $.extend(shopping_cart, {
 			? `<span class="webshop-subnav-badge" id="wish-count">${wishCount}</span>`
 			: `<span class="webshop-subnav-badge" id="wish-count" style="display:none;">${wishCount || 0}</span>`;
 
-		var appLogo = window.webshop_app_logo || (frappe.boot && frappe.boot.app_logo_url) || '';
+		var appLogo = '/assets/upande_webshop/images/UpandeLogo.png';
+		var webshop_user_fullname = window.webshop_user_fullname || (frappe.session && frappe.session.user_fullname) || (frappe.session && frappe.session.user) || '';
+		var webshop_user_initials = webshop_user_fullname.split(' ').filter(function(word) {
+			return word;
+		}).slice(0, 2).map(function(word) {
+			return word[0];
+		}).join('').toUpperCase() || 'U';
+		var webshop_user_avatar = window.webshop_user_image
+			? `<img src="${window.webshop_user_image}" alt="Account" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;">`
+			: `<span style="display:inline-flex;width:28px;height:28px;align-items:center;justify-content:center;border-radius:50%;background:#0d6efd;color:#fff;font-size:0.8rem;font-weight:600;line-height:1;">${webshop_user_initials}</span>`;
 		var shopIconHtml = appLogo
 			? `<img src="${appLogo}" class="webshop-subnav-app-logo" alt="Shop">`
 			: `<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
-					<line x1="3" y1="6" x2="21" y2="6"/>
-					<path d="M16 10a4 4 0 0 1-8 0"/>
-				</svg>`;
+				<path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+				<line x1="3" y1="6" x2="21" y2="6"/>
+				<path d="M16 10a4 4 0 0 1-8 0"/>
+			</svg>`;
 
 		var html = `
 			<div id="webshop-subnav">
 				<div class="webshop-subnav-inner">
 					<!-- Left: App logo / Shop link -->
 					<nav class="webshop-subnav-links">
-						<a href="/upande-webshop" class="webshop-subnav-link webshop-subnav-shop-link" title="Shop">
+						<a href="/webshop" class="webshop-subnav-link webshop-subnav-shop-link" title="Shop">
 							${shopIconHtml}
-							<span class="webshop-subnav-shop-label">Upande Webshop</span>
+							<span class="webshop-subnav-shop-label">Webshop</span>
 						</a>
 					</nav>
 
@@ -162,55 +177,52 @@ $.extend(shopping_cart, {
 					<div class="webshop-subnav-right">
 						${frappe.session.user && frappe.session.user !== 'Guest' ? `
 						<!-- Wishlist link -->
-						<a href="/wishlist" class="webshop-subnav-cart-link wishlist-icon mr-3">
+						<a href="/wishlist" class="webshop-subnav-cart-link wishlist-icon mr-3" aria-label="Wishlist" title="Wishlist">
 							<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 								<path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
 							</svg>
-							<span class="webshop-subnav-cart-label">Wishlist</span>
 							${wishBadgeHtml}
 						</a>
 
-						<!-- Cart / Quote link -->
-						<a href="/cart" class="webshop-subnav-cart-link cart-icon">
+						<!-- Cart link -->
+						<a href="/cart" class="webshop-subnav-cart-link cart-icon" aria-label="Cart" title="Cart">
 							<svg class="icon icon-md" style="width:20px;height:20px;">
 								<use href="#icon-assets"></use>
 							</svg>
-							<span class="webshop-subnav-cart-label">Quote</span>
 							${badgeHtml}
 						</a>
 
 						<!-- Account dropdown -->
 						<div class="webshop-subnav-dropdown">
-							<button class="webshop-subnav-link webshop-subnav-dropdown-toggle" id="ws-account-toggle" aria-expanded="false">
-								Account
+							<button class="webshop-subnav-link webshop-subnav-dropdown-toggle" id="ws-account-toggle" aria-expanded="false" aria-label="Account" title="Account">
+								${webshop_user_avatar}
 								<svg style="width:12px;height:12px;margin-left:4px;vertical-align:middle;" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
 									<polyline points="4 6 8 10 12 6"/>
 								</svg>
 							</button>
 							<ul class="webshop-subnav-dropdown-menu" id="ws-account-menu" role="menu">
-								<li><a href="/upande-webshop" class="webshop-subnav-dropdown-item">Products</a></li>
-								<li class="webshop-subnav-dropdown-divider"></li>
+								<li><a href="/webshop" class="webshop-subnav-dropdown-item">Products</a></li>
 								<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
-								<li><a href="/quotations" class="webshop-subnav-dropdown-item">Quotations</a></li>
-								<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
-								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart / Quote</a></li>
+									<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
+								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart</a></li>
+								${window.webshop_show_bouquets_page ? `<li><a href="/bouquet" class="webshop-subnav-dropdown-item">Bouquet</a></li>` : ``}
 								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
-								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
 								<li class="webshop-subnav-dropdown-divider"></li>
 								<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
 								<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
 								<li class="webshop-subnav-dropdown-divider"></li>
-								<li><a href="/logout?redirect-to=/upande-webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
+								<li><a href="/webshop-setting" class="webshop-subnav-dropdown-item">Setting</a></li>
+								<li><a href="/logout?redirect-to=/webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
 							</ul>
 						</div>
-						` : `
-						<!-- Guest: show Login button -->
-						<a href="/login" class="webshop-subnav-login-btn">Login</a>
-						`}
-					</div>
+					` : `
+					<!-- Guest: show Login button -->
+					<a href="/login" class="webshop-subnav-login-btn">Login</a>
+					`}
 				</div>
 			</div>
+		</div>
 		`;
 
 		var $header = $('header.navbar, nav.navbar').first();
@@ -275,7 +287,12 @@ $.extend(shopping_cart, {
 				},
 				btn: opts.btn,
 				callback: function(r) {
-					shopping_cart.set_cart_count(true);
+					// Prefer the count returned in the response — avoids any cookie
+					// propagation race and works even if the cookie isn't readable yet.
+					var explicit_count = (r && r.message && r.message.cart_count != null)
+						? r.message.cart_count
+						: undefined;
+					shopping_cart.set_cart_count(true, explicit_count);
 					if(opts.callback)
 						opts.callback(r);
 				}
@@ -283,10 +300,14 @@ $.extend(shopping_cart, {
 		}
 	},
 
-	set_cart_count: function(animate=false) {
+	set_cart_count: function(animate=false, explicit_count=undefined) {
 		$(".intermediate-empty-cart").remove();
 
-		var cart_count = frappe.get_cookie("cart_count");
+		// explicit_count (when provided by an update_cart response) wins over the
+		// cookie, since the cookie may lag a frame on some browsers.
+		var cart_count = (explicit_count !== undefined)
+			? explicit_count
+			: frappe.get_cookie("cart_count");
 		if(frappe.session.user==="Guest") {
 			cart_count = 0;
 		}
@@ -367,6 +388,17 @@ $.extend(shopping_cart, {
 				}
 			}
 		});
+
+		frappe.call({
+			method: "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.is_wishlist_enabled",
+			callback: function(r) {
+				if (!r.message) {
+					$('#webshop-subnav .wishlist-icon').hide();
+					$('#webshop-subnav .webshop-subnav-dropdown-item[href="/wishlist"]')
+						.closest('li').hide();
+				}
+			}
+		});
 	},
 
 	toggle_button_class(button, remove, add) {
@@ -393,30 +425,11 @@ $.extend(shopping_cart, {
 			$btn.closest('.cart-action-container').addClass('d-flex');
 			$btn.parent().find('.go-to-cart').removeClass('hidden');
 			$btn.parent().find('.go-to-cart-grid').removeClass('hidden');
-			$btn.parent().find('.cart-indicator').removeClass('hidden');
 
 			const item_code = $btn.data('item-code');
 			upande_webshop.upande_webshop.shopping_cart.update_cart({
 				item_code,
 				qty: 1
-			});
-		});
-
-		// Remove from quote via cart-indicator × button in grid view
-		$('.page_content').on('click', '.remove-from-cart-grid', (e) => {
-			e.preventDefault();
-			e.stopPropagation();
-			const $btn = $(e.currentTarget);
-			const item_code = $btn.data('item-code');
-			upande_webshop.upande_webshop.shopping_cart.update_cart({
-				item_code,
-				qty: 0,
-				callback: function(r) {
-					if (!r.exc) {
-						$btn.closest('.cart-indicator').addClass('hidden');
-						shopping_cart.set_cart_count();
-					}
-				}
 			});
 		});
 	},

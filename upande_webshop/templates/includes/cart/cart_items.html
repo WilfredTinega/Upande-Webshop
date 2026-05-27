@@ -18,10 +18,15 @@
 {% endmacro %}
 
 {% for d in doc.items %}
-	{#- Parse stems per bunch from UOM name: "Bunch (25)" → 25 -#}
-	{%- set uom_name = d.uom or '' -%}
+	{#- Resolve the effective bunch UOM. The row's stored uom is the source of
+	    truth when it encodes a bunch size (e.g. "Bunch (12)"). For legacy rows
+	    where uom got saved as the stock UOM ("Nos"), fall back to the item's
+	    sales_uom so qty increments still step by full bunches. -#}
+	{%- set row_uom = d.uom or '' -%}
+	{%- set sales_uom = frappe.db.get_value('Item', d.item_code, 'sales_uom') or '' -%}
+	{%- set effective_uom = row_uom if '(' in row_uom else (sales_uom or row_uom) -%}
 	{%- set ns = namespace(stems_per_bunch=1) -%}
-	{%- for part in uom_name.split('(') -%}
+	{%- for part in effective_uom.split('(') -%}
 		{%- if loop.index > 1 and ')' in part -%}
 			{%- set num_str = part.split(')')[0].strip() -%}
 			{%- if num_str.isdigit() -%}
@@ -29,11 +34,16 @@
 			{%- endif -%}
 		{%- endif -%}
 	{%- endfor -%}
-	{#- qty is in bunches; use stems parsed from UOM name as source of truth -#}
+	{#- qty is in bunches; total stems = bunches × bunch size -#}
 	{%- set bunches = d.qty | int -%}
 	{%- set total_stems = (bunches * ns.stems_per_bunch) -%}
+	{#- Stock cap: server-side `_decorate_items_with_stock_cap` sets
+	    `_max_stock_bunches` to floor((available - other rows) / stems_per_bunch).
+	    0 means "no cap" (non-stock, free items, or feature off). -#}
+	{%- set max_bunches = (d.get("_max_stock_bunches") or 0) | int -%}
+	{%- set at_stock_cap = (max_bunches > 0 and bunches >= max_bunches) -%}
 
-	<tr data-name="{{ d.name }}" data-uom="{{ d.uom or '' }}" data-custom-length="{{ d.custom_length or '' }}" data-custom-box-type="{{ d.custom_box_type or '' }}">
+	<tr data-name="{{ d.name }}" data-uom="{{ effective_uom }}" data-custom-length="{{ d.custom_length or '' }}" data-custom-box-type="{{ d.custom_box_type or '' }}">
 		<td style="width: 60%;">
 			<div class="d-flex">
 				<div class="cart-item-image mr-4">
@@ -56,24 +66,28 @@
 						{{ _('Length') }}: <strong>{{ d.custom_length }}</strong>
 					</span>
 					{% endif %}
-					{% if d.uom %}
+					{% if effective_uom %}
 					<span class="item-subtitle mr-2">
-						{{ _('Pack') }}: <strong>{{ d.uom }}</strong>
+						{{ _('Pack') }}: <strong>{{ effective_uom }}</strong>
 					</span>
 					{% endif %}
-					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') if d.custom_box_type else 0 -%}
+					{% if d.custom_box_type %}
+					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') if frappe.get_meta('Box Type').has_field('min_order_qty') else 0 -%}
 					{%- set box_min_qty_int = (box_min_qty | int) if box_min_qty else 0 -%}
 					<span class="item-subtitle mr-2">
-						{{ _('Box Type') }}: <strong>{{ d.custom_box_type or '—' }}</strong>
-						{% if d.custom_box_type and box_min_qty_int > 0 %}
+						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>
+						{% if box_min_qty_int > 0 %}
 							<span class="text-muted" style="font-size:0.85em;">
 								({{ _('min') }} {{ box_min_qty_int }} {{ _('bunches') }})
 							</span>
 						{% endif %}
 					</span>
+					{% endif %}
+					{% if total_stems %}
 					<span class="item-subtitle mr-2">
 						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>
+					{% endif %}
 				</div>
 			</div>
 		</td>
@@ -93,10 +107,12 @@
 						value="{{ bunches }}"
 						data-item-code="{{ d.item_code }}"
 						data-stems-per-bunch="{{ d.conversion_factor | int }}"
+						data-max-bunches="{{ max_bunches }}"
 						style="max-width: 70px;" {{ disabled }}>
 
 					<span class="input-group-append d-sm-inline-block">
-						<button class="btn cart-btn" data-dir="up" {{ disabled }}>
+						<button class="btn cart-btn" data-dir="up" {{ 'disabled' if disabled or at_stock_cap else '' }}
+							{% if at_stock_cap %}title="{{ _('Stock limit reached') }}"{% endif %}>
 							{{ '+' if not d.is_free_item else ''}}
 						</button>
 					</span>

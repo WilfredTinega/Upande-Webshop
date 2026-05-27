@@ -10,9 +10,15 @@ webshop.ProductView =  class {
 		this.make();
 	}
 
-	make(from_filters=false) {
-		this.products_section.empty();
-		this.prepare_toolbar();
+	make(from_filters=false, preserve_toolbar=false) {
+		if (preserve_toolbar) {
+			// Remove only product/list/grid areas, keep the toolbar so the search input keeps focus
+			this.products_section.find("#products-grid-area, #products-list-area, .cart-empty, .alert-error").remove();
+			this.products_section.find("br").remove();
+		} else {
+			this.products_section.empty();
+			this.prepare_toolbar();
+		}
 		this.get_item_filter_data(from_filters);
 	}
 
@@ -25,6 +31,51 @@ webshop.ProductView =  class {
 		this.prepare_view_toggler();
 
 		new webshop.ProductSearch();
+		this.bind_grid_search();
+	}
+
+	bind_grid_search() {
+		const me = this;
+		const $box = $("#search-box");
+		if (!$box.length) return;
+
+		// Restore the current search term (if any) from the URL into the input
+		const initial = frappe.utils.get_query_params().search || "";
+		if (initial && !$box.val()) {
+			$box.val(initial);
+		}
+
+		const apply_search = (term) => {
+			const params = frappe.utils.get_query_params();
+			const current = params.search || "";
+			if (term === current) return;
+
+			if (term) {
+				params.search = term;
+			} else {
+				delete params.search;
+			}
+			params.start = 0;
+
+			const qs = me.get_query_string(params);
+			const path = qs ? `${location.pathname}?${qs}` : location.pathname;
+			window.history.replaceState("search", "", path);
+
+			me.from_filters = true;
+			me.make(true, true);
+		};
+
+		const debounced = frappe.utils.debounce((term) => apply_search(term), 300);
+
+		$box.on("input", (e) => {
+			const term = (e.target.value || "").trim();
+			// Clear immediately on empty; otherwise debounce
+			if (!term) {
+				apply_search("");
+			} else {
+				debounced(term);
+			}
+		});
 	}
 
 	prepare_view_toggler() {
@@ -142,7 +193,8 @@ webshop.ProductView =  class {
 			attribute_filters: attribute_filters,
 			item_group: this.item_group,
 			start: filters.start || null,
-			from_filters: this.from_filters || false
+			from_filters: this.from_filters || false,
+			search: filters.search || null
 		};
 	}
 

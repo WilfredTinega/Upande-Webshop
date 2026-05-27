@@ -1,4 +1,4 @@
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
+# Copyright (c) 2026, Upande LTD and contributors
 # License: GNU General Public License v3. See license.txt
 
 import frappe
@@ -56,7 +56,8 @@ class ProductQuery:
 		"""
 		# track if discounts included in field filters
 		self.filter_with_discount = bool(fields.get("discount"))
-		result, discount_list, website_item_groups, cart_items, count = [], [], [], [], 0
+		result, discount_list, website_item_groups, count = [], [], [], 0
+		cart_items = {}
 
 		if fields:
 			self.build_fields_filters(fields)
@@ -64,17 +65,12 @@ class ProductQuery:
 			self.build_item_group_filters(item_group)
 		if search_term:
 			self.build_search_filters(search_term)
-		if self.settings.hide_variants:
-			self.filters.append(["variant_of", "is", "not set"])
 
 		# query results
 		if attributes:
 			result, count = self.query_items_with_attributes(attributes, start)
 		else:
 			result, count = self.query_items(start=start)
-
-		# sort combined results by ranking
-		result = sorted(result, key=lambda x: x.get("ranking"), reverse=True)
 
 		if self.settings.enabled:
 			cart_items = self.get_cart_items()
@@ -90,37 +86,114 @@ class ProductQuery:
 		return {"items": result, "items_count": count, "discounts": discounts}
 
 	def query_items(self, start=0):
-		"""Build a query to fetch Website Items based on field filters."""
-		# MySQL does not support offset without limit,
-		# frappe does not accept two parameters for limit
-		# https://dev.mysql.com/doc/refman/8.0/en/select.html#id4651989
-		count_items = frappe.db.get_all(
-			"Website Item",
-			filters=self.filters,
-			or_filters=self.or_filters,
-			limit_page_length=184467440737095516,
-			limit_start=start,  # get all items from this offset for total count ahead
-			order_by="ranking desc",
-		)
-		count = len(count_items)
+		"""Build a query to fetch Website Items based on field filters.
 
-		# If discounts included, return all rows.
-		# Slice after filtering rows with discount (See `filter_results_by_discount`).
-		# Slicing before hand will miss discounted items on the 3rd or 4th page.
-		# Discounts are fetched on computing Pricing Rules so we cannot query them directly.
-		page_length = 184467440737095516 if self.filter_with_discount else self.page_length
-
+		Results are ordered by total storefront stock qty desc, then ranking desc
+		as tiebreaker. Out-of-stock items fall to the bottom.
+		"""
+		# Fetch all matching rows; sorting needs the full set because the sort
+		# key (stock qty) is computed in Python from the Bin table.
 		items = frappe.db.get_all(
 			"Website Item",
 			fields=self.fields,
 			filters=self.filters,
 			or_filters=self.or_filters,
-			limit_page_length=page_length,
-			limit_start=start,
-			order_by="ranking desc",
+			limit_page_length=184467440737095516,
+			limit_start=0,
+		)
+		count = len(items)
+
+		self._attach_stock_qty(items)
+		items.sort(
+			key=lambda i: (flt(i.get("stock_qty")), flt(i.get("ranking"))),
+			reverse=True,
 		)
 
+		# If discount filter is active, downstream code slices after filtering;
+		# otherwise apply pagination here.
+		if not self.filter_with_discount:
+			items = items[start : start + self.page_length]
+
 		return items, count
+
+	def _attach_stock_qty(self, items):
+		"""Set `stock_qty` on each item using one batched Bin query per warehouse set.
+
+		Used both as the sort key and to short-circuit `get_stock_availability`.
+		"""
+		# Group items by the warehouse set they resolve to, so each set takes one query.
+		items_by_warehouse_key = {}
+		for item in items:
+			leaves = tuple(sorted(_all_storefront_warehouses(item.get("website_warehouse"))))
+			items_by_warehouse_key.setdefault(leaves, []).append(item)
+
+		# For templates with variants, we also need the variant item_codes.
+		variant_parent_of = {}
+		template_codes = [i.item_code for i in items if i.get("has_variants")]
+		if template_codes:
+			variants = frappe.get_all(
+				"Item",
+				filters={"variant_of": ("in", template_codes)},
+				fields=["name", "variant_of"],
+			)
+			for v in variants:
+				variant_parent_of[v.name] = v.variant_of
+
+		for leaves, bucket in items_by_warehouse_key.items():
+			if not leaves:
+				for item in bucket:
+					item.stock_qty = 0.0
+				continue
+
+			# Variants are length-resolved at the item level (one variant = one
+			# length), so their qty stays in core Bin. Plain items use Stem Length
+			# Bin and sum across all lengths since the listing has no length context.
+			variant_lookup_codes = set()
+			plain_lookup_codes = set()
+			for item in bucket:
+				if item.get("has_variants"):
+					variant_lookup_codes.update(
+						code for code, parent in variant_parent_of.items() if parent == item.item_code
+					)
+				else:
+					plain_lookup_codes.add(item.item_code)
+
+			qty_by_code = {}
+
+			if variant_lookup_codes:
+				rows = frappe.db.get_all(
+					"Bin",
+					filters={
+						"item_code": ("in", list(variant_lookup_codes)),
+						"warehouse": ("in", list(leaves)),
+					},
+					fields=["item_code", "actual_qty"],
+				)
+				for row in rows:
+					qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
+
+			if plain_lookup_codes:
+				rows = frappe.db.get_all(
+					"Stem Length Bin",
+					filters={
+						"item_code": ("in", list(plain_lookup_codes)),
+						"warehouse": ("in", list(leaves)),
+					},
+					fields=["item_code", "actual_qty"],
+				)
+				for row in rows:
+					qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
+
+			for item in bucket:
+				if item.get("has_variants"):
+					total = sum(
+						qty_by_code.get(code, 0.0)
+						for code, parent in variant_parent_of.items()
+						if parent == item.item_code
+					)
+				else:
+					total = qty_by_code.get(item.item_code, 0.0)
+				item.stock_qty = total
 
 	def query_items_with_attributes(self, attributes, start=0):
 		"""Build a query to fetch Website Items based on field & attribute filters."""
@@ -235,6 +308,7 @@ class ProductQuery:
 				self.get_stock_availability(item)
 
 			item.in_cart = item.item_code in cart_items
+			item.cart_qty = cart_items.get(item.item_code, 0) if isinstance(cart_items, dict) else 0
 
 			item.wished = False
 			if frappe.db.exists(
@@ -261,10 +335,8 @@ class ProductQuery:
 
 	def get_stock_availability(self, item):
 		"""Modify item object and add stock details."""
-		from upande_webshop.templates.pages.wishlist import (
-			get_stock_availability as get_stock_availability_from_template,
-		)
-
+		# stock_qty was pre-computed by `_attach_stock_qty` in one batched query.
+		precomputed_qty = item.get("stock_qty")
 		item.in_stock = False
 		warehouse = item.get("website_warehouse")
 		is_stock_item = frappe.get_cached_value("Item", item.item_code, "is_stock_item")
@@ -272,7 +344,13 @@ class ProductQuery:
 		if item.get("on_backorder"):
 			return
 
+		if item.get("has_variants"):
+			if warehouse:
+				item.in_stock = flt(precomputed_qty) > 0
+			return
+
 		if not is_stock_item:
+			item.stock_qty = None
 			if warehouse:
 				# product bundle case
 				item.in_stock = get_non_stock_item_status(item.item_code, "website_warehouse")
@@ -280,7 +358,22 @@ class ProductQuery:
 				item.in_stock = True
 		elif warehouse:
 			# stock item and has warehouse
-			item.in_stock = get_stock_availability_from_template(item.item_code, warehouse)
+			item.in_stock = flt(precomputed_qty) > 0
+
+	def has_any_variant_in_stock(self, template_item_code, warehouse):
+		from upande_webshop.templates.pages.wishlist import (
+			get_stock_availability as get_stock_availability_from_template,
+		)
+
+		variants = frappe.get_all(
+			"Item",
+			filters={"variant_of": template_item_code},
+			pluck="name",
+		)
+		for variant_code in variants:
+			if get_stock_availability_from_template(variant_code, warehouse):
+				return True
+		return False
 
 	def get_cart_items(self):
 		customer = get_customer(silent=True)
@@ -298,13 +391,17 @@ class ProductQuery:
 				limit_page_length=1,
 			)
 			if quotation:
-				items = frappe.get_all(
-					"Quotation Item", fields=["item_code"], filters={"parent": quotation[0].get("name")}
+				rows = frappe.get_all(
+					"Quotation Item",
+					fields=["item_code", "qty"],
+					filters={"parent": quotation[0].get("name")},
 				)
-				items = [row.item_code for row in items]
-				return items
+				cart_qty_by_item = {}
+				for row in rows:
+					cart_qty_by_item[row.item_code] = cart_qty_by_item.get(row.item_code, 0) + (row.qty or 0)
+				return cart_qty_by_item
 
-		return []
+		return {}
 
 	def filter_results_by_discount(self, fields, result):
 		if fields and fields.get("discount"):
@@ -321,3 +418,76 @@ class ProductQuery:
 			result[: self.page_length]
 
 		return result
+
+
+def _resolve_warehouses(warehouse):
+	from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
+
+	if warehouse and frappe.get_cached_value("Warehouse", warehouse, "is_group") == 1:
+		return get_child_warehouses(warehouse)
+	return [warehouse] if warehouse else []
+
+
+def _all_storefront_warehouses(fallback_warehouse=None):
+	"""
+	Leaf warehouses to query for storefront stock.
+
+	Aggregates Webshop Settings → Warehouses (with group expansion). Falls back
+	to the per-item `website_warehouse` so we still render something if the
+	settings table is empty.
+	"""
+	from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+		get_configured_warehouses,
+	)
+
+	leaves = set()
+	for wh in get_configured_warehouses():
+		leaves.update(_resolve_warehouses(wh))
+	if not leaves and fallback_warehouse:
+		leaves.update(_resolve_warehouses(fallback_warehouse))
+	return list(leaves)
+
+
+def get_item_total_qty(item_code, warehouse):
+	"""Total qty for a single item across the storefront warehouse set.
+
+	Variant items (variant_of set) use core Bin — each variant_of = a distinct
+	length, already tracked there. Plain items use Stem Length Bin summed
+	across all lengths. Listing has no length context."""
+	warehouses = _all_storefront_warehouses(warehouse)
+	if not warehouses:
+		return 0.0
+	item_meta = frappe.db.get_value(
+		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
+	) or frappe._dict()
+	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	source = "Bin" if is_variant_or_template else "Stem Length Bin"
+	rows = frappe.db.get_all(
+		source,
+		filters={"item_code": item_code, "warehouse": ("in", warehouses)},
+		fields=["actual_qty"],
+	)
+	return sum(flt(r.actual_qty) for r in rows)
+
+
+def get_variants_total_qty(template_item_code, warehouse):
+	warehouses = _all_storefront_warehouses(warehouse)
+	if not warehouses:
+		return 0.0
+	variants = frappe.get_all(
+		"Item",
+		filters={"variant_of": template_item_code},
+		pluck="name",
+	)
+	if not variants:
+		return 0.0
+	rows = frappe.db.get_all(
+		"Bin",
+		filters={
+			"item_code": ("in", variants),
+			"warehouse": ("in", warehouses),
+		},
+		fields=["actual_qty"],
+	)
+	return sum(flt(r.actual_qty) for r in rows)

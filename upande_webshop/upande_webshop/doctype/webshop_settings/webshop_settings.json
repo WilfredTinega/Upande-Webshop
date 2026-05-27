@@ -1,42 +1,43 @@
 {
  "actions": [],
- "creation": "2021-02-10 17:13:39.139103",
+ "creation": "2026-05-18 18:07:06.336264",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "display_setting_tab",
   "products_per_page",
   "column_break_wkjy",
-  "sync_prices",
   "filter_categories_section",
   "enable_field_filters",
   "filter_fields",
   "enable_attribute_filters",
   "filter_attributes",
   "display_settings_section",
-  "hide_variants",
-  "enable_variants",
+  "show_stem_length",
+  "show_box_type",
   "show_price",
+  "show_bunch",
   "column_break_9",
   "login_required_to_view_products",
   "show_stock_availability",
   "show_quantity_in_website",
-  "allow_items_not_in_stock",
+  "full_width",
   "column_break_13",
   "show_apply_coupon_code_in_website",
   "show_contact_us_button",
   "show_attachments",
   "section_break_18",
   "company",
-  "price_list",
-  "enabled",
-  "store_page_docs",
-  "column_break_21",
   "default_customer_group",
   "quotation_series",
-  "allow_non_website_items_in_cart_quotation",
+  "column_break_21",
+  "show_cart_box_type",
+  "enabled",
+  "show_cart_line_code",
   "checkout_settings_section",
   "enable_checkout",
+  "use_sales_order_as_cart",
   "show_price_in_quotation",
   "column_break_27",
   "save_quotations_as_draft",
@@ -48,16 +49,27 @@
   "enable_reviews",
   "column_break_23",
   "enable_recommendations",
-  "item_search_settings_section",
-  "redisearch_warning",
-  "search_index_fields",
-  "is_redisearch_enabled",
-  "is_redisearch_loaded",
-  "shop_by_category_section",
   "slideshow",
   "guest_display_settings_section",
   "hide_price_for_guest",
-  "redirect_on_action"
+  "redirect_on_action",
+  "stock_balances_tab",
+  "sync_prices",
+  "column_break_evtt",
+  "section_break_spad",
+  "warehouses",
+  "bouquets_tab",
+  "show_bouquets_page",
+  "bouquets_item_group",
+  "bouquet_recipes_section",
+  "bouquet_recipes",
+  "bulk_actions_tab",
+  "bulk_publish_section",
+  "open_bulk_publish_page",
+  "column_break_jeie",
+  "section_break_kwyj",
+  "open_setup_check",
+  "setup_check"
  ],
  "fields": [
   {
@@ -74,13 +86,6 @@
   },
   {
    "default": "0",
-   "fieldname": "hide_variants",
-   "fieldtype": "Check",
-   "label": "Hide Variants"
-  },
-  {
-   "default": "0",
-   "description": "The field filters will also work as categories in the <b>Shop by Category</b> page.",
    "fieldname": "enable_field_filters",
    "fieldtype": "Check",
    "label": "Enable Field Filters (Categories)"
@@ -113,11 +118,6 @@
    "label": "Enable Shopping Cart"
   },
   {
-   "depends_on": "doc.enabled",
-   "fieldname": "store_page_docs",
-   "fieldtype": "HTML"
-  },
-  {
    "fieldname": "display_settings_section",
    "fieldtype": "Section Break",
    "label": "Display Settings"
@@ -127,6 +127,12 @@
    "fieldname": "show_attachments",
    "fieldtype": "Check",
    "label": "Show Public Attachments"
+  },
+  {
+   "default": "0",
+   "fieldname": "full_width",
+   "fieldtype": "Check",
+   "label": "Full Width"
   },
   {
    "default": "0",
@@ -142,9 +148,15 @@
   },
   {
    "default": "0",
-   "fieldname": "enable_variants",
+   "fieldname": "show_stem_length",
    "fieldtype": "Check",
-   "label": "Enable Variant Selection"
+   "label": "Show Stem Length"
+  },
+  {
+   "default": "0",
+   "fieldname": "show_box_type",
+   "fieldtype": "Check",
+   "label": "Show Box Type"
   },
   {
    "fieldname": "column_break_13",
@@ -170,12 +182,6 @@
    "label": "Show Apply Coupon Code"
   },
   {
-   "default": "0",
-   "fieldname": "allow_items_not_in_stock",
-   "fieldtype": "Check",
-   "label": "Allow items not in stock to be added to cart"
-  },
-  {
    "fieldname": "section_break_18",
    "fieldtype": "Section Break",
    "label": "Shopping Cart"
@@ -189,15 +195,6 @@
    "mandatory_depends_on": "eval: doc.enabled === 1",
    "options": "Company",
    "remember_last_selected_value": 1
-  },
-  {
-   "depends_on": "enabled",
-   "description": "Prices will not be shown if Price List is not set",
-   "fieldname": "price_list",
-   "fieldtype": "Link",
-   "label": "Price List",
-   "mandatory_depends_on": "eval: doc.enabled === 1",
-   "options": "Price List"
   },
   {
    "fieldname": "column_break_21",
@@ -216,8 +213,26 @@
    "depends_on": "enabled",
    "fieldname": "quotation_series",
    "fieldtype": "Select",
+   "hidden": 1,
    "label": "Quotation Series",
    "mandatory_depends_on": "eval: doc.enabled === 1"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_cart_box_type",
+   "fieldtype": "Check",
+   "label": "Show Box Type on Cart"
+  },
+  {
+   "default": "1",
+   "fieldname": "show_cart_line_code",
+   "fieldtype": "Check",
+   "label": "Show Line Code on Cart"
+  },
+  {
+   "fieldname": "open_setup_check",
+   "fieldtype": "Button",
+   "label": "Run Setup Check"
   },
   {
    "collapsible": 1,
@@ -255,19 +270,19 @@
    "label": "Save Quotations as Draft"
   },
   {
+   "default": "0",
+   "depends_on": "eval: doc.enable_checkout == 0",
+   "fieldname": "use_sales_order_as_cart",
+   "fieldtype": "Check",
+   "label": "Use Sales Order as Cart"
+  },
+  {
    "depends_on": "enable_checkout",
    "fieldname": "payment_gateway_account",
    "fieldtype": "Link",
    "label": "Payment Gateway Account",
    "mandatory_depends_on": "enable_checkout",
    "options": "Payment Gateway Account"
-  },
-  {
-   "collapsible": 1,
-   "depends_on": "enable_field_filters",
-   "fieldname": "shop_by_category_section",
-   "fieldtype": "Section Break",
-   "label": "Shop by Category"
   },
   {
    "fieldname": "slideshow",
@@ -292,33 +307,6 @@
    "fieldname": "enable_reviews",
    "fieldtype": "Check",
    "label": "Enable Reviews and Ratings"
-  },
-  {
-   "fieldname": "search_index_fields",
-   "fieldtype": "Small Text",
-   "label": "Search Index Fields",
-   "mandatory_depends_on": "is_redisearch_enabled",
-   "read_only_depends_on": "eval:!doc.is_redisearch_loaded"
-  },
-  {
-   "collapsible": 1,
-   "fieldname": "item_search_settings_section",
-   "fieldtype": "Section Break",
-   "label": "Item Search Settings"
-  },
-  {
-   "default": "0",
-   "fieldname": "is_redisearch_loaded",
-   "fieldtype": "Check",
-   "hidden": 1,
-   "label": "Is Redisearch Loaded"
-  },
-  {
-   "depends_on": "eval:!doc.is_redisearch_loaded",
-   "fieldname": "redisearch_warning",
-   "fieldtype": "HTML",
-   "label": "Redisearch Warning",
-   "options": "<p class=\"alert alert-warning\">Redisearch is not loaded. If you want to use the advanced product search feature, refer <a class=\"alert-link\" href=\"https://docs.erpnext.com/docs/v13/user/manual/en/setting-up/articles/installing-redisearch\" target=\"_blank\">here</a>.</p>"
   },
   {
    "default": "0",
@@ -366,39 +354,114 @@
   },
   {
    "default": "0",
-   "fieldname": "is_redisearch_enabled",
-   "fieldtype": "Check",
-   "label": "Enable Redisearch",
-   "read_only_depends_on": "eval:!doc.is_redisearch_loaded"
-  },
-  {
-   "default": "0",
    "fieldname": "login_required_to_view_products",
    "fieldtype": "Check",
    "label": "Login Required to View Products"
   },
   {
-   "default": "0",
-   "depends_on": "enabled",
-   "fieldname": "allow_non_website_items_in_cart_quotation",
-   "fieldtype": "Check",
-   "in_list_view": 1,
-   "label": "Allow Non Website Items in Cart Quotation"
-  },
-  {
    "fieldname": "sync_prices",
    "fieldtype": "Button",
-   "label": "Sync Prices"
+   "label": "Sync Price"
   },
   {
    "fieldname": "column_break_wkjy",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "stock_balances_tab",
+   "fieldtype": "Tab Break",
+   "label": "Stock"
+  },
+  {
+   "fieldname": "warehouses",
+   "fieldtype": "Table",
+   "label": "Warehouses",
+   "options": "Webshop Warehouse"
+  },
+  {
+   "default": "0",
+   "fieldname": "show_bunch",
+   "fieldtype": "Check",
+   "label": "Show Bunch Size"
+  },
+  {
+   "fieldname": "column_break_evtt",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_spad",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "bouquets_tab",
+   "fieldtype": "Tab Break",
+   "label": "Bouquets"
+  },
+  {
+   "default": "0",
+   "fieldname": "show_bouquets_page",
+   "fieldtype": "Check",
+   "label": "Enable Bouquets"
+  },
+  {
+   "depends_on": "show_bouquets_page",
+   "fieldname": "bouquets_item_group",
+   "fieldtype": "Link",
+   "label": "Bouquets Item Group",
+   "options": "Item Group"
+  },
+  {
+   "depends_on": "show_bouquets_page",
+   "fieldname": "bouquet_recipes_section",
+   "fieldtype": "Section Break",
+   "label": "Bouquet Recipes"
+  },
+  {
+   "depends_on": "show_bouquets_page",
+   "fieldname": "bouquet_recipes",
+   "fieldtype": "Table",
+   "label": "Bouquet Recipes",
+   "options": "Bouquet Recipe Item"
+  },
+  {
+   "fieldname": "display_setting_tab",
+   "fieldtype": "Tab Break",
+   "label": "Display"
+  },
+  {
+   "fieldname": "bulk_actions_tab",
+   "fieldtype": "Tab Break",
+   "label": "Actions"
+  },
+  {
+   "fieldname": "bulk_publish_section",
+   "fieldtype": "Section Break",
+   "label": "Publish Item"
+  },
+  {
+   "fieldname": "open_bulk_publish_page",
+   "fieldtype": "Button",
+   "label": "Publish"
+  },
+  {
+   "fieldname": "column_break_jeie",
+   "fieldtype": "Column Break"
+  },
+  {
+   "collapsible": 1,
+   "fieldname": "section_break_kwyj",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "setup_check",
+   "fieldtype": "HTML",
+   "label": "Setup Check"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-11 23:38:22.312266",
+ "modified": "2026-05-27 14:01:10.082883",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",

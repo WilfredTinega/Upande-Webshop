@@ -1,15 +1,31 @@
 import frappe
-from frappe.utils import getdate, nowdate
 
-from erpnext.stock.doctype.batch.batch import get_batch_qty
 from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
 
 
 def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
+	"""Total available qty across the storefront warehouse set, in sales UOM.
+
+	Source-of-truth choice mirrors shopping_cart.cart._stock_uom_qty_available:
+	  - Variant or template items resolve length at the item level (each
+	    variant = one length), so core Bin is correct.
+	  - Plain items use Stem Length Bin summed across all lengths.
+
+	Warehouse resolution prefers the storefront list (Webshop Settings →
+	Warehouses) so the qty matches what the listing card displays. Falls back
+	to the per-item website_warehouse if that list is empty, matching the
+	prior behavior."""
 	in_stock, stock_qty = 0, ""
-	template_item_code, is_stock_item = frappe.db.get_value(
-		"Item", item_code, ["variant_of", "is_stock_item"]
+	item_meta = frappe.db.get_value(
+		"Item", item_code, ["variant_of", "has_variants", "is_stock_item"], as_dict=True
 	)
+	if not item_meta:
+		# Virtual variant code (e.g. "Beatrice-73CM") that isn't a real Item.
+		# Treat as non-stock, not-in-stock so callers don't crash.
+		return frappe._dict({"in_stock": 0, "stock_qty": 0, "is_stock_item": 0})
+	template_item_code = item_meta.variant_of
+	is_stock_item = item_meta.is_stock_item
+	is_variant_or_template = bool(item_meta.has_variants) or bool(template_item_code)
 
 	if not warehouse:
 		warehouse = frappe.db.get_value("Website Item", {"item_code": item_code}, item_warehouse_field)
@@ -19,67 +35,49 @@ def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
 			"Website Item", {"item_code": template_item_code}, item_warehouse_field
 		)
 
-	if warehouse and frappe.get_cached_value("Warehouse", warehouse, "is_group") == 1:
-		warehouses = get_child_warehouses(warehouse)
-	else:
-		warehouses = [warehouse] if warehouse else []
+	# Use storefront warehouse set (matches listing's _attach_stock_qty); fall back
+	# to the resolved per-item warehouse if no storefront set is configured.
+	from upande_webshop.upande_webshop.product_data_engine.query import (
+		_all_storefront_warehouses,
+	)
+	warehouses = _all_storefront_warehouses(warehouse)
 
 	total_stock = 0.0
 	if warehouses:
-		for warehouse in warehouses:
-			stock_qty = frappe.db.sql(
+		placeholders = ",".join(["%s"] * len(warehouses))
+		if is_variant_or_template:
+			rows = frappe.db.sql(
 				"""
-			select S.actual_qty / IFNULL(C.conversion_factor, 1)
-			from tabBin S
-			inner join `tabItem` I on S.item_code = I.Item_code
-			left join `tabUOM Conversion Detail` C on I.sales_uom = C.uom and C.parent = I.Item_code
-			where S.item_code=%s and S.warehouse=%s""",
-				(item_code, warehouse),
+				SELECT S.actual_qty / IFNULL(C.conversion_factor, 1)
+				FROM `tabBin` S
+				INNER JOIN `tabItem` I ON S.item_code = I.Item_code
+				LEFT JOIN `tabUOM Conversion Detail` C
+				  ON I.sales_uom = C.uom AND C.parent = I.Item_code
+				WHERE S.item_code = %s AND S.warehouse IN ({})
+				""".format(placeholders),
+				(item_code, *warehouses),
+			)
+		else:
+			rows = frappe.db.sql(
+				"""
+				SELECT S.actual_qty / IFNULL(C.conversion_factor, 1)
+				FROM `tabStem Length Bin` S
+				INNER JOIN `tabItem` I ON S.item_code = I.Item_code
+				LEFT JOIN `tabUOM Conversion Detail` C
+				  ON I.sales_uom = C.uom AND C.parent = I.Item_code
+				WHERE S.item_code = %s AND S.warehouse IN ({})
+				""".format(placeholders),
+				(item_code, *warehouses),
 			)
 
-			if stock_qty:
-				total_stock += adjust_qty_for_expired_items(item_code, stock_qty, warehouse)
+		for row in rows:
+			total_stock += row[0] or 0
 
 		in_stock = total_stock > 0 and 1 or 0
 
 	return frappe._dict(
 		{"in_stock": in_stock, "stock_qty": total_stock, "is_stock_item": is_stock_item}
 	)
-
-
-def adjust_qty_for_expired_items(item_code, stock_qty, warehouse):
-	batches = frappe.get_all("Batch", filters=[{"item": item_code}], fields=["expiry_date", "name"])
-	expired_batches = get_expired_batches(batches)
-	stock_qty = [list(item) for item in stock_qty]
-
-	for batch in expired_batches:
-		if warehouse:
-			stock_qty[0][0] = max(0, stock_qty[0][0] - get_batch_qty(batch, warehouse))
-		else:
-			stock_qty[0][0] = max(0, stock_qty[0][0] - qty_from_all_warehouses(get_batch_qty(batch)))
-
-		if not stock_qty[0][0]:
-			break
-
-	return stock_qty[0][0] if stock_qty else 0
-
-
-def get_expired_batches(batches):
-	"""
-	:param batches: A list of dict in the form [{'expiry_date': datetime.date(20XX, 1, 1), 'name': 'batch_id'}, ...]
-	"""
-	return [b.name for b in batches if b.expiry_date and b.expiry_date <= getdate(nowdate())]
-
-
-def qty_from_all_warehouses(batch_info):
-	"""
-	:param batch_info: A list of dict in the form [{u'warehouse': u'Stores - I', u'qty': 0.8}, ...]
-	"""
-	qty = 0
-	for batch in batch_info:
-		qty = qty + batch.qty
-
-	return qty
 
 
 def get_non_stock_item_status(item_code, item_warehouse_field):

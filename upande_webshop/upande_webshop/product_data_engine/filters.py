@@ -1,4 +1,4 @@
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
+# Copyright (c) 2026, Upande LTD and contributors
 # License: GNU General Public License v3. See license.txt
 import frappe
 from frappe import _
@@ -52,10 +52,6 @@ class ProductFiltersBuilder:
 								["Website Item Group", "item_group", "=", self.item_group],  # consider website item groups
 							]
 						)
-
-				# exclude variants if mentioned in settings
-				if frappe.db.get_single_value("Webshop Settings", "hide_variants"):
-					item_filters["variant_of"] = ["is", "not set"]
 
 				# Get link field values attached to published items
 				item_values = frappe.get_all(

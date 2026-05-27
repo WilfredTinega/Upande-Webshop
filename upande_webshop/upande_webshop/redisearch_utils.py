@@ -1,6 +1,3 @@
-# Copyright (c) 2022, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
-
 import json
 
 import frappe
@@ -35,6 +32,11 @@ def get_indexable_web_fields():
 
 def is_redisearch_enabled():
 	"Return True only if redisearch is loaded and enabled."
+	# The toggle field was removed from Webshop Settings in this fork. Without
+	# this guard, get_single_value throws "Field … does not exist on Webshop
+	# Settings" on every search request.
+	if not frappe.get_meta("Webshop Settings").has_field("is_redisearch_enabled"):
+		return False
 	is_redisearch_enabled = frappe.db.get_single_value("Webshop Settings", "is_redisearch_enabled")
 	return is_search_module_loaded() and is_redisearch_enabled
 
@@ -241,8 +243,11 @@ def get_cache_key(name):
 
 
 def get_fields_indexed():
-	fields_to_index = frappe.db.get_single_value("Webshop Settings", "search_index_fields")
-	fields_to_index = fields_to_index.split(",") if fields_to_index else []
+	if frappe.get_meta("Webshop Settings").has_field("search_index_fields"):
+		fields_to_index = frappe.db.get_single_value("Webshop Settings", "search_index_fields")
+		fields_to_index = fields_to_index.split(",") if fields_to_index else []
+	else:
+		fields_to_index = []
 
 	mandatory_fields = ["name", "web_item_name", "route", "thumbnail", "ranking"]
 	fields_to_index = fields_to_index + mandatory_fields

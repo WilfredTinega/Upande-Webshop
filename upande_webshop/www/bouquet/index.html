@@ -1,0 +1,112 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ _('Bouquets') }}{% endblock %}
+
+{% block header %}
+<div class="mb-6">{{ _('Bouquets') }}</div>
+{% endblock header %}
+
+{% block breadcrumbs %}
+<div class="item-breadcrumbs small text-muted">
+	{% include "templates/includes/breadcrumbs.html" %}
+</div>
+{% endblock %}
+
+{% block head_include %}
+<style>
+	.bouquet-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+		gap: 1.5rem;
+	}
+	.bouquet-card {
+		display: block;
+		text-decoration: none;
+		color: inherit;
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+		border-radius: 0.5rem;
+		overflow: hidden;
+		transition: box-shadow .15s ease;
+	}
+	.bouquet-card:hover {
+		text-decoration: none;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+	}
+	.bouquet-card-image {
+		width: 100%;
+		aspect-ratio: 1 / 1;
+		background: var(--gray-100);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--gray-500);
+		font-size: 2rem;
+		overflow: hidden;
+	}
+	.bouquet-card-image img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+	.bouquet-card-body { padding: 1rem; }
+	.bouquet-card-name {
+		font-weight: 600;
+		font-size: 0.95rem;
+		margin-bottom: 0.25rem;
+	}
+	.bouquet-card-meta {
+		font-size: 0.8rem;
+		color: var(--gray-600);
+	}
+	.bouquets-slideshow { margin-bottom: 2rem; }
+	.bouquets-empty {
+		padding: 4rem 1rem;
+		text-align: center;
+		color: var(--gray-600);
+	}
+</style>
+{% endblock %}
+
+{% block page_content %}
+<div class="bouquets-page">
+	{% if slideshow %}
+	<div class="bouquets-slideshow">
+		{{ web_block(
+			"Hero Slider",
+			values=slideshow,
+			add_container=0,
+			add_top_padding=0,
+			add_bottom_padding=0,
+		) }}
+	</div>
+	{% endif %}
+
+	{% if bouquets %}
+	<div class="bouquet-grid">
+		{% for b in bouquets %}
+		<a class="bouquet-card" href="{{ b.bouquet_route }}">
+			<div class="bouquet-card-image">
+				{% if b.website_image %}
+				<img src="{{ b.website_image }}" alt="{{ b.web_item_name }}" loading="lazy">
+				{% else %}
+				{{ (b.web_item_name or b.item_code)[:2] | upper }}
+				{% endif %}
+			</div>
+			<div class="bouquet-card-body">
+				<div class="bouquet-card-name">{{ b.web_item_name or b.item_code }}</div>
+				<div class="bouquet-card-meta">
+					{{ b.ingredient_count }} {{ _('ingredient') if b.ingredient_count == 1 else _('ingredients') }}
+					{% if b.total_stems %} &middot; {{ b.total_stems | int }} {{ _('stems') }}{% endif %}
+				</div>
+			</div>
+		</a>
+		{% endfor %}
+	</div>
+	{% else %}
+	<div class="bouquets-empty">
+		{{ _('No bouquets have been defined yet.') }}
+	</div>
+	{% endif %}
+</div>
+{% endblock %}

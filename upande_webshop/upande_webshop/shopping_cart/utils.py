@@ -1,5 +1,3 @@
-# Copyright (c) 2021, Frappe Technologies Pvt. Ltd. and Contributors
-# License: GNU General Public License v3. See license.txt
 import frappe
 from frappe import _
 
@@ -17,9 +15,6 @@ def show_cart_count():
 
 
 def set_cart_count(login_manager):
-	# since this is run only on hooks login event
-	# make sure user is already a customer
-	# before trying to set cart count
 	user_is_customer = is_customer()
 	if not user_is_customer:
 		return
@@ -27,9 +22,6 @@ def set_cart_count(login_manager):
 	if show_cart_count():
 		from upande_webshop.upande_webshop.shopping_cart.cart import set_cart_count
 
-		# set_cart_count will try to fetch existing cart quotation
-		# or create one if non existent (and create a customer too)
-		# cart count is calculated from this quotation's items
 		set_cart_count()
 
 
@@ -40,7 +32,6 @@ def redirect_customer_after_login(response, request):
 	"""
 	import json
 
-	# Only act on login POST requests
 	is_login = (
 		request.method == "POST"
 		and (
@@ -51,7 +42,6 @@ def redirect_customer_after_login(response, request):
 	if not is_login:
 		return
 
-	# Only act if we have a JSON response with message='Logged In'
 	content_type = response.content_type or ""
 	if "json" not in content_type:
 		return
@@ -62,7 +52,6 @@ def redirect_customer_after_login(response, request):
 		return
 
 	message = data.get("message")
-	# Handle both System Users (Logged In) and Website Users (No App) with Customer role
 	if message not in ("Logged In", "No App"):
 		return
 
@@ -74,26 +63,70 @@ def redirect_customer_after_login(response, request):
 	if not user or user == "Guest":
 		return
 
-	# Use a fresh DB query to avoid stale cached roles from the current request.
-	# On first login, on_session_creation may have just assigned the Customer role
-	# but frappe.get_roles() returns the cached pre-login role list.
+	# Fresh DB query — frappe.get_roles() returns cached pre-login roles, missing the
+	# Customer role just assigned by on_session_creation on first login.
 	roles = frappe.db.get_values(
 		"Has Role", {"parent": user, "parenttype": "User"}, "role", pluck="role"
 	) or frappe.get_roles(user)
 	meaningful_roles = [r for r in roles if r not in ("All", "Guest")]
 
-	# Redirect if Customer role is present and user has no other meaningful roles,
-	# OR if user is a Website User with no meaningful roles yet (first-login race condition).
 	user_type = frappe.db.get_value("User", user, "user_type")
 	is_customer_redirect = (
 		meaningful_roles == ["Customer"]
 		or (not meaningful_roles and user_type == "Website User")
 	)
 	if is_customer_redirect:
+		# If a guest just stashed a pending cart and we replayed it during
+		# on_session_creation, land them on /cart so they see the order.
+		target = "/cart" if getattr(frappe.local.flags, "pending_cart_replayed", False) else "/webshop"
 		data["message"] = "No App"
-		data["redirect_to"] = "/upande-webshop"
-		data["home_page"] = "/upande-webshop"
+		data["redirect_to"] = target
+		data["home_page"] = target
 		response.set_data(json.dumps(data))
+
+
+def _redirect(location, code=302):
+	"""Raise a werkzeug-style redirect that frappe.app turns into a response.
+
+	frappe.Redirect is only interpreted by the website page renderer, which runs
+	*after* before_request — raising it that early bubbles up as a 500. A werkzeug
+	HTTPException, by contrast, is converted to its response by frappe.app at the
+	init_request level, so a redirect raised here actually works.
+	"""
+	from werkzeug.exceptions import HTTPException
+	from werkzeug.utils import redirect as _wz_redirect
+
+	class RedirectException(HTTPException):
+		code = 302
+
+		def get_response(self, environ=None, scope=None):
+			return _wz_redirect(location, code=code)
+
+	raise RedirectException()
+
+
+def redirect_non_desk_users_from_desk():
+	"""before_request hook — if a logged-in user without Desk access hits a desk
+	route (/app, /desk), send them to /webshop instead of Frappe's bare
+	"Not Permitted" page.
+
+	Desk access = user_type 'System User'. Website-only users (Customers) get the
+	storefront. Guests are left alone (they should log in normally).
+	"""
+	user = getattr(frappe.session, "user", None)
+	if not user or user == "Guest":
+		return
+
+	path = (frappe.request.path or "").strip("/") if frappe.request else ""
+	# Only intercept the desk app routes.
+	if not (path == "app" or path.startswith("app/") or path == "desk" or path.startswith("desk/")):
+		return
+
+	# System Users can use the desk — leave them be.
+	if frappe.db.get_value("User", user, "user_type") == "System User":
+		return
+
+	_redirect("/webshop")
 
 
 def redirect_after_login(login_manager):
@@ -113,27 +146,53 @@ def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
 
-	# Expose app logo URL for the webshop sub-navbar via an inline script in <head>
 	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 	import json
 	app_logo = get_app_logo() or ""
 	context["webshop_app_logo"] = app_logo
-	logo_script = f'<script>window.webshop_app_logo = {json.dumps(app_logo)};</script>'
-	context["head_include"] = (context.get("head_include") or "") + logo_script
 
-	# Remove "My Account" from the top navbar — it's now in the webshop sub-navbar dropdown
+	show_bouquets_page = bool(
+		frappe.db.get_single_value("Webshop Settings", "show_bouquets_page")
+	)
+	context["webshop_show_bouquets_page"] = show_bouquets_page
+
+	customer_is_linked = is_customer()
+	context["webshop_user_is_customer"] = customer_is_linked
+
+	user_image = ""
+	user_fullname = frappe.session.user_fullname or frappe.session.user or ""
+	if frappe.session.user and frappe.session.user != "Guest":
+		# Read the live User image so a freshly-uploaded photo shows immediately,
+		# rather than the (possibly stale) value cached on the session.
+		user_image = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
+	context["webshop_user_image"] = user_image
+	context["webshop_user_fullname"] = user_fullname
+
+	boot_script = (
+		f'<script>'
+		f'window.webshop_app_logo = {json.dumps(app_logo)};'
+		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
+		f'window.webshop_user_is_customer = {json.dumps(customer_is_linked)};'
+		f'window.webshop_user_image = {json.dumps(user_image)};'
+		f'window.webshop_user_fullname = {json.dumps(user_fullname)};'
+		f'</script>'
+	)
+	context["head_include"] = (context.get("head_include") or "") + boot_script
+
 	if context.get("post_login"):
 		context["post_login"] = [
 			item for item in context["post_login"]
 			if item.get("label") not in ("My Account", _("My Account"))
 		]
 
-	# Remove "My Account" from top_bar_items if present
 	if context.get("top_bar_items"):
 		context["top_bar_items"] = [
 			item for item in context["top_bar_items"]
 			if item.get("label") not in ("My Account", _("My Account"))
 		]
+
+	context["show_sidebar"] = False
+	context["sidebar_items"] = []
 
 
 def is_customer():
