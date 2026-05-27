@@ -65,8 +65,6 @@ class ProductQuery:
 			self.build_item_group_filters(item_group)
 		if search_term:
 			self.build_search_filters(search_term)
-		if not self.settings.show_variants:
-			self.filters.append(["variant_of", "is", "not set"])
 
 		# query results
 		if attributes:

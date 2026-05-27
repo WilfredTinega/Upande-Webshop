@@ -26,7 +26,6 @@ def create_batches_on_floriday():
     SUPPLIER_ORG_ID = settings.organization_supplier_id
     ACCESS_TOKEN = settings.access_token
 
-    # Use the warehouse field from Floriday Settings
     SOURCE_WAREHOUSE = settings.warehouse
 
     if not SOURCE_WAREHOUSE:
@@ -80,7 +79,6 @@ def create_batches_on_floriday():
         batch_id = str(uuid.uuid4())
         batch_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-        # payload
         batch_payload = {
             "batchDate": batch_date,
             "batchId": batch_id,
@@ -213,12 +211,11 @@ def create_batches_on_floriday():
                 "batch_id": batch_id,
             })
 
-    # Log summary of batch creation results
     success_count = len([r for r in results if r.get("status") == "success"])
     failed_count = len([r for r in results if r.get("status") == "failed"])
     error_count = len([r for r in results if r.get("status") == "error"])
     no_mapping_count = len([r for r in results if r.get("status") == "no_mapping"])
-    
+
     summary_message = (
         f"BATCH CREATION SUMMARY: "
         f"Success: {success_count}, "

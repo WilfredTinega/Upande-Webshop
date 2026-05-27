@@ -12,6 +12,8 @@ def after_install():
 	add_custom_fields()
 	navbar_add_products_link()
 	resync_app_resources()
+	normalize_webshop_workspace()
+	ensure_desktop_icon()
 	ensure_variant_attributes()
 	apply_webshop_settings_defaults()
 	cleanup_blocking_property_setters()
@@ -70,17 +72,118 @@ def resync_app_resources():
 				)
 
 
-def _has_quotation_business_unit():
-	"""The Quotation Item length fields depend on `Quotation.custom_business_unit == "Roses"`.
-	On sites that don't have that driver field (e.g. mona, tambuzi) the eval is
-	always falsy, so creating these fields would just leak hidden columns that
-	core code might still try to populate. Skip them when the driver is absent.
-	"""
-	return bool(
-		frappe.db.get_value(
-			"Custom Field", {"dt": "Quotation", "fieldname": "custom_business_unit"}, "name"
-		)
+# Workspace identity field we standardise on. Frappe requires a Workspace's
+# name == title == label, and derives the Desk route from slug(name)
+# (frappe/public/js/frappe/views/workspace/workspace.js). We want the admin
+# workspace to live at /app/upande-webshop (slug of "Upande Webshop"), distinct
+# from the /webshop storefront URL shortcut inside it. A stale install/UI edit
+# can leave title or label out of sync (showing the wrong text) or set
+# parent_page to the workspace itself (nesting it under a missing parent, which
+# 404s the icon). Normalise all of that here so every install/migrate lands the
+# same working state. Safe to run repeatedly.
+_WORKSPACE_NAME = "Upande Webshop"
+
+
+def normalize_webshop_workspace():
+	"""Force the webshop Workspace's name/title/label consistent and clear any
+	self-referential parent_page so the Desk icon opens /app/upande-webshop."""
+	if not frappe.db.exists("Workspace", _WORKSPACE_NAME):
+		return
+
+	current = frappe.db.get_value(
+		"Workspace",
+		_WORKSPACE_NAME,
+		["title", "label", "parent_page"],
+		as_dict=True,
 	)
+	needs_fix = (
+		current.title != _WORKSPACE_NAME
+		or current.label != _WORKSPACE_NAME
+		or current.parent_page == _WORKSPACE_NAME
+	)
+	if not needs_fix:
+		return
+
+	try:
+		# Write the identity fields directly. Going through doc.save() risks
+		# Workspace's on_update rename trigger (it collapses name->title when
+		# label == name), which would fight us; a db_set keeps name stable.
+		frappe.db.set_value(
+			"Workspace",
+			_WORKSPACE_NAME,
+			{"title": _WORKSPACE_NAME, "label": _WORKSPACE_NAME, "parent_page": ""},
+			update_modified=False,
+		)
+		# The sidebar header (Workspace Sidebar) mirrors the title; keep it in step.
+		if frappe.db.exists("Workspace Sidebar", _WORKSPACE_NAME):
+			frappe.db.set_value(
+				"Workspace Sidebar", _WORKSPACE_NAME, "title", _WORKSPACE_NAME,
+				update_modified=False,
+			)
+	except Exception:
+		frappe.log_error(
+			title="upande_webshop normalize_webshop_workspace",
+			message=frappe.get_traceback(),
+		)
+
+
+# The launcher tile on /desk and /apps is a Desktop Icon. We ship one as a
+# standard fixture (desktop_icon/upande_webshop.json), but Frappe also
+# auto-generates a Desktop Icon from the public Workspace (labelled with the
+# workspace name "Upande Webshop", linking to the bare "/upande-webshop" route
+# that 404s). That auto-row shadows our fixture. Mirror upande_ta's approach:
+# upsert our External-link icon every install/migrate and drop the stale
+# auto-generated one, so the tile always reads "Webshop" and opens
+# /app/upande-webshop. (See upande_ta/install.py::ensure_desktop_icon.)
+_DESKTOP_ICON_NAME = "Webshop"
+_STALE_DESKTOP_ICON_NAME = "Upande Webshop"
+
+
+def ensure_desktop_icon():
+	"""Create / refresh the launcher Desktop Icon for the webshop workspace."""
+	# Drop the auto-generated workspace icon that links to the broken route.
+	if frappe.db.exists("Desktop Icon", _STALE_DESKTOP_ICON_NAME):
+		frappe.delete_doc(
+			"Desktop Icon", _STALE_DESKTOP_ICON_NAME,
+			ignore_permissions=True, force=True,
+		)
+
+	payload = {
+		"doctype": "Desktop Icon",
+		"name": _DESKTOP_ICON_NAME,
+		"label": _DESKTOP_ICON_NAME,
+		"app": "upande_webshop",
+		"icon_type": "App",
+		"link_type": "External",
+		"link": "/app/upande-webshop",
+		"logo_url": "/assets/upande_webshop/images/UpandeLogo.png",
+		"force_show": 1,
+		"hidden": 0,
+		"standard": 1,
+	}
+
+	if frappe.db.exists("Desktop Icon", _DESKTOP_ICON_NAME):
+		doc = frappe.get_doc("Desktop Icon", _DESKTOP_ICON_NAME)
+		for k, v in payload.items():
+			if k in ("doctype", "name"):
+				continue
+			doc.set(k, v)
+		doc.save(ignore_permissions=True)
+	else:
+		frappe.get_doc(payload).insert(ignore_permissions=True, ignore_if_duplicate=True)
+
+	frappe.clear_cache()
+
+
+def remove_legacy_pages():
+	"""Delete Page records this app once shipped but no longer does.
+
+	The "Bulk Publish Items" feature moved from a standalone Desk Page into the
+	Webshop Settings dialog; its backend now lives in webshop_settings.py. The
+	on-disk page was deleted, but the DB record lingers on already-installed
+	sites, so drop it explicitly. Safe to run repeatedly."""
+	if frappe.db.exists("Page", "bulk-publish-items"):
+		frappe.delete_doc("Page", "bulk-publish-items", force=True, ignore_permissions=True)
 
 
 def add_custom_fields():
@@ -90,7 +193,7 @@ def add_custom_fields():
 				"fieldname": "custom_delivery_point",
 				"fieldtype": "Link",
 				"label": "Delivery Point",
-				"options": "Delivery Points",
+				"options": "Delivery Point",
 				"insert_after": "shipping_address_name",
 			},
 			{
@@ -251,31 +354,10 @@ def add_custom_fields():
 				"fieldname": "enable_variants",
 				"fieldtype": "Check",
 				"label": "Enable Variant Selector",
-				"insert_after": "show_variants",
-				"description": "Render the variant selector (Stem Length / Box Type pills) on product pages of items with has_variants=1.",
+				"insert_after": "show_stem_length",
 			},
 		],
 	}
-
-	if _has_quotation_business_unit():
-		custom_fields["Quotation Item"] = [
-			{
-				"fieldname": "custom_length",
-				"fieldtype": "Link",
-				"label": "Length",
-				"options": "Stem Length",
-				"insert_after": "stock_uom",
-				"depends_on": "eval: parent.custom_business_unit == \"Roses\"",
-				"mandatory_depends_on": "eval: parent.custom_business_unit == \"Roses\"",
-			},
-			{
-				"fieldname": "custom_total_stems",
-				"fieldtype": "Float",
-				"label": "Total Stems",
-				"insert_after": "custom_length",
-				"read_only": 1,
-			},
-		]
 
 	frappe.make_property_setter(
 		{

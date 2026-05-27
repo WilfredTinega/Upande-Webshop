@@ -8,7 +8,7 @@
  "doctype": "Workspace",
  "for_user": "",
  "hide_custom": 0,
- "icon": "up",
+ "icon": "sell",
  "idx": 0,
  "indicator_color": "green",
  "is_hidden": 0,
@@ -117,7 +117,7 @@
    "hidden": 0,
    "is_query_report": 0,
    "label": "Shortcuts",
-   "link_count": 5,
+   "link_count": 6,
    "link_type": "DocType",
    "onboard": 0,
    "type": "Card Break"
@@ -171,15 +171,25 @@
    "link_type": "DocType",
    "onboard": 0,
    "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Drop Off Point",
+   "link_count": 0,
+   "link_to": "Delivery Point",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
   }
  ],
- "modified": "2026-05-26 10:10:46.892811",
+ "modified": "2026-05-27 19:39:59.241855",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Upande Webshop",
  "number_cards": [],
  "owner": "Administrator",
- "parent_page": "Upande Webshop",
+ "parent_page": "",
  "public": 1,
  "quick_lists": [],
  "roles": [

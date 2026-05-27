@@ -105,7 +105,14 @@
   "at_column_break_runtime",
   "at_next_run",
   "section_break_fvbp",
-  "token_url"
+  "token_url",
+  "custom_fields_tab",
+  "create_missing_custom_fields",
+  "check_custom_fields",
+  "column_break_kpvg",
+  "custom_fields_status_html",
+  "section_break_pkus",
+  "custom_fields_intro"
  ],
  "fields": [
   {
@@ -636,13 +643,46 @@
   {
    "fieldname": "column_break_fwyp",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "custom_fields_tab",
+   "fieldtype": "Tab Break",
+   "label": "Actions"
+  },
+  {
+   "fieldname": "custom_fields_intro",
+   "fieldtype": "HTML",
+   "options": "<p class=\"text-muted\">The Floriday integration reads Custom Fields that live on the host site's doctypes, not in this app's fixtures. Use <b>Check Custom Fields</b> to see which are present, then <b>Create Missing Custom Fields</b> to add the ones you select.</p>"
+  },
+  {
+   "fieldname": "check_custom_fields",
+   "fieldtype": "Button",
+   "label": "Check Custom Fields"
+  },
+  {
+   "fieldname": "create_missing_custom_fields",
+   "fieldtype": "Button",
+   "label": "Create Missing Custom Fields"
+  },
+  {
+   "fieldname": "custom_fields_status_html",
+   "fieldtype": "HTML",
+   "label": "Status"
+  },
+  {
+   "fieldname": "column_break_kpvg",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_pkus",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-04 17:46:26.656403",
+ "modified": "2026-05-27 19:21:24.647210",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Floriday Settings",

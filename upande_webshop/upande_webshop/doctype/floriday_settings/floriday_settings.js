@@ -517,6 +517,16 @@ frappe.ui.form.on("Floriday Settings", {
 		// Always reload from SLE on open — saved rows can go stale.
 		load_stock_table(frm, { silent: true });
 		load_system_stock_table(frm);
+		// Auto-render the custom-field status panel so the tab is never blank.
+		check_custom_fields(frm, { silent: true });
+	},
+
+	check_custom_fields(frm) {
+		check_custom_fields(frm, { silent: false });
+	},
+
+	create_missing_custom_fields(frm) {
+		create_missing_custom_fields(frm);
 	},
 
 	add_stock(frm) {
@@ -666,3 +676,148 @@ frappe.ui.form.on("Floriday Settings", {
 		});
 	},
 });
+
+// ── Custom-field health check ────────────────────────────────────────────
+const CUSTOM_FIELDS_API =
+	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_custom_fields";
+
+// Cache of the last check result so the Create button knows what to send.
+let _floriday_field_status = [];
+
+function render_custom_fields_panel(frm, rows) {
+	const wrapper = frm.get_field("custom_fields_status_html");
+	if (!wrapper || !wrapper.$wrapper) return;
+
+	if (!rows || !rows.length) {
+		wrapper.$wrapper.html(
+			`<p class="text-muted">${__("No fields to check.")}</p>`
+		);
+		return;
+	}
+
+	const present = rows.filter((r) => r.present).length;
+	const missing = rows.filter((r) => !r.present && !r.doctype_missing).length;
+	const dt_missing = rows.filter((r) => r.doctype_missing).length;
+
+	const head = `<div style="margin-bottom:8px;">
+		<span class="indicator-pill green">${__("Present")}: ${present}</span>
+		<span class="indicator-pill orange">${__("Missing")}: ${missing}</span>
+		${dt_missing ? `<span class="indicator-pill red">${__("DocType absent")}: ${dt_missing}</span>` : ""}
+	</div>`;
+
+	const body = rows
+		.map((r) => {
+			let badge, color, disabled;
+			if (r.doctype_missing) {
+				badge = __("DocType absent");
+				color = "red";
+				disabled = "disabled";
+			} else if (r.present) {
+				badge = __("Present");
+				color = "green";
+				disabled = "disabled";
+			} else {
+				badge = r.optional ? __("Missing (optional)") : __("Missing");
+				color = "orange";
+				disabled = "";
+			}
+			const checked = !r.present && !r.doctype_missing && !r.optional ? "checked" : "";
+			return `<tr>
+				<td style="width:32px;text-align:center;">
+					<input type="checkbox" class="floriday-cf-check"
+						data-id="${frappe.utils.escape_html(r.id)}" ${checked} ${disabled}>
+				</td>
+				<td>${frappe.utils.escape_html(r.dt)}</td>
+				<td><code>${frappe.utils.escape_html(r.fieldname)}</code></td>
+				<td>${frappe.utils.escape_html(r.fieldtype || "")}</td>
+				<td><span class="indicator-pill ${color}">${badge}</span></td>
+			</tr>`;
+		})
+		.join("");
+
+	wrapper.$wrapper.html(`${head}
+		<table class="table table-bordered" style="font-size:12px;">
+			<thead><tr>
+				<th></th><th>${__("DocType")}</th><th>${__("Field")}</th>
+				<th>${__("Type")}</th><th>${__("Status")}</th>
+			</tr></thead>
+			<tbody>${body}</tbody>
+		</table>`);
+}
+
+function check_custom_fields(frm, { silent } = {}) {
+	frappe.call({
+		method: `${CUSTOM_FIELDS_API}.check_floriday_custom_fields`,
+		callback(r) {
+			_floriday_field_status = r.message || [];
+			render_custom_fields_panel(frm, _floriday_field_status);
+			if (!silent) {
+				const missing = _floriday_field_status.filter(
+					(x) => !x.present && !x.doctype_missing
+				).length;
+				frappe.show_alert(
+					{
+						message: missing
+							? __("{0} custom field(s) missing", [missing])
+							: __("All Floriday custom fields are present"),
+						indicator: missing ? "orange" : "green",
+					},
+					6
+				);
+			}
+		},
+	});
+}
+
+function create_missing_custom_fields(frm) {
+	// Gather ticked, enabled checkboxes from the rendered panel.
+	const wrapper = frm.get_field("custom_fields_status_html");
+	const ids = [];
+	if (wrapper && wrapper.$wrapper) {
+		wrapper.$wrapper.find(".floriday-cf-check:checked:not(:disabled)").each(function () {
+			ids.push($(this).data("id"));
+		});
+	}
+
+	if (!ids.length) {
+		frappe.msgprint(__("Select at least one missing field to create."));
+		return;
+	}
+
+	frappe.confirm(
+		__("Create {0} custom field(s) on this site?", [ids.length]),
+		() => {
+			frappe.call({
+				method: `${CUSTOM_FIELDS_API}.create_missing_floriday_custom_fields`,
+				args: { field_ids: JSON.stringify(ids) },
+				freeze: true,
+				freeze_message: __("Creating custom fields…"),
+				callback(r) {
+					const m = (r.message && r.message.summary) || {};
+					frappe.show_alert(
+						{
+							message: __("Created {0}, skipped {1}, errors {2}", [
+								m.created || 0,
+								m.skipped || 0,
+								m.errors || 0,
+							]),
+							indicator: m.errors ? "red" : "green",
+						},
+						8
+					);
+					if (r.message && r.message.errors && r.message.errors.length) {
+						frappe.msgprint({
+							title: __("Field creation errors"),
+							message: r.message.errors
+								.map((e) => `<code>${frappe.utils.escape_html(e.id)}</code>: ${frappe.utils.escape_html(e.error)}`)
+								.join("<br>"),
+							indicator: "red",
+						});
+					}
+					// Re-run the check so the panel reflects the new state.
+					check_custom_fields(frm, { silent: true });
+				},
+			});
+		}
+	);
+}

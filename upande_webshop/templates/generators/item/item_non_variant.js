@@ -13,7 +13,7 @@ function nv_fetch_bunch_size(item_code) {
 	}
 	return new Promise((resolve) => {
 		frappe.call({
-			method: 'upande_webshop.api.pack_rate.get_item_bunch_size',
+			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_item_bunch_size',
 			args: { item_code },
 			callback: (r) => {
 				const msg = (r && r.message) || {};
@@ -34,7 +34,7 @@ function nv_fetch_pack_rate(box_name, length_cm) {
 	}
 	return new Promise((resolve) => {
 		frappe.call({
-			method: 'upande_webshop.api.pack_rate.get_pack_rate',
+			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_pack_rate',
 			args: { box_name, length_cm },
 			callback: (r) => {
 				const result = (r && r.message) || { pack_rate: null };
@@ -77,7 +77,7 @@ class InlineNonVariantSelector {
 		const symbols = { USD: '$', EUR: '€', GBP: '£', KES: 'KSh' };
 		this._currency = symbols[this._currency_code] || (this._currency_code + ' ');
 
-		// Map<length, { stock_qty, per_stem_rate, num_bunches, pack_rate }>
+		// Map<length, { stock_qty, per_stem_rate, num_stems, pack_rate }>
 		this.length_state = new Map();
 		this.selected_box_type = '';
 		this.bunch_size = 1;
@@ -136,7 +136,7 @@ class InlineNonVariantSelector {
 				this.length_state.set(value, {
 					stock_qty: this.get_stock_qty(value),
 					per_stem_rate: null,
-					num_bunches: 0,
+					num_stems: 0,
 					pack_rate: null,
 					user_edited: false,
 				});
@@ -163,21 +163,20 @@ class InlineNonVariantSelector {
 			});
 		});
 
-		this.$root.on('input', '.bunches-input', (e) => {
+		this.$root.on('input', '.stems-input', (e) => {
 			const $input = $(e.currentTarget);
 			const length = String($input.closest('.length-row').data('length'));
 			const state = this.length_state.get(length);
 			if (!state) return;
 			let raw = Math.max(parseInt($input.val()) || 0, 0);
-			// Clamp at per-length stock cap. data-max-bunches is set on render
-			// from floor(stock_qty / bunch_size); enforce both the spinner-click
-			// path and typed/pasted values here.
-			const maxAttr = parseInt($input.attr('data-max-bunches'));
+			// Clamp at per-length stock cap. data-max-stems is set on render
+			// from stock_qty; enforce both the spinner-click path and typed/pasted values here.
+			const maxAttr = parseInt($input.attr('data-max-stems'));
 			if (!isNaN(maxAttr) && maxAttr >= 0 && raw > maxAttr) {
 				raw = maxAttr;
 				$input.val(raw);
 			}
-			state.num_bunches = raw;
+			state.num_stems = raw;
 			state.user_edited = true;
 			this.update_row(length);
 			this.update_grand_totals();
@@ -208,11 +207,11 @@ class InlineNonVariantSelector {
 			// or item not stock-tracked). The actual click-time enforcement lives in
 			// the `input` handler — `max` alone doesn't block browser spinner clicks.
 			const bunchSize = this.bunch_size || 1;
-			const maxBunches = (state.stock_qty != null && state.stock_qty >= 0)
-				? Math.floor(Number(state.stock_qty) / bunchSize)
+			const maxStems = state.stock_qty != null && state.stock_qty >= 0
+				? Math.floor(Number(state.stock_qty))
 				: '';
-			const maxAttr = maxBunches !== '' ? `max="${maxBunches}"` : '';
-			const dataMaxAttr = maxBunches !== '' ? `data-max-bunches="${maxBunches}"` : '';
+			const maxAttr = maxStems !== '' ? `max="${maxStems}"` : '';
+			const dataMaxAttr = maxStems !== '' ? `data-max-stems="${maxStems}"` : '';
 			return `
 				<div class="length-row" data-length="${frappe.utils.escape_html(length)}">
 					<div>
@@ -228,16 +227,16 @@ class InlineNonVariantSelector {
 					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">×</div>
 					<div>
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
-							${__('No. of Bunches')}
+							${__('No. of Stems')}
 						</label>
-						<input type="number" class="form-control bunches-input" value="${state.num_bunches || 0}" min="0" ${maxAttr} ${dataMaxAttr}>
+						<input type="number" class="form-control stems-input" value="${state.num_stems || 0}" min="0" ${maxAttr} ${dataMaxAttr}>
 					</div>
 					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">=</div>
 					<div>
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
-							${__('Total Stems')}
+							${__('Total Bunches')}
 						</label>
-						<input type="number" class="form-control total-stems" value="0" readonly>
+						<input type="number" class="form-control total-bunches" value="0" readonly>
 					</div>
 					<div class="row-line-price ml-auto" style="font-size:13px; color:var(--gray-700); align-self:center;"></div>
 					<div class="row-msg"></div>
@@ -265,26 +264,26 @@ class InlineNonVariantSelector {
 		);
 		if (!state || !$row.length) return;
 
-		// Refresh the stock cap on the bunches input. Stock or bunch_size may
-		// have changed since render — keep `max` and `data-max-bunches` in sync
-		// and clamp any prior bunches value down to the new cap.
-		const $bunches = $row.find('.bunches-input');
+		// Refresh the stock cap on the stems input. Stock may have changed since render.
+		const $stems = $row.find('.stems-input');
 		const bunchSize = this.bunch_size || 1;
 		if (state.stock_qty != null && state.stock_qty >= 0) {
-			const maxBunches = Math.floor(Number(state.stock_qty) / bunchSize);
-			$bunches.attr('max', maxBunches);
-			$bunches.attr('data-max-bunches', maxBunches);
-			if ((state.num_bunches || 0) > maxBunches) {
-				state.num_bunches = maxBunches;
-				$bunches.val(maxBunches);
+			const maxStems = Math.floor(Number(state.stock_qty));
+			$stems.attr('max', maxStems);
+			$stems.attr('data-max-stems', maxStems);
+			if ((state.num_stems || 0) > maxStems) {
+				state.num_stems = maxStems;
+				$stems.val(maxStems);
 			}
 		} else {
-			$bunches.removeAttr('max');
-			$bunches.removeAttr('data-max-bunches');
+			$stems.removeAttr('max');
+			$stems.removeAttr('data-max-stems');
 		}
 
-		const total_stems = (state.num_bunches || 0) * (this.bunch_size || 1);
-		$row.find('.total-stems').val(total_stems);
+		// Calculate bunches from stems: bunches = ceil(stems / bunch_size)
+		const num_stems = state.num_stems || 0;
+		const total_bunches = num_stems > 0 ? Math.ceil(num_stems / bunchSize) : 0;
+		$row.find('.total-bunches').val(total_bunches);
 		$row.find('.bunch-size-display').val(this.bunch_size);
 
 		const $msg = $row.find('.row-msg');
@@ -293,7 +292,7 @@ class InlineNonVariantSelector {
 		const moq_bunches = this._moq_bunches || 0;
 
 		let msg = '';
-		if (total_stems > 0 && moq_bunches > 0 && state.num_bunches < moq_bunches) {
+		if (total_bunches > 0 && moq_bunches > 0 && total_bunches < moq_bunches) {
 			msg = `<small style="color:#e8a000; font-weight:500;">⚠️ ${__(
 				'Minimum order is {0} bunch{1} for this box type.',
 				[moq_bunches, moq_bunches > 1 ? 'es' : '']
@@ -323,11 +322,11 @@ class InlineNonVariantSelector {
 		let stems = 0;
 		let grand_price = 0;
 		this.length_state.forEach((state) => {
-			const nb = state.num_bunches || 0;
-			const ts = nb * (this.bunch_size || 1);
+			const ns = state.num_stems || 0;
+			const nb = ns > 0 ? Math.ceil(ns / (this.bunch_size || 1)) : 0;
 			bunches += nb;
-			stems += ts;
-			if (state.per_stem_rate) grand_price += state.per_stem_rate * ts;
+			stems += ns;
+			if (state.per_stem_rate) grand_price += state.per_stem_rate * ns;
 		});
 		this.$grand_bunches.text(bunches.toLocaleString());
 		this.$grand_stems.text(stems.toLocaleString());
@@ -370,18 +369,18 @@ class InlineNonVariantSelector {
 	}
 
 	autofill_bunches_for(length) {
-		// One box's worth of bunches = pack_rate / bunch_size.
+		// One box's worth of stems = pack_rate.
 		// Don't overwrite a value the user has already typed.
 		const state = this.length_state.get(length);
 		if (!state || state.user_edited) return;
-		if (!state.pack_rate || !this.bunch_size) return;
-		const bunches = Math.floor(state.pack_rate / this.bunch_size);
-		if (bunches > 0) {
-			state.num_bunches = bunches;
+		if (!state.pack_rate) return;
+		const stems = state.pack_rate;
+		if (stems > 0) {
+			state.num_stems = stems;
 			const $input = this.$length_rows.find(
-				`.length-row[data-length="${$.escapeSelector(String(length))}"] .bunches-input`
+				`.length-row[data-length="${$.escapeSelector(String(length))}"] .stems-input`
 			);
-			if ($input.length) $input.val(bunches);
+			if ($input.length) $input.val(stems);
 		}
 	}
 
@@ -411,7 +410,7 @@ class InlineNonVariantSelector {
 	load_box_types() {
 		if (!this.$box_area.length) return;
 		frappe.call({
-			method: 'upande_webshop.api.pack_rate.get_box_types',
+			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_box_types',
 			callback: (r) => {
 				const rows = (r && r.message) || [];
 				if (!rows.length) {
@@ -469,7 +468,10 @@ class InlineNonVariantSelector {
 					// Seed any rows that haven't been touched yet (pack-rate auto-fill takes precedence and runs after).
 					if (bunches) {
 						this.length_state.forEach((state) => {
-							if (!state.num_bunches && !state.user_edited) state.num_bunches = bunches;
+							if (!state.num_stems && !state.user_edited) {
+								// Convert bunches MOQ to stems: stems = bunches * bunch_size
+								state.num_stems = bunches * (this.bunch_size || 1);
+							}
 						});
 						this.render_length_rows();
 						this.update_grand_totals();
@@ -494,11 +496,13 @@ class InlineNonVariantSelector {
 		let ok = false;
 		let blocked = false;
 		this.length_state.forEach((state) => {
-			const stems = (state.num_bunches || 0) * (this.bunch_size || 1);
+			const stems = state.num_stems || 0;
 			if (stems <= 0) return;
+			const bunchSize = this.bunch_size || 1;
+			const bunches = stems > 0 ? Math.ceil(stems / bunchSize) : 0;
 			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
 			const within_stock = (stock_qty == null) || stems <= stock_qty;
-			const meets_moq = !this._moq_bunches || state.num_bunches >= this._moq_bunches;
+			const meets_moq = !this._moq_bunches || bunches >= this._moq_bunches;
 			if (within_stock && meets_moq) ok = true;
 			else blocked = true;
 		});
@@ -533,7 +537,7 @@ class InlineNonVariantSelector {
 				this.length_state.set(String(length), {
 					stock_qty: this.get_stock_qty(length),
 					per_stem_rate: null,
-					num_bunches: 0,
+					num_stems: 0,
 					pack_rate: null,
 					user_edited: false,
 				});
@@ -553,8 +557,9 @@ class InlineNonVariantSelector {
 	add_to_cart() {
 		const entries = [];
 		this.length_state.forEach((state, length) => {
-			const nb = state.num_bunches || 0;
-			const stems = nb * (this.bunch_size || 1);
+			const ns = state.num_stems || 0;
+			const nb = ns > 0 ? Math.ceil(ns / (this.bunch_size || 1)) : 0;
+			const stems = ns;
 			if (stems <= 0) return;
 			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
 			if (stock_qty != null && stems > stock_qty) return;
@@ -565,7 +570,7 @@ class InlineNonVariantSelector {
 		if (!entries.length) {
 			frappe.msgprint({
 				title: __('Enter quantity'),
-				message: __('Enter the number of bunches for at least one stem length.'),
+				message: __('Enter the number of stems for at least one stem length.'),
 				indicator: 'orange',
 			});
 			return;
@@ -589,7 +594,7 @@ class InlineNonVariantSelector {
 				additional_notes: [
 					this.selected_box_type ? `Box: ${this.selected_box_type}` : '',
 					entry.pack_rate ? `Pack Rate: ${entry.pack_rate} stems/box` : '',
-					`Total Stems: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
+					`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
 					specs.length ? `Specs: ${specs.join(', ')}` : '',
 				].filter(Boolean).join(' | '),
 				custom_length: entry.length,
@@ -612,7 +617,7 @@ class InlineNonVariantSelector {
 			const additional_notes = [
 				this.selected_box_type ? `Box: ${this.selected_box_type}` : '',
 				entry.pack_rate ? `Pack Rate: ${entry.pack_rate} stems/box` : '',
-				`Total Stems: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
+				`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
 				specs.length ? `Specs: ${specs.join(', ')}` : '',
 			].filter(Boolean).join(' | ');
 

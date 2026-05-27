@@ -72,7 +72,7 @@
 					</span>
 					{% endif %}
 					{% if d.custom_box_type %}
-					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') -%}
+					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') if frappe.get_meta('Box Type').has_field('min_order_qty') else 0 -%}
 					{%- set box_min_qty_int = (box_min_qty | int) if box_min_qty else 0 -%}
 					<span class="item-subtitle mr-2">
 						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>

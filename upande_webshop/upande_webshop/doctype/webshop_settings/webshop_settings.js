@@ -2,11 +2,6 @@
 
 frappe.ui.form.on("Webshop Settings", {
 	onload: function(frm) {
-		if(frm.doc.__onload && frm.doc.__onload.quotation_series) {
-			frm.fields_dict.quotation_series.df.options = frm.doc.__onload.quotation_series;
-			frm.refresh_field("quotation_series");
-		}
-
 		frm.set_query('payment_gateway_account', function() {
 			return { 'filters': {
 				'payment_channel': ['in', ["Email", "Phone"]]
@@ -71,8 +66,6 @@ frappe.ui.form.on("Webshop Settings", {
 			?.removeClass("btn-default")
 			.addClass("btn-primary");
 
-		populate_warehouse_qty(frm);
-
 		frm.add_custom_button(__("Repost Bin (all Website Items)"), () => {
 			const d = new frappe.ui.Dialog({
 				title: __("Repost Bin from Stock Ledger"),
@@ -119,6 +112,51 @@ frappe.ui.form.on("Webshop Settings", {
 			d.show();
 		}, __("Actions"));
 
+		frm.add_custom_button(__("Backfill Per-Length Prices"), () => {
+			const d = new frappe.ui.Dialog({
+				title: __("Backfill Per-Length Item Prices"),
+				fields: [
+					{
+						fieldtype: "HTML",
+						options: `
+							<div class="text-muted small">
+								<p>${__("Seeds one <b>Item Price</b> row per master Stem Length for every enabled <b>non-variant</b> rose / David Austin item. Variants are skipped — they encode length in the item code.")}</p>
+								<p>${__("Run this once after first install/migration. Ongoing items are maintained automatically when saved, so re-running only fills gaps — it is safe (idempotent) and creates no duplicates.")}</p>
+							</div>
+						`,
+					},
+				],
+				primary_action_label: __("Start Backfill"),
+				primary_action: () => {
+					d.hide();
+					frappe.show_progress(__("Webshop Prices Sync"), 1, 100, __("Backfilling per-length prices..."));
+					frappe.call({
+						method: "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.enqueue_backfill_per_length_prices",
+						args: { run_async: 1 },
+						callback: (r) => {
+							const result = (r && r.message) || {};
+							if (!result.enqueued) {
+								frappe.hide_progress();
+								frappe.show_alert({
+									message: __("Could not start backfill."),
+									indicator: "red",
+								}, 8);
+								return;
+							}
+							frappe.show_alert({
+								message: __("Backfill started in background. Watch the progress bar."),
+								indicator: "blue",
+							}, 6);
+						},
+						error: () => {
+							frappe.hide_progress();
+						},
+					});
+				},
+			});
+			d.show();
+		}, __("Actions"));
+
 		frappe.model.with_doctype("Website Item", () => {
 			const web_item_meta = frappe.get_meta('Website Item');
 
@@ -134,7 +172,10 @@ frappe.ui.form.on("Webshop Settings", {
 		});
 	},
 	open_bulk_publish_page: function(frm) {
-		frappe.set_route("bulk-publish-items");
+		open_bulk_publish_dialog(frm);
+	},
+	open_setup_check: function(frm) {
+		toggle_setup_check(frm);
 	},
 	enabled: function(frm) {
 		if (frm.doc.enabled === 1) {
@@ -142,7 +183,6 @@ frappe.ui.form.on("Webshop Settings", {
 		}
 		else {
 			frm.set_value('company', '');
-			frm.set_value('price_list', '');
 			frm.set_value('default_customer_group', '');
 			frm.set_value('quotation_series', '');
 		}
@@ -156,7 +196,7 @@ frappe.ui.form.on("Webshop Settings", {
 					fieldname: "price_list",
 					label: __("Item Price List"),
 					options: "Price List",
-					default: frm.doc.price_list || "USD Price List",
+					default: "USD Price List",
 					reqd: 1,
 					get_query: () => ({ filters: { selling: 1, enabled: 1 } }),
 				},
@@ -214,29 +254,344 @@ frappe.ui.form.on("Webshop Settings", {
 	}
 });
 
-function populate_warehouse_qty(frm) {
-	// Live total qty per configured warehouse, summed from Bin. Read-only display
-	// only — nothing is persisted back. Skipped if the table is empty.
-	const rows = (frm.doc.warehouses || []).filter(r => r.warehouse);
-	if (!rows.length) return;
+function toggle_setup_check(frm) {
+	const field = frm.get_field("setup_check");
+	if (!field) return;
 
+	// Toggle: if currently shown, hide and clear.
+	if (frm._setup_check_shown) {
+		field.$wrapper.empty();
+		frm._setup_check_shown = false;
+		return;
+	}
+
+	frm._setup_check_shown = true;
+	field.$wrapper.html(
+		`<div class="text-muted small">${__("Checking required custom fields...")}</div>`
+	);
 	frappe.call({
-		method: "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.get_warehouse_totals",
-		args: { warehouses: rows.map(r => r.warehouse) },
+		method: "upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings.get_setup_check_html",
 		callback: (r) => {
-			const totals = (r && r.message) || {};
-			(frm.doc.warehouses || []).forEach(row => {
-				if (row.warehouse && totals[row.warehouse] !== undefined) {
-					row.qty = totals[row.warehouse];
-				}
-			});
-			// Re-render the grid so read-only static cells reflect updated row data.
-			// frm.refresh_field("warehouses") alone does not redraw already-rendered cells.
-			const grid = frm.fields_dict.warehouses.grid;
-			grid.grid_rows && grid.grid_rows.forEach(gr => gr.refresh());
-			grid.refresh();
-		}
+			if (!frm._setup_check_shown) return; // toggled off while loading
+			const msg = (r && r.message) || {};
+			field.$wrapper.html(msg.html || "");
+		},
+		error: () => {
+			field.$wrapper.html(
+				`<div class="text-muted small">${__("Could not run setup check.")}</div>`
+			);
+		},
 	});
+}
+
+const BULK_PUBLISH_METHOD =
+	"upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings";
+
+// ERPNext-provided default groups — hidden from the Item Group filter so users
+// only pick real product groups.
+const DEFAULT_ITEM_GROUPS = [
+	"All Item Groups",
+	"Products",
+	"Raw Material",
+	"Services",
+	"Sub Assemblies",
+	"Consumable",
+	"Chemicals",
+];
+
+function open_bulk_publish_dialog(frm) {
+	const state = {
+		start: 0,
+		page_length: 50,
+		total: 0,
+		items: [],
+		selected: new Set(),
+		in_progress: false,
+		poll_timer: null,
+		progress_dialog: null,
+	};
+
+	const d = new frappe.ui.Dialog({
+		title: __("Bulk Publish Items"),
+		size: "extra-large",
+		fields: [
+			{
+				fieldtype: "Link",
+				fieldname: "item_group",
+				label: __("Item Group"),
+				options: "Item Group",
+				get_query: () => ({ filters: { name: ["not in", DEFAULT_ITEM_GROUPS] } }),
+				change: () => reset_and_refresh(),
+			},
+			{ fieldtype: "Column Break" },
+			{ fieldtype: "Check", fieldname: "show_templates", label: __("Show variant template"), default: 0, change: () => reset_and_refresh() },
+			{ fieldtype: "Check", fieldname: "hide_published", label: __("Published"), default: 1, change: () => reset_and_refresh() },
+			{ fieldtype: "Section Break" },
+			{
+				fieldtype: "HTML",
+				fieldname: "grid_html",
+				options: `
+					<div class="bulk-publish-summary text-muted" style="margin: 0 0 8px;"></div>
+					<div class="bulk-publish-table-wrap" style="max-height: 50vh; overflow: auto;">
+						<table class="table table-bordered table-hover bulk-publish-table" style="background: var(--card-bg); margin-bottom: 0; width: 100%; table-layout: auto;">
+							<thead style="position: sticky; top: 0; background: var(--card-bg); z-index: 1;">
+								<tr>
+									<th style="width: 36px; white-space: nowrap;"><input type="checkbox" class="select-all-checkbox" /></th>
+									<th style="white-space: nowrap;">${__("Item Code")}</th>
+									<th>${__("Item Name")}</th>
+									<th style="white-space: nowrap;">${__("Item Group")}</th>
+									<th style="width: 1%; white-space: nowrap;">${__("Status")}</th>
+								</tr>
+							</thead>
+							<tbody class="bulk-publish-rows"></tbody>
+						</table>
+					</div>
+					<div class="bulk-publish-pagination" style="display:flex; gap:8px; align-items:center; margin-top: 10px;">
+						<button class="btn btn-default btn-sm prev-btn">${__("Previous")}</button>
+						<button class="btn btn-default btn-sm next-btn">${__("Next")}</button>
+						<span class="page-info text-muted"></span>
+					</div>
+				`,
+			},
+		],
+		primary_action_label: __("Publish Selected"),
+		primary_action: () => publish_selected(),
+	});
+
+	const $wrap = d.get_field("grid_html").$wrapper;
+	const $summary = $wrap.find(".bulk-publish-summary");
+	const $rows = $wrap.find(".bulk-publish-rows");
+	const $selectAll = $wrap.find(".select-all-checkbox");
+	const $prev = $wrap.find(".prev-btn");
+	const $next = $wrap.find(".next-btn");
+	const $pageInfo = $wrap.find(".page-info");
+
+	const get_filters = () => ({
+		item_group: d.get_value("item_group") || null,
+		hide_published: d.get_value("hide_published") ? 1 : 0,
+		show_templates: d.get_value("show_templates") ? 1 : 0,
+	});
+
+	const reset_and_refresh = () => {
+		state.start = 0;
+		state.selected.clear();
+		refresh();
+	};
+
+	const update_primary = () => {
+		const enabled = state.selected.size > 0 && !state.in_progress;
+		d.get_primary_btn().prop("disabled", !enabled);
+		$summary.text(__("{0} item(s) selected", [state.selected.size]));
+	};
+
+	const render_rows = () => {
+		$rows.empty();
+		if (!state.items.length) {
+			$rows.append(`
+				<tr><td colspan="5" class="text-muted text-center" style="padding: 20px;">
+					${__("No items match the current filters.")}
+				</td></tr>
+			`);
+			$selectAll.prop("checked", false).prop("disabled", true);
+			return;
+		}
+		$selectAll.prop("disabled", false);
+
+		for (const item of state.items) {
+			const checked = state.selected.has(item.item_code) ? "checked" : "";
+			const disabled = item.already_published ? "disabled" : "";
+			const status = item.already_published
+				? `<span class="indicator-pill green">${__("Published")}</span>`
+				: `<span class="indicator-pill gray">${__("Not Published")}</span>`;
+			$rows.append(`
+				<tr>
+					<td style="white-space: nowrap;"><input type="checkbox" class="row-checkbox" data-item-code="${frappe.utils.escape_html(item.item_code)}" ${checked} ${disabled} /></td>
+					<td style="white-space: nowrap;">${frappe.utils.escape_html(item.item_code)}</td>
+					<td style="word-break: break-word;">${frappe.utils.escape_html(item.item_name || "")}</td>
+					<td style="white-space: nowrap;">${frappe.utils.escape_html(item.item_group || "")}</td>
+					<td style="white-space: nowrap;">${status}</td>
+				</tr>
+			`);
+		}
+
+		$selectAll.prop(
+			"checked",
+			state.items.filter((i) => !i.already_published).every((i) => state.selected.has(i.item_code)) &&
+				state.items.some((i) => !i.already_published)
+		);
+	};
+
+	const render_pagination = () => {
+		const from = state.total === 0 ? 0 : state.start + 1;
+		const to = Math.min(state.start + state.page_length, state.total);
+		$pageInfo.text(__("Showing {0}-{1} of {2}", [from, to, state.total]));
+		$prev.prop("disabled", state.start <= 0);
+		$next.prop("disabled", to >= state.total);
+	};
+
+	const refresh = async () => {
+		const args = Object.assign({ start: state.start, page_length: state.page_length }, get_filters());
+		const r = await frappe.call({ method: `${BULK_PUBLISH_METHOD}.get_items`, args });
+		state.items = (r.message && r.message.items) || [];
+		state.total = (r.message && r.message.total) || 0;
+		render_rows();
+		render_pagination();
+		update_primary();
+	};
+
+	$selectAll.on("change", (e) => {
+		const checked = $(e.target).is(":checked");
+		for (const item of state.items) {
+			if (item.already_published) continue;
+			if (checked) state.selected.add(item.item_code);
+			else state.selected.delete(item.item_code);
+		}
+		$rows.find(".row-checkbox:not(:disabled)").prop("checked", checked);
+		update_primary();
+	});
+
+	$rows.on("change", ".row-checkbox", (e) => {
+		const $cb = $(e.target);
+		const code = $cb.data("item-code");
+		if ($cb.is(":checked")) state.selected.add(code);
+		else state.selected.delete(code);
+		update_primary();
+	});
+
+	$prev.on("click", () => {
+		if (state.start <= 0) return;
+		state.start = Math.max(0, state.start - state.page_length);
+		refresh();
+	});
+
+	$next.on("click", () => {
+		if (state.start + state.page_length >= state.total) return;
+		state.start += state.page_length;
+		refresh();
+	});
+
+	const stop_polling = () => {
+		if (state.poll_timer) {
+			clearInterval(state.poll_timer);
+			state.poll_timer = null;
+		}
+	};
+
+	const finish_progress = ({ succeeded, skipped, failed, errors }) => {
+		state.in_progress = false;
+		stop_polling();
+		if (state.progress_dialog) {
+			const $bar = state.progress_dialog.$body.find(".bulk-publish-progress-bar");
+			const $msg = state.progress_dialog.$body.find(".bulk-publish-progress-msg");
+			$bar.css("width", "100%").attr("aria-valuenow", 100).text("100%");
+			$msg.text(__("Done. Published: {0}, Skipped: {1}, Failed: {2}", [succeeded || 0, skipped || 0, failed || 0]));
+			state.progress_dialog.set_primary_action(__("Close"), () => {
+				state.progress_dialog.hide();
+				state.progress_dialog = null;
+				state.selected.clear();
+				reset_and_refresh();
+			});
+		}
+		if (errors && errors.length) {
+			frappe.msgprint({
+				title: __("Some items failed"),
+				message: errors.map(frappe.utils.escape_html).join("<br>"),
+				indicator: "orange",
+			});
+		}
+	};
+
+	const set_progress = (pct, message) => {
+		if (!state.progress_dialog) return;
+		const $bar = state.progress_dialog.$body.find(".bulk-publish-progress-bar");
+		const $msg = state.progress_dialog.$body.find(".bulk-publish-progress-msg");
+		$bar.css("width", `${pct}%`).attr("aria-valuenow", pct).text(`${pct}%`);
+		if (message) $msg.text(message);
+	};
+
+	let last_event_at = Date.now();
+	const on_progress = (data) => {
+		if (!state.progress_dialog) return;
+		last_event_at = Date.now();
+		const pct = Math.max(1, Math.min(100, Number(data.progress) || 0));
+		set_progress(pct, data.message || "");
+	};
+	const on_done = (data) => {
+		if (!state.progress_dialog) return;
+		last_event_at = Date.now();
+		finish_progress(data);
+	};
+	frappe.realtime.off("webshop_bulk_publish_progress", on_progress);
+	frappe.realtime.off("webshop_bulk_publish_done", on_done);
+	frappe.realtime.on("webshop_bulk_publish_progress", on_progress);
+	frappe.realtime.on("webshop_bulk_publish_done", on_done);
+
+	d.$wrapper.on("hidden.bs.modal", () => {
+		frappe.realtime.off("webshop_bulk_publish_progress", on_progress);
+		frappe.realtime.off("webshop_bulk_publish_done", on_done);
+		stop_polling();
+	});
+
+	const run_publish = async (codes) => {
+		state.in_progress = true;
+		update_primary();
+
+		state.progress_dialog = new frappe.ui.Dialog({ title: __("Publishing Items"), no_cancel: true });
+		state.progress_dialog.$body.html(`
+			<div class="bulk-publish-progress-msg text-muted" style="margin-bottom: 10px;">${__("Starting...")}</div>
+			<div class="progress" style="height: 20px;">
+				<div class="progress-bar bulk-publish-progress-bar" role="progressbar"
+					aria-valuenow="1" aria-valuemin="0" aria-valuemax="100" style="width: 1%;">1%</div>
+			</div>
+		`);
+		state.progress_dialog.show();
+		last_event_at = Date.now();
+
+		try {
+			await frappe.call({ method: `${BULK_PUBLISH_METHOD}.publish_items`, args: { item_codes: codes } });
+			// Realtime-independent fallback: poll published count.
+			const started_at = Date.now();
+			state.poll_timer = setInterval(async () => {
+				if (!state.progress_dialog) return stop_polling();
+				try {
+					const r = await frappe.call({
+						method: `${BULK_PUBLISH_METHOD}.get_publish_status`,
+						args: { item_codes: codes },
+					});
+					const total = (r.message && r.message.total) || codes.length || 1;
+					const published = (r.message && r.message.published) || 0;
+					const pct = Math.max(1, Math.min(99, Math.round((published / total) * 100)));
+					const $bar = state.progress_dialog.$body.find(".bulk-publish-progress-bar");
+					const current = parseInt($bar.attr("aria-valuenow"), 10) || 0;
+					if (pct > current) set_progress(pct, __("Publishing {0} of {1}...", [published, total]));
+					const idle_ms = Date.now() - (last_event_at || started_at);
+					if (published >= total && idle_ms > 5000) {
+						finish_progress({ succeeded: published, skipped: 0, failed: Math.max(0, total - published), errors: [] });
+					}
+				} catch (e) {
+					// transient errors are fine — keep polling
+				}
+			}, 4000);
+		} catch (e) {
+			state.in_progress = false;
+			stop_polling();
+			update_primary();
+			if (state.progress_dialog) {
+				state.progress_dialog.hide();
+				state.progress_dialog = null;
+			}
+		}
+	};
+
+	const publish_selected = () => {
+		if (!state.selected.size) return;
+		const codes = Array.from(state.selected);
+		frappe.confirm(__("Publish {0} item(s) on the webshop?", [codes.length]), () => run_publish(codes));
+	};
+
+	d.show();
+	update_primary();
+	refresh();
 }
 
 function open_sync_dialog(frm, { source, title, intro }) {

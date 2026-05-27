@@ -54,9 +54,6 @@ frappe.ready(function() {
 	referral_coupon_code=frappe.get_cookie("referral_coupon_code");
 	referral_sales_partner=frappe.get_cookie("referral_sales_partner");
 
-	if (referral_coupon_code && $(".tot_quotation_discount").val()==undefined ) {
-		$(".txtcoupon").val(referral_coupon_code);
-	}
 	if (referral_sales_partner) {
 		$(".txtreferral_sales_partner").val(referral_sales_partner);
 	}
@@ -77,7 +74,7 @@ frappe.ready(function() {
 	}
 
 	var webshop_prefixes = [
-		'/webshop', '/cart', '/quotations', '/invoices',
+		'/webshop', '/cart', '/invoices',
 		'/orders', '/shipments', '/issues', '/contact', '/wishlist'
 	];
 	var is_webshop_page = webshop_prefixes.some(function(prefix) {
@@ -206,8 +203,7 @@ $.extend(shopping_cart, {
 							<ul class="webshop-subnav-dropdown-menu" id="ws-account-menu" role="menu">
 								<li><a href="/webshop" class="webshop-subnav-dropdown-item">Products</a></li>
 								<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
-								<li><a href="/quotations" class="webshop-subnav-dropdown-item">Quotations</a></li>
-								<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
+									<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
 								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart</a></li>
 								${window.webshop_show_bouquets_page ? `<li><a href="/bouquet" class="webshop-subnav-dropdown-item">Bouquet</a></li>` : ``}
 								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>

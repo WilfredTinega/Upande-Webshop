@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import comma_and, flt, unique
+from frappe.utils import cint, comma_and, flt, unique
 
 from upande_webshop.upande_webshop.redisearch_utils import (
 	create_website_items_index,
@@ -17,19 +17,26 @@ class ShoppingCartSetupError(frappe.ValidationError):
 
 class WebshopSettings(Document):
 	def onload(self):
-		self.get("__onload").quotation_series = frappe.get_meta("Quotation").get_options("naming_series")
-
 		# flag >> if redisearch is installed and loaded
 		self.is_redisearch_loaded = is_search_module_loaded()
+		self._populate_warehouse_qty()
+
+	def _populate_warehouse_qty(self):
+		"""Fill each Warehouses row's `qty` with the live Bin total so the form
+		shows current stock. In-memory only — not persisted, so the doc stays
+		clean. Done server-side so the values arrive with the form (no flaky
+		client-side grid refresh)."""
+		rows = [r for r in (self.get("warehouses") or []) if r.warehouse]
+		if not rows:
+			return
+		totals = get_warehouse_totals([r.warehouse for r in rows])
+		for r in rows:
+			r.qty = totals.get(r.warehouse, 0) or 0
 
 	def validate(self):
 		self.validate_field_filters(self.filter_fields, self.enable_field_filters)
-		self.validate_attribute_filters()
 		self.validate_checkout()
 		self.validate_search_index_fields()
-
-		if self.enabled:
-			self.validate_price_list_exchange_rate()
 
 		frappe.clear_document_cache("Webshop Settings", "Webshop Settings")
 
@@ -68,13 +75,6 @@ class WebshopSettings(Document):
 					).format(row.idx, frappe.bold(row.fieldname))
 				)
 
-	def validate_attribute_filters(self):
-		if not (self.enable_attribute_filters and self.filter_attributes):
-			return
-
-		# if attribute filters are enabled, variants must be shown so attribute filtering can match them
-		self.show_variants = 1
-
 	def validate_checkout(self):
 		if self.enable_checkout and not self.payment_gateway_account:
 			self.enable_checkout = 0
@@ -104,34 +104,6 @@ class WebshopSettings(Document):
 				)
 
 		self.search_index_fields = ",".join(fields)
-
-	def validate_price_list_exchange_rate(self):
-		"Check if exchange rate exists for Price List currency (to Company's currency)."
-		from erpnext.setup.utils import get_exchange_rate
-
-		if not self.enabled or not self.company or not self.price_list:
-			return  # this function is also called from hooks, check values again
-
-		company_currency = frappe.get_cached_value("Company", self.company, "default_currency")
-		price_list_currency = frappe.db.get_value("Price List", self.price_list, "currency")
-
-		if not company_currency:
-			msg = f"Please specify currency in Company {self.company}"
-			frappe.throw(_(msg), title=_("Missing Currency"), exc=ShoppingCartSetupError)
-
-		if not price_list_currency:
-			msg = f"Please specify currency in Price List {frappe.bold(self.price_list)}"
-			frappe.throw(_(msg), title=_("Missing Currency"), exc=ShoppingCartSetupError)
-
-		if price_list_currency != company_currency:
-			from_currency, to_currency = price_list_currency, company_currency
-
-			# Get exchange rate checks Currency Exchange Records too
-			exchange_rate = get_exchange_rate(from_currency, to_currency, args="for_selling")
-
-			if not flt(exchange_rate):
-				msg = f"Missing Currency Exchange Rates for {from_currency}-{to_currency}"
-				frappe.throw(_(msg), title=_("Missing"), exc=ShoppingCartSetupError)
 
 	def validate_tax_rule(self):
 		if not frappe.db.get_value("Tax Rule", {"use_for_shopping_cart": 1}, "name"):
@@ -350,3 +322,360 @@ def sync_website_item_warehouses(user=None):
 			user=user,
 			after_commit=True,
 		)
+
+
+# ---------------------------------------------------------------------------
+# Bulk publish
+#
+# Backend for the "Bulk Publish Items" dialog opened from the Webshop Settings
+# form (open_bulk_publish_page button). Previously lived in a standalone Page
+# (page/bulk_publish_items); moved here when that orphaned Page was removed.
+# ---------------------------------------------------------------------------
+
+
+def _check_bulk_publish_permission():
+	if not frappe.has_permission("Website Item", "create"):
+		frappe.throw(_("Not permitted to create Website Items"), frappe.PermissionError)
+
+
+@frappe.whitelist()
+def get_items(
+	item_group=None, search=None, hide_published=1, show_templates=0, start=0, page_length=50
+):
+	"""Return Items matching filters, flagged with whether a Website Item already exists."""
+	_check_bulk_publish_permission()
+
+	start = cint(start)
+	page_length = min(cint(page_length) or 50, 200)
+	hide_published = cint(hide_published)
+	show_templates = cint(show_templates)
+
+	has_variants = 1 if show_templates else 0
+	conditions = ["i.disabled = 0", "i.has_variants = %(has_variants)s"]
+	values = {"has_variants": has_variants}
+
+	if item_group:
+		conditions.append("i.item_group = %(item_group)s")
+		values["item_group"] = item_group
+	if search:
+		conditions.append("i.item_name LIKE %(search)s")
+		values["search"] = f"%{search}%"
+	if hide_published:
+		conditions.append("wi.name IS NULL")
+
+	where_clause = " AND ".join(conditions)
+
+	total = frappe.db.sql(
+		f"""
+		SELECT COUNT(*) FROM `tabItem` i
+		LEFT JOIN `tabWebsite Item` wi ON wi.item_code = i.item_code
+		WHERE {where_clause}
+		""",
+		values,
+	)[0][0]
+
+	values["start"] = start
+	values["page_length"] = page_length
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT
+			i.name AS item_code,
+			i.item_name,
+			i.item_group,
+			i.brand,
+			i.image,
+			CASE WHEN wi.name IS NOT NULL THEN 1 ELSE 0 END AS already_published
+		FROM `tabItem` i
+		LEFT JOIN `tabWebsite Item` wi ON wi.item_code = i.item_code
+		WHERE {where_clause}
+		ORDER BY i.item_name ASC
+		LIMIT %(start)s, %(page_length)s
+		""",
+		values,
+		as_dict=True,
+	)
+
+	return {"items": rows, "total": total}
+
+
+@frappe.whitelist()
+def get_publish_status(item_codes):
+	"""Count how many of the given Item codes already have a Website Item.
+
+	Used by the dialog as a realtime-independent progress fallback.
+	"""
+	_check_bulk_publish_permission()
+	if isinstance(item_codes, str):
+		item_codes = frappe.parse_json(item_codes)
+	item_codes = [c for c in (item_codes or []) if c]
+	if not item_codes:
+		return {"total": 0, "published": 0}
+
+	published = frappe.db.count("Website Item", filters={"item_code": ("in", item_codes)})
+	return {"total": len(item_codes), "published": published}
+
+
+@frappe.whitelist()
+def publish_items(item_codes):
+	"""Enqueue bulk publish for the given Item codes. Returns immediately."""
+	_check_bulk_publish_permission()
+
+	if isinstance(item_codes, str):
+		item_codes = frappe.parse_json(item_codes)
+	item_codes = [c for c in (item_codes or []) if c]
+	if not item_codes:
+		frappe.throw(_("No items selected"))
+
+	frappe.enqueue(
+		"upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings._bulk_publish_worker",
+		queue="long",
+		timeout=1500,
+		item_codes=item_codes,
+		user=frappe.session.user,
+	)
+	return {"queued": len(item_codes)}
+
+
+def _bulk_publish_worker(item_codes, user):
+	"""Background worker: create Website Items and set published=1."""
+	from upande_webshop.upande_webshop.doctype.website_item.website_item import (
+		make_website_item,
+	)
+
+	total = len(item_codes)
+	succeeded = 0
+	skipped = 0
+	failed = 0
+	errors = []
+
+	for index, item_code in enumerate(item_codes, start=1):
+		try:
+			if frappe.db.exists("Website Item", {"item_code": item_code}):
+				skipped += 1
+			else:
+				item_doc = frappe.get_doc("Item", item_code)
+				web_item = make_website_item(item_doc.as_dict(), save=False)
+				web_item.published = 1
+				web_item.flags.ignore_permissions = True
+				web_item.save()
+				succeeded += 1
+		except Exception as exc:
+			failed += 1
+			if len(errors) < 20:
+				errors.append(f"{item_code}: {exc}")
+			frappe.log_error(
+				title=f"Bulk publish failed for {item_code}",
+				message=frappe.get_traceback(),
+			)
+
+		if index % 10 == 0 or index == total:
+			frappe.db.commit()
+			progress = int((index / total) * 100)
+			frappe.publish_realtime(
+				"webshop_bulk_publish_progress",
+				{
+					"progress": progress,
+					"message": _("Publishing {0} of {1}...").format(index, total),
+				},
+				user=user,
+				after_commit=True,
+			)
+
+	frappe.publish_realtime(
+		"webshop_bulk_publish_done",
+		{
+			"succeeded": succeeded,
+			"skipped": skipped,
+			"failed": failed,
+			"total": total,
+			"errors": errors,
+		},
+		user=user,
+		after_commit=True,
+	)
+
+
+# ---------------------------------------------------------------------------
+# Setup check
+#
+# The webshop flow depends on a set of custom fields existing on their
+# doctypes. Rather than throwing a raw error mid-cart, the Webshop Settings
+# "Run Setup Check" button (Actions tab) renders this report inline so an admin
+# can see what's missing and how to add it. The same data powers /webshop-setup.
+# ---------------------------------------------------------------------------
+
+# required=True fields block the webshop pages when missing (the flow can't run
+# without them). required=False are shown in the setup check but never block:
+#  - custom_delivery_date: cart falls back to the standard `delivery_date` field
+#  - custom_line_code: gated by the Show Line Code on Cart setting
+#  - custom_total_stems: written only when the column exists (has_column guarded)
+WEBSHOP_REQUIRED_FIELDS = [
+	{"doctype": "Website Item", "fieldname": "custom_length", "label": "Stem Length", "fieldtype": "Link", "options": "Stem Length", "required": True, "why": "Lets the product page resolve and display each stem-length variant."},
+	{"doctype": "Website Item", "fieldname": "custom_box_type", "label": "Box Type", "fieldtype": "Link", "options": "Box Type", "required": True, "why": "Used for box-type selection and pricing on the product page."},
+]
+
+WEBSHOP_QUOTATION_FIELDS = [
+	{"doctype": "Quotation", "fieldname": "custom_delivery_point", "label": "Delivery Point", "fieldtype": "Link", "options": "Delivery Point", "required": True, "why": "Where the order is delivered. Required at checkout."},
+	{"doctype": "Quotation", "fieldname": "custom_box_type", "label": "Box Type", "fieldtype": "Link", "options": "Box Type", "required": True, "why": "Cart-level box type, propagated to each order line."},
+	{"doctype": "Quotation", "fieldname": "custom_line_code", "label": "Line Code", "fieldtype": "Data", "options": "", "required": False, "why": "Optional — only used when 'Show Line Code on Cart' is enabled."},
+	{"doctype": "Quotation Item", "fieldname": "custom_length", "label": "Stem Length", "fieldtype": "Link", "options": "Stem Length", "required": True, "why": "Per-line stem length carried from the cart to the order."},
+	{"doctype": "Quotation Item", "fieldname": "custom_total_stems", "label": "Total Stems", "fieldtype": "Float", "options": "", "required": False, "why": "Optional — written only when the column exists."},
+]
+
+WEBSHOP_SALES_ORDER_FIELDS = [
+	{"doctype": "Sales Order", "fieldname": "custom_delivery_point", "label": "Delivery Point", "fieldtype": "Data", "options": "", "required": True, "why": "Where the order is delivered."},
+	{"doctype": "Sales Order", "fieldname": "custom_box_type", "label": "Box Type", "fieldtype": "Data", "options": "", "required": True, "why": "Cart-level box type."},
+	{"doctype": "Sales Order", "fieldname": "custom_line_code", "label": "Line Code", "fieldtype": "Data", "options": "", "required": False, "why": "Optional — only used when 'Show Line Code on Cart' is enabled."},
+	{"doctype": "Sales Order Item", "fieldname": "custom_length", "label": "Length", "fieldtype": "Link", "options": "Stem Length", "required": True, "why": "Per-line stem length."},
+	{"doctype": "Sales Order Item", "fieldname": "custom_box_type", "label": "Box Type", "fieldtype": "Link", "options": "Box Type", "required": True, "why": "Per-line box type."},
+	{"doctype": "Sales Order Item", "fieldname": "custom_total_stems", "label": "Total Stems", "fieldtype": "Float", "options": "", "required": False, "why": "Optional — written only when the column exists."},
+]
+
+
+def get_setup_check_fields():
+	"""Return the list of required fields for the cart doctype actually in use,
+	each augmented with whether it exists and a link to add it."""
+	use_sales_order = bool(
+		frappe.db.get_single_value("Webshop Settings", "use_sales_order_as_cart")
+	)
+	cart_fields = WEBSHOP_SALES_ORDER_FIELDS if use_sales_order else WEBSHOP_QUOTATION_FIELDS
+	fields = WEBSHOP_REQUIRED_FIELDS + cart_fields
+
+	out = []
+	for f in fields:
+		row = dict(f)
+		row["exists"] = bool(frappe.get_meta(f["doctype"]).has_field(f["fieldname"]))
+		# Open the Customize Form for the doctype — shows the doctype and all its
+		# fields so the admin can add the missing one inline.
+		row["new_custom_field_url"] = "/app/customize-form?doc_type={0}".format(
+			frappe.utils.quote(f["doctype"])
+		)
+		out.append(row)
+	return {"fields": out, "use_sales_order": use_sales_order}
+
+
+def get_missing_webshop_fields():
+	"""Return required webshop fields that don't yet exist. Only required-and-
+	missing fields block the pages; optional ones never block."""
+	return [
+		f
+		for f in get_setup_check_fields()["fields"]
+		if f.get("required") and not f["exists"]
+	]
+
+
+def apply_webshop_setup_guard(context):
+	"""Guard a webshop page: if any required custom field is missing, swap the
+	page for a friendly setup-block template instead of letting the page error
+	(or fall through to a Not Found). Returns True if the page was blocked.
+
+	Call at the top of a webshop page's get_context, before any code that reads
+	the custom fields.
+	"""
+	missing = get_missing_webshop_fields()
+	if not missing:
+		return False
+
+	# Group missing fields by doctype for a clean display.
+	groups = {}
+	for f in missing:
+		groups.setdefault(f["doctype"], []).append(f)
+
+	context.webshop_setup_missing = missing
+	context.webshop_setup_groups = groups
+	context.body_class = "product-page"
+	context.no_cache = 1
+	context.title = _("Webshop Setup Needed")
+	# Render the friendly block instead of the normal page body.
+	context.template = "templates/includes/webshop_setup_block.html"
+	return True
+
+
+@frappe.whitelist()
+def get_setup_check_html():
+	"""Render the setup-check report as HTML for the Webshop Settings form."""
+	if not frappe.has_permission("Webshop Settings", "read"):
+		frappe.throw(_("Not permitted"), frappe.PermissionError)
+
+	data = get_setup_check_fields()
+	fields = data["fields"]
+	missing = [f for f in fields if not f["exists"]]
+	missing_required = [f for f in missing if f.get("required")]
+
+	groups = {}
+	for f in fields:
+		groups.setdefault(f["doctype"], []).append(f)
+
+	esc = frappe.utils.escape_html
+	parts = []
+
+	if not missing:
+		parts.append(
+			'<div class="alert alert-success" style="margin-bottom:12px;">'
+			+ _("All custom fields are configured. The cart and checkout will work.")
+			+ "</div>"
+		)
+	elif missing_required:
+		parts.append(
+			'<div class="alert alert-danger" style="margin-bottom:12px;">'
+			+ _("{0} required field(s) are missing — the shop will show a setup page until they are added.").format(len(missing_required))
+			+ "</div>"
+		)
+	else:
+		parts.append(
+			'<div class="alert alert-warning" style="margin-bottom:12px;">'
+			+ _("{0} optional field(s) are missing. The shop still works; add them for full functionality.").format(len(missing))
+			+ "</div>"
+		)
+
+	for doctype, rows in groups.items():
+		parts.append('<div style="font-weight:600; margin:10px 0 4px;">%s</div>' % esc(doctype))
+		parts.append('<table class="table table-bordered" style="font-size:13px;">')
+		parts.append(
+			"<thead><tr>"
+			"<th style='width:80px;'>%s</th><th>%s</th><th>%s</th><th>%s</th><th style='width:120px;'></th>"
+			"</tr></thead><tbody>"
+			% (_("Status"), _("Field"), _("Type"), _("What it's for"))
+		)
+		for f in rows:
+			status = (
+				'<span class="indicator-pill green">%s</span>' % _("OK")
+				if f["exists"]
+				else '<span class="indicator-pill red">%s</span>' % _("Missing")
+			)
+			opts = (
+				'<div class="text-muted" style="font-size:11px;">%s: %s</div>'
+				% (_("Options"), esc(f["options"]))
+				if f["options"]
+				else ""
+			)
+			action = (
+				""
+				if f["exists"]
+				else '<a class="btn btn-primary btn-xs" target="_blank" href="%s">%s</a>'
+				% (f["new_custom_field_url"], _("Add field"))
+			)
+			req_pill = (
+				'<span class="indicator-pill orange" style="margin-left:4px;">%s</span>' % _("Required")
+				if f.get("required")
+				else '<span class="indicator-pill gray" style="margin-left:4px;">%s</span>' % _("Optional")
+			)
+			parts.append(
+				"<tr><td>%s</td>"
+				"<td><b>%s</b>%s<div class='text-muted' style='font-size:11px;'>%s</div></td>"
+				"<td>%s%s</td><td class='text-muted'>%s</td><td>%s</td></tr>"
+				% (
+					status,
+					esc(f["label"]),
+					req_pill,
+					esc(f["fieldname"]),
+					esc(f["fieldtype"]),
+					opts,
+					esc(f["why"]),
+					action,
+				)
+			)
+		parts.append("</tbody></table>")
+
+	return {"html": "".join(parts), "missing": len(missing)}

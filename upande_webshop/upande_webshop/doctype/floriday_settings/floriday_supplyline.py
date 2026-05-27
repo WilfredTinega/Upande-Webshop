@@ -4,7 +4,7 @@ import uuid
 import json
 from datetime import datetime, timezone, timedelta
 
-SUPPLY_LINE_CURRENCY = "EUR" 
+SUPPLY_LINE_CURRENCY = "EUR"
 
 EAT_OFFSET = timedelta(hours=3)
 
@@ -16,32 +16,24 @@ MAX_LOG_LENGTH = 100
 LATEST_BATCH_LIMIT = 1000
 
 def safe_log(message, title="Floriday Log"):
-    """
-    Safely log messages ensuring they never exceed length limits
-    """
+    """Log to Error Log, truncating message/title to stay under the length limit."""
     if not message:
         return
     if not title:
         title = "Floriday Log"
-    
-    # Truncate message if too long
+
     if len(message) > MAX_LOG_LENGTH:
         message = message[:MAX_LOG_LENGTH-3] + "..."
-    
-    # Truncate title if too long
     if len(title) > 100:
         title = title[:97] + "..."
-    
+
     try:
         frappe.log_error(message, title)
     except:
         pass
 
 def get_item_mapping():
-    """
-    Fetch item mappings from Floriday Items / Stem Length Price.
-    Returns {item_code: trade_item_id} (first non-empty trade_item_id per item).
-    """
+    """Return {item_code: trade_item_id} from Floriday Items / Stem Length Price."""
     try:
         from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
             get_item_mapping as _get_item_mapping,
@@ -54,19 +46,17 @@ def get_item_mapping():
         return {}
 
 def get_source_warehouse():
-    """
-    Fetch source warehouse from Floriday Settings
-    """
+    """Return the configured Floriday warehouse, throwing if unset."""
     try:
         settings = frappe.get_single("Floriday Settings")
         source_warehouse = settings.warehouse
-        
+
         if not source_warehouse:
             frappe.throw("Warehouse not configured in Floriday Settings")
-            
+
         safe_log(f"Using source warehouse: {source_warehouse}", "Floriday Warehouse")
         return source_warehouse
-        
+
     except Exception as e:
         error_msg = f"Error fetching source warehouse"
         safe_log(error_msg, "Floriday Warehouse Error")
@@ -74,10 +64,8 @@ def get_source_warehouse():
 
 @frappe.whitelist()
 def create_supply_lines_only_from_batches():
-    """
-    Create ONLY supply lines from available batches - no customer offers
-    Fetches batches for CURRENT DATE only with proper EAT timezone conversion
-    """
+    """Create supply lines (no customer offers) from today's available batches,
+    filtered to the current EAT date."""
     try:
         safe_log("Starting supply line creation", "Floriday Supply Lines")
 
@@ -88,7 +76,6 @@ def create_supply_lines_only_from_batches():
         ACCESS_TOKEN = settings.access_token
         SUPPLIER_ORG_ID = settings.organization_supplier_id
 
-        # Get current date for filtering (in EAT timezone)
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
         safe_log(f"Filtering for EAT date: {current_date}", "Floriday Date")
 
@@ -138,16 +125,16 @@ def create_supply_lines_only_from_batches():
 
         safe_log("Creating supply lines", "Floriday Creation")
         results = create_supply_lines_only(BASE_URL, API_KEY, ACCESS_TOKEN, available_batches)
-        
+
         successful_supply_lines = [r for r in results if r.get('status') == 'success']
         failed_supply_lines = [r for r in results if r.get('status') != 'success']
-        
+
         safe_log(f"Results: {len(successful_supply_lines)} success, {len(failed_supply_lines)} failed", "Floriday Complete")
 
         if not successful_supply_lines:
             result_msg = {
                 "status": "failed",
-                "message": "Failed to create any supply lines", 
+                "message": "Failed to create any supply lines",
                 "details": results,
                 "available_batches_processed": len(available_batches),
                 "date_applied": current_date
@@ -166,7 +153,7 @@ def create_supply_lines_only_from_batches():
             "date_applied": current_date,
             "currency_used": SUPPLY_LINE_CURRENCY,
         }
-        
+
         return success_result
 
     except Exception as e:
@@ -175,87 +162,62 @@ def create_supply_lines_only_from_batches():
         return {"status": "error", "message": f"Error: {str(e)[:100]}"}
 
 def filter_batches_by_date_eat(batches, target_date):
-    """
-    Filter batches by date using EAT timezone conversion (UTC+3)
-    """
+    """Keep batches whose batchDate falls on target_date in EAT (UTC+3)."""
     try:
         todays_batches = []
-        
+
         for batch in batches:
-            batch_id = batch.get("batchId", "unknown")
             batch_date_str = batch.get("batchDate")
-            
             if batch_date_str:
                 try:
-                    # Parse the UTC datetime string
                     if batch_date_str.endswith('Z'):
                         batch_dt_utc = datetime.fromisoformat(batch_date_str.replace('Z', '+00:00'))
                     else:
                         batch_dt_utc = datetime.fromisoformat(batch_date_str)
-                    
-                    # Ensure it's UTC timezone aware
                     if batch_dt_utc.tzinfo is None:
                         batch_dt_utc = batch_dt_utc.replace(tzinfo=timezone.utc)
-                    
-                    # Convert UTC to EAT (UTC+3)
-                    batch_dt_eat = batch_dt_utc + EAT_OFFSET
-                    
-                    # Extract EAT date for comparison
-                    batch_eat_date = batch_dt_eat.strftime('%Y-%m-%d')
-                    
+
+                    batch_eat_date = (batch_dt_utc + EAT_OFFSET).strftime('%Y-%m-%d')
                     if batch_eat_date == target_date:
                         todays_batches.append(batch)
-                        
                 except Exception:
-                    # Fallback to simple string matching
+                    # Unparseable date — fall back to a substring match on the raw string.
                     if target_date in batch_date_str:
                         todays_batches.append(batch)
-        
+
         return todays_batches
-        
-    except Exception as e:
+    except Exception:
         return []
 
 def filter_batches_by_date_utc(batches, target_date):
-    """
-    Filter batches by date using UTC comparison
-    """
+    """Keep batches whose batchDate falls within target_date in UTC."""
     try:
         todays_batches = []
-        
-        # Convert target_date to UTC datetime range
+
         target_dt = datetime.strptime(target_date, '%Y-%m-%d')
         utc_start = datetime(target_dt.year, target_dt.month, target_dt.day, 0, 0, 0, tzinfo=timezone.utc)
         utc_end = datetime(target_dt.year, target_dt.month, target_dt.day, 23, 59, 59, tzinfo=timezone.utc)
-        
+
         for batch in batches:
-            batch_id = batch.get("batchId", "unknown")
             batch_date_str = batch.get("batchDate")
-            
             if batch_date_str:
                 try:
-                    # Parse the UTC datetime string
                     if batch_date_str.endswith('Z'):
                         batch_dt = datetime.fromisoformat(batch_date_str.replace('Z', '+00:00'))
                     else:
                         batch_dt = datetime.fromisoformat(batch_date_str)
-                    
-                    # Ensure it's UTC timezone aware
                     if batch_dt.tzinfo is None:
                         batch_dt = batch_dt.replace(tzinfo=timezone.utc)
-                    
-                    # Check if batch datetime falls within the target UTC day
+
                     if utc_start <= batch_dt <= utc_end:
                         todays_batches.append(batch)
-                        
                 except Exception:
-                    # Fallback to simple string matching
+                    # Unparseable date — fall back to a substring match on the raw string.
                     if target_date in batch_date_str:
                         todays_batches.append(batch)
-        
+
         return todays_batches
-        
-    except Exception as e:
+    except Exception:
         return []
 
 def filter_available_batches_fixed(batches):
@@ -305,50 +267,40 @@ def sort_batches_newest_first(batches):
     except Exception:
         return batches
 
-# Replace the old functions with the fixed versions
 def filter_batches_by_date(batches, target_date):
-    """Alias for the EAT function for backward compatibility"""
+    """Alias for filter_batches_by_date_eat."""
     return filter_batches_by_date_eat(batches, target_date)
 
 def filter_available_batches(batches):
-    """Alias for the fixed function for backward compatibility"""
+    """Alias for filter_available_batches_fixed."""
     return filter_available_batches_fixed(batches)
 
 def create_supply_lines_only(BASE_URL, API_KEY, ACCESS_TOKEN, batches):
-    """
-    Create only supply lines without customer offers
-    """
+    """POST a supply line per batch (capped at 10), without customer offers."""
     try:
         results = []
-        total_batches = min(len(batches), 10)  # Limit to 10 batches
-        
-        for i, batch in enumerate(batches[:10]):
-            batch_id = batch.get("batchId")
-            
-            # Create supply line directly
+
+        for batch in batches[:10]:
             result = create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch)
             results.append(result)
-            
+
             frappe.db.commit()
             import time
-            time.sleep(1)  # Small delay between API calls
-        
+            time.sleep(1)  # throttle between API calls
+
         return results
-        
-    except Exception as e:
+    except Exception:
         safe_log("Error in supply line creation", "Floriday Error")
         return []
 
 def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
-    """
-    Create a single supply line with proper payload structure
-    """
+    """Build and POST one supply line for a batch; returns a status dict."""
     try:
         batch_id = batch.get("batchId")
         trade_item_id = batch.get("tradeItemId")
         available_pieces = batch.get("available_pieces", 0)
         warehouse_id = batch.get("warehouseId")
-        
+
         if available_pieces <= 0:
             return {"status": "failed", "message": "No pieces", "batch_id": batch_id}
 
@@ -363,21 +315,19 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
                 "message": f"No Stem Length Price for trade_item_id {trade_item_id}",
                 "batch_id": batch_id,
             }
-            
+
         now = datetime.now(timezone.utc)
         order_end = now + timedelta(days=7)
-        
-        # Get packing configuration from batch or use default
+
         packing_config = batch.get("packingConfiguration", get_default_packing_config())
-        
-        # Create supply line payload
+
         supply_line_payload = {
             "supplyLineId": str(uuid.uuid4()),
             "tradeItemId": trade_item_id,
             "warehouseId": warehouse_id,
             "numberOfPieces": available_pieces,
             "pricePerPiece": {
-                "currency": SUPPLY_LINE_CURRENCY,  
+                "currency": SUPPLY_LINE_CURRENCY,
                 "value": float(offer_price)
             },
             "orderPeriod": {
@@ -395,7 +345,7 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
             "includedServices": ["DELIVERY"],
             "availability": "LIMITED"
         }
-        
+
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
             "X-Api-Key": API_KEY,
@@ -405,7 +355,7 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
 
         base_url_clean = BASE_URL.rstrip('/')
         supply_line_endpoint = f"{base_url_clean}/supply-lines"
-        
+
         response = requests.post(
             supply_line_endpoint,
             json=supply_line_payload,
@@ -413,10 +363,9 @@ def create_single_supply_line(BASE_URL, API_KEY, ACCESS_TOKEN, batch):
             timeout=30
         )
 
-        # Handle 200/201 success responses
         if response.status_code in (200, 201):
             supply_line_id = supply_line_payload["supplyLineId"]
-            
+
             return {
                 "status": "success",
                 "supply_line_id": supply_line_id,
@@ -560,7 +509,7 @@ def get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID, 
 
 def get_default_packing_config():
     return {
-        "piecesPerPackage": 200, 
+        "piecesPerPackage": 200,
         "vbnPackageCode": 884,
         "packagesPerLayer": 10,
         "layersPerLoadCarrier": 2,
@@ -570,11 +519,8 @@ def get_default_packing_config():
 
 @frappe.whitelist()
 def get_available_batches():
-    """
-    Returns batches with available pieces for CURRENT EAT DATE only
-    """
+    """Return today's (EAT) batches that still have available pieces, for the UI picker."""
     try:
-        # Get current date in EAT timezone
         current_date = (datetime.now(timezone.utc) + EAT_OFFSET).strftime('%Y-%m-%d')
 
         settings = frappe.get_single("Floriday Settings")
@@ -582,11 +528,10 @@ def get_available_batches():
         API_KEY = settings.api_key
         BASE_URL = settings.base_url
         ACCESS_TOKEN = settings.access_token
-        SUPPLIER_ORG_ID = settings.organization_supplier_id 
+        SUPPLIER_ORG_ID = settings.organization_supplier_id
 
-        # Get ALL batches first
         all_batches = get_your_floriday_batches(BASE_URL, API_KEY, ACCESS_TOKEN, SUPPLIER_ORG_ID)
-        
+
         if not all_batches:
             return {
                 "status": "success",
@@ -595,10 +540,9 @@ def get_available_batches():
                 "date_applied": current_date,
                 "message": "No batches found"
             }
-        
-        # Filter for today's batches - USING EAT VERSION
+
         todays_batches = filter_batches_by_date_eat(all_batches, current_date)
-        
+
         if not todays_batches:
             return {
                 "status": "success",
@@ -607,12 +551,11 @@ def get_available_batches():
                 "todays_batches": 0,
                 "date_applied": current_date,
                 "message": f"No batches found for EAT today ({current_date})"
-            } 
-        
-        # Sort newest-first then filter for available pieces
+            }
+
         todays_batches = sort_batches_newest_first(todays_batches)
         available_batches = filter_available_batches_fixed(todays_batches)
-        
+
         batch_options = []
         for batch in available_batches:
             available_quantity = batch.get("available_pieces", 0)
@@ -625,7 +568,7 @@ def get_available_batches():
                 "warehouse": batch.get("warehouseId"),
                 "label": f"{batch.get('tradeItemName', 'Unknown Item')} - {available_quantity} pieces"
             })
-        
+
         return {
             "status": "success",
             "batches": batch_options,

@@ -1,6 +1,10 @@
 import frappe
 from frappe import _
 
+from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+	apply_webshop_setup_guard,
+)
+
 sitemap = 1
 
 
@@ -15,6 +19,9 @@ def get_context(context):
 
 	When 'Enable Bouquets Page' is off, redirects to /webshop.
 	"""
+	if apply_webshop_setup_guard(context):
+		return
+
 	settings = frappe.get_cached_doc("Webshop Settings")
 
 	if not settings.get("show_bouquets_page"):
