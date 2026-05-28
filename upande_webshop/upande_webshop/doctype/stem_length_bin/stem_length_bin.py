@@ -1,5 +1,4 @@
 import frappe
-from frappe import _
 from frappe.model.document import Document
 from frappe.utils import flt
 
@@ -99,27 +98,23 @@ def update_stem_length_bin_qty(item_code, warehouse, stem_length, qty_delta):
 
 
 def reserve_stem_length_qty(item_code, warehouse, stem_length, qty):
-	"""Increase reserved_qty. Throws if bin missing or actual_qty - reserved_qty < qty."""
+	"""Increase reserved_qty when the bin exists and has stock. Never throws —
+	missing or insufficient bins are skipped silently so the bin is a passive
+	tracker, not a gate on Sales Order submit."""
 	qty = flt(qty)
 	if qty <= 0:
 		return
 
 	bin_name = get_stem_length_bin(item_code, warehouse, stem_length, create=False)
 	if not bin_name:
-		frappe.throw(
-			_("No Stem Length Bin found for {0} / {1} in {2}").format(item_code, stem_length, warehouse)
-		)
+		return
 
 	row = frappe.db.get_value(
 		"Stem Length Bin", bin_name, ["actual_qty", "reserved_qty"], as_dict=True
 	)
 	available = flt(row.actual_qty) - flt(row.reserved_qty)
 	if available < qty:
-		frappe.throw(
-			_("Insufficient stem-length stock for {0} {1} in {2}: need {3}, available {4}").format(
-				item_code, stem_length, warehouse, qty, available
-			)
-		)
+		return
 
 	_apply_delta(bin_name, reserved_delta=qty)
 
