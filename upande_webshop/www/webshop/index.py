@@ -15,6 +15,13 @@ def get_context(context):
 	if apply_webshop_setup_guard(context):
 		return
 
+	# When Product Overview is the active storefront, /webshop redirects to it.
+	# (Product Overview's own page redirects back here when the setting is off,
+	# so exactly one of the two pages is ever live.)
+	if frappe.get_cached_value("Webshop Settings", "Webshop Settings", "show_product_overview"):
+		frappe.local.flags.redirect_location = "/product-overview"
+		raise frappe.Redirect
+
 	# Add homepage as parent
 	context.body_class = "product-page"
 	context.parents = [{"name": frappe._("Home"), "route": "/webshop"}]
@@ -26,11 +33,5 @@ def get_context(context):
 	context.page_length = (
 		cint(frappe.db.get_single_value("Webshop Settings", "products_per_page")) or 20
 	)
-
-	meta = frappe.get_meta("Webshop Settings")
-	if meta.has_field("full_width"):
-		context.full_width = cint(
-			frappe.db.get_single_value("Webshop Settings", "full_width")
-		)
 
 	context.no_cache = 1

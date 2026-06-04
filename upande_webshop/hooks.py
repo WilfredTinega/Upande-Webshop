@@ -231,7 +231,8 @@ override_doctype_class = {
 # Request Events
 # ----------------
 before_request = [
-    "upande_webshop.upande_webshop.shopping_cart.utils.redirect_non_desk_users_from_desk"
+    "upande_webshop.upande_webshop.shopping_cart.utils.redirect_non_desk_users_from_desk",
+    "upande_webshop.upande_webshop.shopping_cart.utils.block_other_webshop_pages_when_po_only",
 ]
 after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
 

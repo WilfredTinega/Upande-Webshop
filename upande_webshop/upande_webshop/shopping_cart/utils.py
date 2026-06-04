@@ -126,7 +126,71 @@ def redirect_non_desk_users_from_desk():
 	if frappe.db.get_value("User", user, "user_type") == "System User":
 		return
 
-	_redirect("/webshop")
+	try:
+		po_only = bool(
+			frappe.db.get_single_value("Webshop Settings", "show_product_overview")
+		)
+	except Exception:
+		po_only = False
+	_redirect("/product-overview" if po_only else "/webshop")
+
+
+# Only the product *browsing* surfaces that Product Overview replaces. The
+# transactional / account pages (cart, wishlist, orders, invoices, shipments,
+# issues, contact) MUST stay reachable — Product Overview links straight into
+# /cart and the checkout → /orders flow, so locking them would stop customers
+# from buying or viewing what they bought.
+_PO_LOCKED_PREFIXES = (
+	"webshop",
+	"bouquet",
+	"all-products",
+	"product-search",
+	"customer-reviews",
+)
+
+
+def block_other_webshop_pages_when_po_only():
+	"""before_request hook — when Webshop Settings → show_product_overview is on,
+	the storefront *product listing* is replaced by /product-overview. Direct
+	hits on the browsing surfaces (/webshop, /bouquet, /all-products,
+	/product-search, /customer-reviews) get redirected to /product-overview.
+
+	Transactional / account pages (/cart, /wishlist, /orders, /invoices, …) are
+	deliberately NOT locked — Product Overview links into the cart → checkout →
+	orders flow, so those must stay reachable for customers to actually buy.
+
+	Guests are bounced too: /product-overview's own get_context sends Guests to
+	the login page, so the listing is never reachable without authenticating.
+
+	System Users (staff) are unaffected so they can still QA the storefront.
+	"""
+	if not frappe.request:
+		return
+
+	path = (frappe.request.path or "").strip("/")
+	if not path:
+		return
+	first = path.split("/", 1)[0]
+	if first not in _PO_LOCKED_PREFIXES:
+		return
+
+	user = getattr(frappe.session, "user", None)
+	# System Users (staff) keep full storefront access for QA.
+	if user and user != "Guest" and (
+		frappe.db.get_value("User", user, "user_type") == "System User"
+	):
+		return
+
+	try:
+		enabled = bool(
+			frappe.db.get_single_value("Webshop Settings", "show_product_overview")
+		)
+	except Exception:
+		enabled = False
+	if not enabled:
+		return
+
+	_redirect("/product-overview")
 
 
 def redirect_after_login(login_manager):
@@ -146,6 +210,17 @@ def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
 
+	# Webshop Settings → Full Width: drop the .container wrapper on every
+	# webshop-rendered page (not just /webshop). The desk's navbar toggle does
+	# this globally via body.full-width; this is the website-side equivalent.
+	meta = frappe.get_meta("Webshop Settings")
+	full_width_setting = 0
+	if meta.has_field("full_width") and frappe.db.get_single_value(
+		"Webshop Settings", "full_width"
+	):
+		context["full_width"] = 1
+		full_width_setting = 1
+
 	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 	import json
 	app_logo = get_app_logo() or ""
@@ -156,25 +231,58 @@ def update_website_context(context):
 	)
 	context["webshop_show_bouquets_page"] = show_bouquets_page
 
+	show_product_overview = bool(
+		frappe.db.get_single_value("Webshop Settings", "show_product_overview")
+	)
+	context["webshop_show_product_overview"] = show_product_overview
+
 	customer_is_linked = is_customer()
 	context["webshop_user_is_customer"] = customer_is_linked
 
 	user_image = ""
 	user_fullname = frappe.session.user_fullname or frappe.session.user or ""
+	user_theme = "light"
 	if frappe.session.user and frappe.session.user != "Guest":
 		# Read the live User image so a freshly-uploaded photo shows immediately,
 		# rather than the (possibly stale) value cached on the session.
 		user_image = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
+		stored_theme = (
+			frappe.db.get_value("User", frappe.session.user, "desk_theme") or ""
+		).lower()
+		if stored_theme in ("light", "dark", "automatic"):
+			user_theme = stored_theme
 	context["webshop_user_image"] = user_image
 	context["webshop_user_fullname"] = user_fullname
 
+	# Apply the user's theme synchronously in <head> so dark mode doesn't flash
+	# light first. Mirrors what frappe.ui.set_theme does on /app, but executed
+	# at parse time instead of after DOMContentLoaded.
+	theme_init = (
+		'(function(){'
+		'try{'
+		f'var defaultMode = {json.dumps(user_theme)};'
+		'var stored = null;'
+		'try { stored = localStorage.getItem("desk_theme_mode"); } catch (e) {}'
+		'var mode = (stored && ["light","dark","automatic"].indexOf(stored) >= 0) ? stored : defaultMode;'
+		'var resolved = mode;'
+		'if (mode === "automatic" && window.matchMedia) {'
+		'  resolved = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";'
+		'}'
+		'document.documentElement.setAttribute("data-theme-mode", mode);'
+		'document.documentElement.setAttribute("data-theme", resolved);'
+		'} catch (e) {}'
+		'})();'
+	)
 	boot_script = (
 		f'<script>'
+		f'{theme_init}'
 		f'window.webshop_app_logo = {json.dumps(app_logo)};'
 		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
+		f'window.webshop_show_product_overview = {json.dumps(show_product_overview)};'
 		f'window.webshop_user_is_customer = {json.dumps(customer_is_linked)};'
 		f'window.webshop_user_image = {json.dumps(user_image)};'
 		f'window.webshop_user_fullname = {json.dumps(user_fullname)};'
+		f'window.webshop_full_width_default = {json.dumps(bool(full_width_setting))};'
 		f'</script>'
 	)
 	context["head_include"] = (context.get("head_include") or "") + boot_script

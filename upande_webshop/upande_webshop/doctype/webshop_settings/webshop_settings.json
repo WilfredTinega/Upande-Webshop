@@ -27,6 +27,9 @@
   "show_apply_coupon_code_in_website",
   "show_contact_us_button",
   "show_attachments",
+  "show_product_overview",
+  "po_warehouse_display_words",
+  "po_default_view",
   "section_break_18",
   "company",
   "default_customer_group",
@@ -423,6 +426,28 @@
    "options": "Bouquet Recipe Item"
   },
   {
+   "default": "0",
+   "fieldname": "show_product_overview",
+   "fieldtype": "Check",
+   "label": "Show Product Overview"
+  },
+  {
+   "default": "0",
+   "depends_on": "show_product_overview",
+   "fieldname": "po_warehouse_display_words",
+   "fieldtype": "Int",
+   "label": "Product Overview"
+  },
+  {
+   "default": "Grid",
+   "depends_on": "show_product_overview",
+   "fieldname": "po_default_view",
+   "fieldtype": "Select",
+   "label": "Product Overview View",
+   "options": "Grid\nList",
+   "description": "Layout used to render the Product Overview page."
+  },
+  {
    "fieldname": "display_setting_tab",
    "fieldtype": "Tab Break",
    "label": "Display"
@@ -460,7 +485,7 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-27 14:01:10.082883",
+ "modified": "2026-05-28 22:42:26.267672",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",

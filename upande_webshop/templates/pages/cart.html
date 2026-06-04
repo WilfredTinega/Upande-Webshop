@@ -2,12 +2,36 @@
 
 {% block title %} {{ _("Shopping Cart") }} {% endblock %}
 
+{% block breadcrumbs %}
+<div class="breadcrumb-container container">
+	<nav aria-label="breadcrumb">
+		<ol class="breadcrumb">
+			<li class="breadcrumb-item">
+				<a href="/product-overview">{{ _("Product Overview") }}</a>
+			</li>
+			<li class="breadcrumb-item active" aria-current="page">
+				<span>{{ _("Shopping Cart") }}</span>
+			</li>
+		</ol>
+	</nav>
+</div>
+{% endblock %}
+
 {% block header %}<div class="shopping-cart-header mt-2 mb-6">{{ _("Shopping Cart") }}</div>{% endblock %}
 
 {% block header_actions %}
 {% endblock %}
 
 {% block page_content %}
+
+{# Customer cart switcher — a rep is a Portal User on several customers, each
+   with its own draft Sales Order cart. Pick which customer's cart to view.
+   Populated and wired by shopping_cart.bind_customer_switcher() in cart.js. #}
+<div id="cart-customer-switcher" class="frappe-card p-3 mb-3" style="display:none;">
+	<label class="control-label mr-2 mb-0">{{ _("Customer") }}</label>
+	<select id="cart-customer-select" class="form-control form-control-sm" style="max-width:360px;display:inline-block;"></select>
+</div>
+
 
 {% from "templates/includes/macros.html" import item_name_and_description %}
 

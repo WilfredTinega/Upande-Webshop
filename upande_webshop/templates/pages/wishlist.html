@@ -2,6 +2,21 @@
 
 {% block title %} {{ _("Wishlist") }} {% endblock %}
 
+{% block breadcrumbs %}
+<div class="breadcrumb-container container">
+	<nav aria-label="breadcrumb">
+		<ol class="breadcrumb">
+			<li class="breadcrumb-item">
+				<a href="/product-overview">{{ _("Product Overview") }}</a>
+			</li>
+			<li class="breadcrumb-item active" aria-current="page">
+				<span>{{ _("Wishlist") }}</span>
+			</li>
+		</ol>
+	</nav>
+</div>
+{% endblock %}
+
 {% block header %}<h3 class="shopping-cart-header mt-2 mb-6">{{ _("Wishlist") }}</h1>{% endblock %}
 
 {% block page_content %}
