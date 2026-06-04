@@ -86,6 +86,20 @@ frappe.ready(function() {
 		$('body').addClass('hide-frappe-navbar');
 	}
 
+	// Apply Full Width preference: the user's localStorage override wins over
+	// the server-side Webshop Settings default. Mirrors the desk's
+	// frappe.ui.toolbar.toggle_full_width: same key (container_fullwidth) and
+	// same body class (full-width) so the choice carries desk ↔ webshop.
+	var storedFullWidth = null;
+	try {
+		var raw = localStorage.getItem('container_fullwidth');
+		if (raw !== null) storedFullWidth = JSON.parse(raw);
+	} catch (e) { /* corrupt value — fall back to default */ }
+	var fullWidthOn = (storedFullWidth === null)
+		? !!window.webshop_full_width_default
+		: !!storedFullWidth;
+	$('body').toggleClass('full-width', fullWidthOn);
+
 	if ((!is_webshop_page && !is_item_page) || is_system_message_page) {
 		shopping_cart.inject_webshop_navbar = function() {};
 		$('#webshop-subnav').remove();
@@ -162,20 +176,56 @@ $.extend(shopping_cart, {
 				<path d="M16 10a4 4 0 0 1-8 0"/>
 			</svg>`;
 
+		var poOnly = !!window.webshop_show_product_overview;
+		var brandHref = poOnly ? '/product-overview' : '/webshop';
+		var brandLabel = poOnly ? 'Product Overview' : 'Webshop';
+		var logoutRedirect = poOnly ? '/product-overview' : '/webshop';
+		var prefDropdown = `
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="#" class="webshop-subnav-dropdown-item" data-action="toggle-full-width">Toggle Full Width</a></li>
+			<li><a href="#" class="webshop-subnav-dropdown-item" data-action="toggle-theme">Toggle Theme</a></li>
+		`;
+		var fullDropdown = `
+			<li><a href="/webshop" class="webshop-subnav-dropdown-item">Products</a></li>
+			${window.webshop_show_product_overview ? `<li><a href="/product-overview" class="webshop-subnav-dropdown-item">Product Overview</a></li>` : ``}
+			<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
+			<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
+			<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart</a></li>
+			${window.webshop_show_bouquets_page ? `<li><a href="/bouquet" class="webshop-subnav-dropdown-item">Bouquet</a></li>` : ``}
+			<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
+			<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
+			<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="/webshop-setting" class="webshop-subnav-dropdown-item">Setting</a></li>
+			${prefDropdown}
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="/logout?redirect-to=/webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
+		`;
+		var poOnlyDropdown = `
+			<li><a href="/product-overview" class="webshop-subnav-dropdown-item">Product Overview</a></li>
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="/webshop-setting" class="webshop-subnav-dropdown-item">Setting</a></li>
+			${prefDropdown}
+			<li class="webshop-subnav-dropdown-divider"></li>
+			<li><a href="/logout?redirect-to=${logoutRedirect}" class="webshop-subnav-dropdown-item">Logout</a></li>
+		`;
 		var html = `
 			<div id="webshop-subnav">
 				<div class="webshop-subnav-inner">
 					<!-- Left: App logo / Shop link -->
 					<nav class="webshop-subnav-links">
-						<a href="/webshop" class="webshop-subnav-link webshop-subnav-shop-link" title="Shop">
+						<a href="${brandHref}" class="webshop-subnav-link webshop-subnav-shop-link" title="${brandLabel}">
 							${shopIconHtml}
-							<span class="webshop-subnav-shop-label">Webshop</span>
+							<span class="webshop-subnav-shop-label">${brandLabel}</span>
 						</a>
 					</nav>
 
 					<!-- Right: Wishlist, Cart, Account -->
 					<div class="webshop-subnav-right">
 						${frappe.session.user && frappe.session.user !== 'Guest' ? `
+						${poOnly ? `` : `
 						<!-- Wishlist link -->
 						<a href="/wishlist" class="webshop-subnav-cart-link wishlist-icon mr-3" aria-label="Wishlist" title="Wishlist">
 							<svg xmlns="http://www.w3.org/2000/svg" style="width:20px;height:20px;vertical-align:middle;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -191,6 +241,7 @@ $.extend(shopping_cart, {
 							</svg>
 							${badgeHtml}
 						</a>
+						`}
 
 						<!-- Account dropdown -->
 						<div class="webshop-subnav-dropdown">
@@ -201,28 +252,16 @@ $.extend(shopping_cart, {
 								</svg>
 							</button>
 							<ul class="webshop-subnav-dropdown-menu" id="ws-account-menu" role="menu">
-								<li><a href="/webshop" class="webshop-subnav-dropdown-item">Products</a></li>
-								<li><a href="/orders" class="webshop-subnav-dropdown-item">Orders</a></li>
-									<li><a href="/invoices" class="webshop-subnav-dropdown-item">Invoices</a></li>
-								<li><a href="/cart" class="webshop-subnav-dropdown-item">Cart</a></li>
-								${window.webshop_show_bouquets_page ? `<li><a href="/bouquet" class="webshop-subnav-dropdown-item">Bouquet</a></li>` : ``}
-								<li><a href="/wishlist" class="webshop-subnav-dropdown-item">Wishlist</a></li>
-								<li><a href="/shipments" class="webshop-subnav-dropdown-item">Shipments</a></li>
-								<li class="webshop-subnav-dropdown-divider"></li>
-								<li><a href="/issues" class="webshop-subnav-dropdown-item">Issues</a></li>
-								<li><a href="/contact" class="webshop-subnav-dropdown-item">Contact</a></li>
-								<li class="webshop-subnav-dropdown-divider"></li>
-								<li><a href="/webshop-setting" class="webshop-subnav-dropdown-item">Setting</a></li>
-								<li><a href="/logout?redirect-to=/webshop" class="webshop-subnav-dropdown-item">Logout</a></li>
+								${poOnly ? poOnlyDropdown : fullDropdown}
 							</ul>
 						</div>
 					` : `
 					<!-- Guest: show Login button -->
 					<a href="/login" class="webshop-subnav-login-btn">Login</a>
 					`}
+					</div>
 				</div>
 			</div>
-		</div>
 		`;
 
 		var $header = $('header.navbar, nav.navbar').first();
@@ -244,6 +283,108 @@ $.extend(shopping_cart, {
 			if (!$(e.target).closest('.webshop-subnav-dropdown').length) {
 				$('#ws-account-menu').removeClass('open');
 				$('#ws-account-toggle').attr('aria-expanded', 'false');
+			}
+		});
+
+		$(document).on('click', '#ws-account-menu [data-action="toggle-full-width"]', function(e) {
+			e.preventDefault();
+			$('#ws-account-menu').removeClass('open');
+			$('#ws-account-toggle').attr('aria-expanded', 'false');
+			// Emulate the desk's frappe.ui.toolbar.toggle_full_width: same
+			// localStorage key, same body class, same custom event.
+			if (frappe.ui && frappe.ui.toolbar && typeof frappe.ui.toolbar.toggle_full_width === 'function') {
+				frappe.ui.toolbar.toggle_full_width();
+				return;
+			}
+			var current = false;
+			try { current = JSON.parse(localStorage.container_fullwidth || 'false'); } catch (err) {}
+			var next = !current;
+			try { localStorage.setItem('container_fullwidth', JSON.stringify(next)); } catch (err) {}
+			$(document.body).toggleClass('full-width', next).trigger('toggleFullWidth');
+		});
+
+		$(document).on('click', '#ws-account-menu [data-action="toggle-theme"]', function(e) {
+			e.preventDefault();
+			$('#ws-account-menu').removeClass('open');
+			$('#ws-account-toggle').attr('aria-expanded', 'false');
+			// Emulate the desk's "Switch Theme" dialog: prefer the real one if
+			// the desk bundle is loaded; otherwise show an equivalent 3-option
+			// chooser (Light / Dark / Automatic) backed by the same
+			// switch_theme xcall.
+			if (frappe.ui && typeof frappe.ui.ThemeSwitcher === 'function') {
+				if (frappe.theme_switcher && frappe.theme_switcher.dialog && frappe.theme_switcher.dialog.is_visible) {
+					frappe.theme_switcher.hide();
+				} else {
+					frappe.theme_switcher = new frappe.ui.ThemeSwitcher();
+					frappe.theme_switcher.show();
+				}
+				return;
+			}
+			shopping_cart.open_theme_switcher();
+		});
+	},
+
+	open_theme_switcher: function() {
+		var current = (document.documentElement.getAttribute('data-theme-mode') || 'light').toLowerCase();
+		var themes = [
+			{ name: 'light',     label: __('Frappe Light'),  info: __('Light Theme'),  swatch: '#ffffff' },
+			{ name: 'dark',      label: __('Timeless Night'), info: __('Dark Theme'),  swatch: '#1f272e' },
+			{ name: 'automatic', label: __('Automatic'),     info: __("Uses system's theme to switch between light and dark mode"), swatch: 'linear-gradient(135deg, #ffffff 50%, #1f272e 50%)' }
+		];
+		var $existing = $('#ws-theme-switcher');
+		if ($existing.length) { $existing.remove(); }
+
+		var tiles = themes.map(function(t) {
+			var sel = t.name === current ? ' selected' : '';
+			return (
+				'<button type="button" class="ws-theme-tile' + sel + '" data-theme="' + t.name + '" title="' + frappe.utils.escape_html(t.info) + '">' +
+					'<span class="ws-theme-swatch" style="background:' + t.swatch + ';"></span>' +
+					'<span class="ws-theme-tile-label">' + frappe.utils.escape_html(t.label) + '</span>' +
+				'</button>'
+			);
+		}).join('');
+
+		var $modal = $(
+			'<div id="ws-theme-switcher" class="po-modal-backdrop">' +
+				'<div class="po-modal" style="max-width:520px;">' +
+					'<div class="po-modal-header">' +
+						'<h5 class="po-modal-title">' + __('Switch Theme') + '</h5>' +
+						'<button type="button" class="po-modal-close" aria-label="Close">&times;</button>' +
+					'</div>' +
+					'<div class="po-modal-body">' +
+						'<div class="ws-theme-grid">' + tiles + '</div>' +
+					'</div>' +
+				'</div>' +
+			'</div>'
+		).appendTo('body');
+
+		function close() { $modal.remove(); }
+		$modal.on('click', function(e) { if (e.target === $modal[0]) close(); });
+		$modal.find('.po-modal-close').on('click', close);
+
+		$modal.find('.ws-theme-tile').on('click', function() {
+			var name = $(this).data('theme');
+			$modal.find('.ws-theme-tile').removeClass('selected');
+			$(this).addClass('selected');
+			document.documentElement.setAttribute('data-theme-mode', name);
+			if (frappe.ui && typeof frappe.ui.set_theme === 'function') {
+				frappe.ui.set_theme(name === 'automatic' ? undefined : name);
+			} else {
+				var resolved = name;
+				if (name === 'automatic' && window.matchMedia) {
+					resolved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+				}
+				document.documentElement.setAttribute('data-theme', resolved);
+			}
+			// Cache the choice client-side so the early head-init script can
+			// apply it before paint on the next page load (no flash). Server
+			// also gets it via switch_theme below for cross-device sync.
+			try { localStorage.setItem('desk_theme_mode', name); } catch (e) {}
+			frappe.show_alert && frappe.show_alert(__('Theme Changed'), 3);
+			if (frappe.session && frappe.session.user && frappe.session.user !== 'Guest') {
+				frappe.xcall('frappe.core.doctype.user.user.switch_theme', {
+					theme: name.charAt(0).toUpperCase() + name.slice(1)
+				}).catch(function() {});
 			}
 		});
 	},

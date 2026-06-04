@@ -1,5 +1,9 @@
 import frappe
 
+from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+	parse_harvest_date,
+	update_age_bin_qty,
+)
 from upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin import (
 	release_stem_length_qty,
 	reserve_stem_length_qty,
@@ -52,6 +56,7 @@ def on_stock_entry_submit(doc, method=None):
 	items are also skipped — core Bin already tracks per-length qty for them via
 	distinct item_codes."""
 	header_sl = doc.get("custom_stem_length")
+	harvest_date = parse_harvest_date(doc.get("custom_harvest_batch_no"))
 
 	for item in doc.items:
 		if _is_variant_or_template(item.item_code):
@@ -70,9 +75,24 @@ def on_stock_entry_submit(doc, method=None):
 		if item.s_warehouse:
 			update_stem_length_bin_qty(item.item_code, item.s_warehouse, stem_length, -qty)
 
+		# Mirror the movement into the per-harvest-date age bin so the Product
+		# Overview age filter reads an indexed Date column, not a Stock Entry
+		# string-parse. Only entries that carry a harvest batch (Grading inflow,
+		# and transfers that retain it) contribute age data.
+		if harvest_date:
+			if item.t_warehouse:
+				update_age_bin_qty(
+					item.item_code, item.t_warehouse, stem_length, harvest_date, qty
+				)
+			if item.s_warehouse:
+				update_age_bin_qty(
+					item.item_code, item.s_warehouse, stem_length, harvest_date, -qty
+				)
+
 
 def on_stock_entry_cancel(doc, method=None):
 	header_sl = doc.get("custom_stem_length")
+	harvest_date = parse_harvest_date(doc.get("custom_harvest_batch_no"))
 
 	for item in doc.items:
 		if _is_variant_or_template(item.item_code):
@@ -90,6 +110,16 @@ def on_stock_entry_cancel(doc, method=None):
 			update_stem_length_bin_qty(item.item_code, item.t_warehouse, stem_length, -qty)
 		if item.s_warehouse:
 			update_stem_length_bin_qty(item.item_code, item.s_warehouse, stem_length, qty)
+
+		if harvest_date:
+			if item.t_warehouse:
+				update_age_bin_qty(
+					item.item_code, item.t_warehouse, stem_length, harvest_date, -qty
+				)
+			if item.s_warehouse:
+				update_age_bin_qty(
+					item.item_code, item.s_warehouse, stem_length, harvest_date, qty
+				)
 
 
 def on_sales_order_submit(doc, method=None):

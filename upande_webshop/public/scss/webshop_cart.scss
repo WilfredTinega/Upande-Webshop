@@ -19,6 +19,11 @@ body.hide-frappe-navbar {
 		display: none !important;
 	}
 
+	// The webshop sub-navbar (#webshop-subnav) is position:fixed and 44px tall,
+	// so it's out of flow — reserve that space at the top of the page or content
+	// would start underneath it.
+	padding-top: 44px;
+
 	// Align page content with the webshop sub-navbar's inner container
 	// (max-width 1200px, centred, 1rem horizontal padding — see #webshop-subnav .webshop-subnav-inner).
 	// Without this, breadcrumbs/heading/filters sit flush against the viewport edge
@@ -36,6 +41,255 @@ body.hide-frappe-navbar {
 			padding-right: 0;
 		}
 	}
+}
+
+// Dark theme overrides for website pages. The desk's full dark.scss only
+// ships in the desk bundle, so website pages need their own variable
+// overrides for the "Toggle Theme" choice to actually flip colors.
+// Values mirror apps/frappe/frappe/public/scss/desk/dark.scss so the look
+// matches the desk's "Timeless Night" exactly — uses the same espresso gray
+// ramp that website/variables.scss already imports.
+[data-theme="dark"] {
+	// gray-700/800 nudges from desk/dark.scss
+	--gray-700: #383838;
+	--gray-800: #232323;
+
+	// Type
+	--text-neutral: var(--gray-50);
+	--text-dark: var(--gray-900);
+	--text-muted: var(--gray-400);
+	--text-light: var(--gray-300);
+	--text-color: var(--gray-50);
+	--heading-color: var(--gray-50);
+
+	// SVG
+	--icon-fill: transparent;
+	--icon-stroke: var(--gray-300);
+
+	// Layout
+	--bg-color: var(--gray-900);
+	--fg-color: var(--gray-900);
+	--subtle-accent: var(--gray-800);
+	--subtle-fg: var(--gray-700);
+	--fg-hover-color: var(--gray-800);
+	--card-bg: var(--gray-900);
+	--disabled-text-color: var(--gray-400);
+	--disabled-control-bg: var(--gray-800);
+	--control-bg: var(--gray-800);
+	--control-bg-on-gray: var(--gray-800);
+	--awesomebar-focus-bg: var(--control-bg);
+	--awesomplete-hover-bg: var(--gray-800);
+	--modal-bg: var(--gray-900);
+	--toast-bg: var(--modal-bg);
+	--popover-bg: var(--bg-color);
+
+	// Buttons
+	--btn-default-bg: var(--gray-800);
+	--btn-default-hover-bg: var(--gray-700);
+	--btn-primary: var(--gray-300);
+
+	// Borders
+	--border-primary: var(--gray-200);
+	--border-color: var(--gray-800);
+	--dark-border-color: var(--gray-600);
+	--table-border-color: var(--border-color);
+	--highlight-color: var(--gray-700);
+	--btn-group-border-color: var(--gray-700);
+	--placeholder-color: var(--gray-700);
+
+	// Indicator backgrounds (used by the "In stock / Out of stock" pills)
+	--bg-green: var(--green-900);
+	--bg-red: var(--red-600);
+	--bg-gray: var(--gray-600);
+	--text-on-green: var(--green-100);
+	--text-on-red: var(--red-50);
+	--text-on-gray: var(--gray-50);
+
+	color-scheme: dark;
+
+	background-color: var(--bg-color);
+	color: var(--text-color);
+
+	body {
+		background-color: var(--bg-color);
+		color: var(--text-color);
+	}
+
+	// Webshop sub-navbar
+	#webshop-subnav {
+		background: var(--fg-color);
+		border-bottom: 1px solid var(--border-color);
+	}
+	.webshop-subnav-link,
+	.webshop-subnav-shop-label {
+		color: var(--text-color);
+	}
+	.webshop-subnav-dropdown-menu {
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+	}
+	.webshop-subnav-dropdown-item {
+		color: var(--text-color);
+		&:hover { background: var(--fg-hover-color); color: var(--text-color); }
+	}
+	.webshop-subnav-dropdown-divider {
+		background: var(--border-color);
+	}
+
+	// Cards & tiles
+	.card,
+	.po-tile,
+	.po-modal {
+		background: var(--card-bg);
+		border-color: var(--border-color);
+		color: var(--text-color);
+	}
+	.po-modal-header,
+	.po-modal-footer {
+		border-color: var(--border-color);
+	}
+
+	// Tables
+	.table,
+	.po-variety-table {
+		color: var(--text-color);
+		background: transparent;
+	}
+	.po-variety-table th,
+	.po-variety-table td,
+	.table th,
+	.table td {
+		border-color: var(--border-color);
+	}
+
+	// Form controls
+	.form-control {
+		background: var(--control-bg);
+		border-color: var(--border-color);
+		color: var(--text-color);
+
+		&::placeholder { color: var(--placeholder-color); }
+		&:focus { background: var(--control-bg); color: var(--text-color); }
+	}
+
+	// Theme switcher tiles
+	.ws-theme-tile {
+		background: var(--card-bg);
+		border-color: var(--border-color);
+		&:hover { border-color: var(--gray-400); }
+	}
+	.ws-theme-tile-label { color: var(--text-color); }
+
+	// Outline / secondary buttons
+	.btn-outline-secondary {
+		color: var(--text-color);
+		border-color: var(--border-color);
+		&:hover { background: var(--fg-hover-color); color: var(--text-color); }
+	}
+}
+
+// Full width mode: lift the 1200px cap so content spans the viewport.
+// Class name mirrors the desk's `body.full-width` (set by
+// frappe.ui.toolbar.toggle_full_width) so the same localStorage flag
+// (container_fullwidth) drives both desk and webshop.
+body.full-width {
+	#webshop-subnav .webshop-subnav-inner {
+		max-width: none;
+	}
+
+	&.hide-frappe-navbar .page-content-wrapper {
+		max-width: none;
+	}
+}
+
+// Plain-HTML modal scaffolding shared across portal pages (frappe.ui.Dialog
+// can't render controls outside /app — see project_webshop_portal_no_make_control).
+.po-modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1060;
+	padding: 1rem;
+}
+.po-modal {
+	background: var(--white, #fff);
+	border-radius: 0.5rem;
+	width: 100%;
+	max-width: 420px;
+	max-height: calc(100vh - 2rem);
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.po-modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.75rem 1rem;
+	border-bottom: 1px solid var(--gray-200, #e2e8f0);
+}
+.po-modal-title {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+}
+.po-modal-close {
+	background: transparent;
+	border: none;
+	font-size: 1.4rem;
+	line-height: 1;
+	color: var(--text-muted, #6c7680);
+	cursor: pointer;
+	padding: 0 0.25rem;
+
+	&:hover { color: var(--text-color, #1f272e); }
+}
+.po-modal-body {
+	padding: 1rem;
+	overflow-y: auto;
+}
+
+// Theme switcher fallback dialog (used when frappe.ui.ThemeSwitcher isn't
+// loaded — i.e. on website pages outside /app). Visual idiom mirrors the
+// desk's "Switch Theme" tile grid.
+.ws-theme-grid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 0.75rem;
+}
+.ws-theme-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 0.5rem;
+	background: var(--white, #fff);
+	border: 2px solid var(--gray-200, #e2e8f0);
+	border-radius: 0.5rem;
+	cursor: pointer;
+	transition: border-color 0.12s ease, transform 0.12s ease;
+
+	&:hover {
+		border-color: var(--gray-400, #b8bdc4);
+	}
+	&.selected {
+		border-color: var(--primary, #5e64ff);
+	}
+}
+.ws-theme-swatch {
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	border: 1px solid var(--gray-300, #d1d8dd);
+}
+.ws-theme-tile-label {
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--text-color, #1f272e);
+	text-align: center;
 }
 
 .item-breadcrumbs {
@@ -1540,8 +1794,14 @@ body.hide-frappe-navbar {
 
 // ─── Webshop Sub-Navbar ───────────────────────────────────────────────────────
 #webshop-subnav {
-	position: sticky;
+	// `position: fixed` rather than `sticky`: the subnav is a direct <body> child,
+	// and the website layout's overflow on <html>/<body> silently disables sticky
+	// for body's own children. Fixed is immune to ancestor overflow clipping.
+	// The 44px the bar occupies is reserved via the body padding-top rule below.
+	position: fixed;
 	top: 0;
+	left: 0;
+	right: 0;
 	z-index: 1000;
 	background: var(--fg-color, #fff);
 	border-bottom: 1px solid var(--border-color, #e2e8f0);

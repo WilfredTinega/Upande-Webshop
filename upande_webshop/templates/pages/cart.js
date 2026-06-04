@@ -22,6 +22,49 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_delivery_point();
 		shopping_cart.bind_box_type();
 		shopping_cart.bind_line_code();
+		shopping_cart.bind_customer_switcher();
+	},
+
+	// Per-customer cart switcher. A sales rep is a Portal User on several
+	// customers, each with its own draft Sales Order cart. The dropdown lets the
+	// rep pick which customer's cart to view; selecting one sets the active cart
+	// server-side and reloads. Also shows an item-count badge per customer.
+	bind_customer_switcher: function() {
+		var $wrap = $("#cart-customer-switcher");
+		var $sel = $("#cart-customer-select");
+		if (!$wrap.length || !$sel.length) return;
+
+		frappe.call({
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.get_cart_customers",
+			callback: function(r) {
+				var rows = (r && r.message) || [];
+				if (rows.length < 2) return; // nothing to switch between
+
+				$sel.empty();
+				rows.forEach(function(row) {
+					var label = row.customer_name;
+					if (row.has_cart) {
+						label += "  (" + (row.cart_qty || 0) + " " + __("items") + ")";
+					}
+					var opt = $("<option>").val(row.customer).text(label);
+					if (row.active) opt.prop("selected", true);
+					$sel.append(opt);
+				});
+				$wrap.show();
+
+				$sel.on("change", function() {
+					frappe.call({
+						method: "upande_webshop.upande_webshop.shopping_cart.cart.set_active_cart_customer",
+						args: { customer: $sel.val() },
+						freeze: true,
+						freeze_message: __("Switching cart…"),
+						callback: function() {
+							window.location.reload();
+						},
+					});
+				});
+			},
+		});
 	},
 
 	bind_line_code: function() {
@@ -499,7 +542,21 @@ $.extend(shopping_cart, {
 					return;
 				}
 				$(btn).hide();
-				window.location.href = '/orders/' + encodeURIComponent(r.message);
+				// Staff place orders on behalf of customers, so the customer-facing
+				// /orders/<SO> portal page is permission-gated against them ("Not
+				// Permitted"). Confirm the order and return to Product Overview so
+				// they can immediately place another.
+				var so = r.message;
+				frappe.show_alert(
+					{
+						message: __("Order {0} created.", [so]),
+						indicator: "green",
+					},
+					8
+				);
+				setTimeout(function () {
+					window.location.href = "/product-overview";
+				}, 1200);
 			}
 		});
 	},
@@ -522,7 +579,21 @@ $.extend(shopping_cart, {
 					return;
 				}
 				$(btn).hide();
-				window.location.href = "/orders/" + encodeURIComponent(r.message);
+				// Staff save orders on behalf of customers; the customer-facing
+				// /orders/<SO> portal page is permission-gated against them
+				// ("Not Permitted" / 403). Confirm and return to Product Overview
+				// so they can place another order immediately. (Mirrors place_order.)
+				var so = r.message;
+				frappe.show_alert(
+					{
+						message: __("Order {0} saved.", [so]),
+						indicator: "green",
+					},
+					8
+				);
+				setTimeout(function () {
+					window.location.href = "/product-overview";
+				}, 1200);
 			}
 		});
 	},

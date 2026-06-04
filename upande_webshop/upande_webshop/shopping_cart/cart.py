@@ -336,6 +336,12 @@ def place_order():
 	if box_err:
 		return {"error": box_err}
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
+
+	# Sales-Order-as-cart mode: the cart IS a draft Sales Order. Checkout just
+	# submits it in place (no Quotation→SO conversion) and reserves stems.
+	if quotation.doctype == "Sales Order":
+		return _place_sales_order_cart(quotation, cart_settings)
+
 	quotation.company = cart_settings.company
 
 	quotation.flags.ignore_permissions = True
@@ -390,6 +396,44 @@ def place_order():
 		frappe.local.cookie_manager.delete_cookie("cart_count")
 
 	return sales_order.name
+
+
+def _place_sales_order_cart(so, cart_settings):
+	"""Submit a draft Sales-Order cart in place.
+
+	Used when "Use Sales Order as Cart" is on: the cart already IS the order, so
+	checkout submits it (docstatus 0→1) rather than converting a Quotation. Each
+	line keeps the warehouse chosen on Product Overview.
+
+	Stem reservation is NOT done here — submitting the SO fires the
+	`on_sales_order_submit` hook, which is the single point that bumps Stem Length
+	Bin reserved_qty for every line (using each line's custom_source_warehouse).
+	Reserving here too would double-count.
+	"""
+	so.company = cart_settings.company
+
+	# Default delivery to at least tomorrow on header and lines.
+	tomorrow = add_days(nowdate(), 1)
+	if not so.delivery_date or getdate(so.delivery_date) < getdate(tomorrow):
+		so.delivery_date = tomorrow
+	for item in so.get("items") or []:
+		if not item.delivery_date or getdate(item.delivery_date) < getdate(tomorrow):
+			item.delivery_date = so.delivery_date
+
+	_assign_sequential_box_ids(so)
+
+	so.flags.ignore_permissions = True
+	so.order_type = "Sales"  # leave the cart; becomes a normal Sales Order
+	so.save()
+	so.submit()  # fires on_sales_order_submit → reserves each line's stems once
+
+	# Clear the active-cart selection so the next view doesn't reopen this order.
+	frappe.cache.delete_value(_active_cart_customer_key())
+
+	if hasattr(frappe.local, "cookie_manager"):
+		frappe.local.cookie_manager.delete_cookie("cart_count")
+
+	return so.name
 
 
 @frappe.whitelist()
@@ -1040,6 +1084,108 @@ def _ensure_contact_linked_to_customer(contact_name, customer_name):
 	contact.save()
 
 
+def _active_cart_customer_key(user=None):
+	return f"active_cart_customer:{user or frappe.session.user}"
+
+
+def _user_is_portal_user_of(customer, user=None):
+	"""True if `user` is a Portal User on `customer` (rep authorised on it)."""
+	user = user or frappe.session.user
+	return bool(
+		frappe.db.exists(
+			"Portal User", {"parent": customer, "parenttype": "Customer", "user": user}
+		)
+	)
+
+
+@frappe.whitelist()
+def set_active_cart_customer(customer):
+	"""Set which customer's cart the session is currently viewing/editing.
+
+	A sales rep is a Portal User on several customers; this picks the active one
+	so /cart, update_cart and checkout all operate on that customer's draft SO.
+	Rejected if the user isn't authorised on the customer (unless admin).
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		frappe.throw(_("Please log in."), frappe.PermissionError)
+	if not frappe.db.exists("Customer", customer):
+		frappe.throw(_("Customer {0} not found.").format(customer))
+
+	is_admin = user == "Administrator" or "System Manager" in frappe.get_roles(user)
+	if not is_admin and not _user_is_portal_user_of(customer, user):
+		frappe.throw(
+			_("You are not authorised to act for customer {0}.").format(customer),
+			frappe.PermissionError,
+		)
+
+	frappe.cache.set_value(_active_cart_customer_key(user), customer)
+	return {"customer": customer}
+
+
+def _active_cart_customer(user=None):
+	"""The session's selected cart customer, if still valid for this user."""
+	user = user or frappe.session.user
+	customer = frappe.cache.get_value(_active_cart_customer_key(user))
+	if not customer:
+		return None
+	is_admin = user == "Administrator" or "System Manager" in frappe.get_roles(user)
+	if is_admin or _user_is_portal_user_of(customer, user):
+		return customer
+	return None
+
+
+@frappe.whitelist()
+def get_cart_customers():
+	"""Customers (with an open draft-SO cart) the rep may switch between on /cart.
+
+	Returns [{customer, has_cart, active}]. Always includes customers the user
+	is a Portal User on; flags which already have an open Shopping Cart SO and
+	which is the active selection.
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		return []
+
+	portal_customers = frappe.get_all(
+		"Portal User",
+		filters={"user": user, "parenttype": "Customer"},
+		pluck="parent",
+	)
+	portal_customers = list(dict.fromkeys(portal_customers))
+
+	cart_sos = frappe.get_all(
+		"Sales Order",
+		filters={
+			"contact_email": user,
+			"order_type": "Shopping Cart",
+			"docstatus": 0,
+		},
+		fields=["name", "customer", "total_qty"],
+	)
+	# customer -> total item qty across their open cart(s)
+	cart_qty = {}
+	for so in cart_sos:
+		cart_qty[so.customer] = cart_qty.get(so.customer, 0) + (so.total_qty or 0)
+	with_carts = set(cart_qty)
+
+	# Union: portal customers + any customer that already has a cart for this user.
+	names = list(dict.fromkeys(list(portal_customers) + list(with_carts)))
+	active = _active_cart_customer(user)
+	rows = [
+		{
+			"customer": n,
+			"customer_name": frappe.db.get_value("Customer", n, "customer_name") or n,
+			"has_cart": n in with_carts,
+			"cart_qty": int(cart_qty.get(n, 0)),
+			"active": n == active,
+		}
+		for n in names
+	]
+	rows.sort(key=lambda r: (not r["has_cart"], r["customer_name"].lower()))
+	return rows
+
+
 def _get_cart_doc(party=None):
 	"""Return the open draft cart document of the configured doctype.
 
@@ -1050,6 +1196,13 @@ def _get_cart_doc(party=None):
 	"""
 	if not party:
 		party = get_party()
+
+	# A rep may be a Portal User on several customers and pick which one's cart
+	# is active (Product Overview / the /cart selector). Honour that selection,
+	# overriding get_party()'s single default-linked customer.
+	_active = _active_cart_customer()
+	if _active and (not party or party.doctype != "Customer" or party.name != _active):
+		party = frappe.get_doc("Customer", _active)
 
 	target_doctype = _cart_doctype()
 
