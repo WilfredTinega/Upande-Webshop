@@ -13,8 +13,7 @@
   "description",
   "column_break_1",
   "is_active",
-  "pack_rates_section",
-  "pack_rates"
+  "packrate"
  ],
  "fields": [
   {
@@ -50,20 +49,15 @@
    "label": "Description"
   },
   {
-   "fieldname": "pack_rates_section",
-   "fieldtype": "Section Break",
-   "label": "Pack Rates"
-  },
-  {
-   "description": "Stems-per-box for each stem length. Used to compute total stems on the storefront.",
-   "fieldname": "pack_rates",
-   "fieldtype": "Table",
-   "label": "Pack Rates",
-   "options": "Pack Rate"
+   "fieldname": "packrate",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Packrate",
+   "options": "\n240\n204\n192\n180\n144\n120"
   }
  ],
  "links": [],
- "modified": "2026-05-24 22:21:34.888041",
+ "modified": "2026-06-09 21:09:41.387868",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Box Type",

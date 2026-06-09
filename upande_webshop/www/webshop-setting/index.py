@@ -5,7 +5,7 @@ sitemap = 1
 
 def get_context(context):
 	context.body_class = "product-page"
-	context.parents = [{"name": frappe._("Home"), "route": "/webshop-setting"}]
+	context.parents = [{"name": frappe._("Home"), "route": "/webshop"}]
 
 	current_user_email = frappe.session.user
 	# expose both user id (email) and full name to the template

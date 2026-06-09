@@ -92,6 +92,49 @@ the including page; this partial only ships styles + the class definition, plus
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+
+	/* Dark mode: the surfaces above hard-code light hex (#fff / #fafbfc /
+	   #f7f7f9 / #f4f5f6), which never adapt. Repaint them with the theme's
+	   dark ramp. These rules live in the same <style> block as the originals
+	   so source order (dark after light) lets them win on equal specificity. */
+	/* Selectable attribute/box chips: raised surface + visible border so they read
+	   as clickable. */
+	[data-theme="dark"] .inline-variant-selector .attr-toggle .btn,
+	[data-theme="dark"] .inline-variant-selector .box-type-toggle .btn {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--gray-500);
+	}
+	[data-theme="dark"] .inline-variant-selector .attr-toggle .btn:hover:not(:disabled):not(.oos),
+	[data-theme="dark"] .inline-variant-selector .box-type-toggle .btn:hover:not(:disabled):not(.oos) {
+		border-color: var(--ws-accent, #0289f7);
+		color: var(--ws-accent, #0289f7);
+	}
+	/* Out-of-stock: recede so available chips stand out. */
+	[data-theme="dark"] .inline-variant-selector .attr-toggle .btn.oos,
+	[data-theme="dark"] .inline-variant-selector .box-type-toggle .btn.oos {
+		color: var(--text-muted);
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	/* Selected chip: solid accent fill. */
+	[data-theme="dark"] .inline-variant-selector .attr-toggle .btn.active,
+	[data-theme="dark"] .inline-variant-selector .box-type-toggle .btn.active {
+		background: var(--ws-accent, #0289f7);
+		border-color: var(--ws-accent, #0289f7);
+		color: #fff;
+	}
+	[data-theme="dark"] .inline-variant-selector .variant-row {
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	[data-theme="dark"] .inline-variant-selector .variant-row .variant-tag {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--dark-border-color);
+	}
+	[data-theme="dark"] .inline-variant-selector .variant-row .variant-stock { color: var(--text-muted); }
+	[data-theme="dark"] .inline-variant-selector .variant-row .total-stems { background: var(--gray-800); }
 </style>
 
 <script>

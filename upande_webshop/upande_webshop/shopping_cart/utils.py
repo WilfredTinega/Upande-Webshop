@@ -126,71 +126,7 @@ def redirect_non_desk_users_from_desk():
 	if frappe.db.get_value("User", user, "user_type") == "System User":
 		return
 
-	try:
-		po_only = bool(
-			frappe.db.get_single_value("Webshop Settings", "show_product_overview")
-		)
-	except Exception:
-		po_only = False
-	_redirect("/product-overview" if po_only else "/webshop")
-
-
-# Only the product *browsing* surfaces that Product Overview replaces. The
-# transactional / account pages (cart, wishlist, orders, invoices, shipments,
-# issues, contact) MUST stay reachable — Product Overview links straight into
-# /cart and the checkout → /orders flow, so locking them would stop customers
-# from buying or viewing what they bought.
-_PO_LOCKED_PREFIXES = (
-	"webshop",
-	"bouquet",
-	"all-products",
-	"product-search",
-	"customer-reviews",
-)
-
-
-def block_other_webshop_pages_when_po_only():
-	"""before_request hook — when Webshop Settings → show_product_overview is on,
-	the storefront *product listing* is replaced by /product-overview. Direct
-	hits on the browsing surfaces (/webshop, /bouquet, /all-products,
-	/product-search, /customer-reviews) get redirected to /product-overview.
-
-	Transactional / account pages (/cart, /wishlist, /orders, /invoices, …) are
-	deliberately NOT locked — Product Overview links into the cart → checkout →
-	orders flow, so those must stay reachable for customers to actually buy.
-
-	Guests are bounced too: /product-overview's own get_context sends Guests to
-	the login page, so the listing is never reachable without authenticating.
-
-	System Users (staff) are unaffected so they can still QA the storefront.
-	"""
-	if not frappe.request:
-		return
-
-	path = (frappe.request.path or "").strip("/")
-	if not path:
-		return
-	first = path.split("/", 1)[0]
-	if first not in _PO_LOCKED_PREFIXES:
-		return
-
-	user = getattr(frappe.session, "user", None)
-	# System Users (staff) keep full storefront access for QA.
-	if user and user != "Guest" and (
-		frappe.db.get_value("User", user, "user_type") == "System User"
-	):
-		return
-
-	try:
-		enabled = bool(
-			frappe.db.get_single_value("Webshop Settings", "show_product_overview")
-		)
-	except Exception:
-		enabled = False
-	if not enabled:
-		return
-
-	_redirect("/product-overview")
+	_redirect("/webshop")
 
 
 def redirect_after_login(login_manager):
@@ -209,6 +145,8 @@ def clear_cart_count(login_manager):
 def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
+
+	_set_webshop_breadcrumbs(context)
 
 	# Webshop Settings → Full Width: drop the .container wrapper on every
 	# webshop-rendered page (not just /webshop). The desk's navbar toggle does
@@ -231,11 +169,6 @@ def update_website_context(context):
 	)
 	context["webshop_show_bouquets_page"] = show_bouquets_page
 
-	show_product_overview = bool(
-		frappe.db.get_single_value("Webshop Settings", "show_product_overview")
-	)
-	context["webshop_show_product_overview"] = show_product_overview
-
 	customer_is_linked = is_customer()
 	context["webshop_user_is_customer"] = customer_is_linked
 
@@ -249,8 +182,10 @@ def update_website_context(context):
 		stored_theme = (
 			frappe.db.get_value("User", frappe.session.user, "desk_theme") or ""
 		).lower()
-		if stored_theme in ("light", "dark", "automatic"):
-			user_theme = stored_theme
+		# Only light/dark are offered in the webshop; treat anything else
+		# (e.g. a legacy "Automatic" desk_theme) as light.
+		if stored_theme == "dark":
+			user_theme = "dark"
 	context["webshop_user_image"] = user_image
 	context["webshop_user_fullname"] = user_fullname
 
@@ -263,13 +198,9 @@ def update_website_context(context):
 		f'var defaultMode = {json.dumps(user_theme)};'
 		'var stored = null;'
 		'try { stored = localStorage.getItem("desk_theme_mode"); } catch (e) {}'
-		'var mode = (stored && ["light","dark","automatic"].indexOf(stored) >= 0) ? stored : defaultMode;'
-		'var resolved = mode;'
-		'if (mode === "automatic" && window.matchMedia) {'
-		'  resolved = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";'
-		'}'
+		'var mode = (stored === "dark" || stored === "light") ? stored : defaultMode;'
 		'document.documentElement.setAttribute("data-theme-mode", mode);'
-		'document.documentElement.setAttribute("data-theme", resolved);'
+		'document.documentElement.setAttribute("data-theme", mode);'
 		'} catch (e) {}'
 		'})();'
 	)
@@ -278,7 +209,6 @@ def update_website_context(context):
 		f'{theme_init}'
 		f'window.webshop_app_logo = {json.dumps(app_logo)};'
 		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
-		f'window.webshop_show_product_overview = {json.dumps(show_product_overview)};'
 		f'window.webshop_user_is_customer = {json.dumps(customer_is_linked)};'
 		f'window.webshop_user_image = {json.dumps(user_image)};'
 		f'window.webshop_user_fullname = {json.dumps(user_fullname)};'
@@ -301,6 +231,64 @@ def update_website_context(context):
 
 	context["show_sidebar"] = False
 	context["sidebar_items"] = []
+
+
+# The account-menu pages, keyed by their (leading-slash-stripped) route. Each
+# value is the breadcrumb label shown for that page. Mirrors the dropdown in
+# shopping_cart.js so the trail matches the nav. /webshop is the webshop "home"
+# and is the "Home" root crumb on every other page (and gets no breadcrumb
+# itself).
+_WEBSHOP_BREADCRUMB_PAGES = {
+	"orders": "Orders",
+	"invoices": "Invoices",
+	"cart": "Cart",
+	"bouquet": "Bouquet",
+	"wishlist": "Wishlist",
+	"shipments": "Shipments",
+	"issues": "Issues",
+	"contact": "Contact",
+	"webshop-setting": "Setting",
+}
+
+
+def _set_webshop_breadcrumbs(context):
+	"""Render `Products / <Page>` breadcrumbs on the account-menu pages.
+
+	The standard breadcrumbs.html only renders when `parents` is set on the
+	context. The webshop landing (/webshop) and the doctype list pages
+	(/orders, /invoices, …) don't set it, so no trail shows. Detail pages
+	(e.g. /orders/SO-0001) already populate their own `parents` via
+	website_route_rules — we only touch exact top-level routes here and never
+	clobber an existing trail.
+	"""
+	request = getattr(frappe.local, "request", None)
+	if not request:
+		return
+
+	route = (request.path or "").strip("/")
+	label = _WEBSHOP_BREADCRUMB_PAGES.get(route)
+
+	# Generic Frappe doctype portals render their LIST at `<route>/list` (e.g.
+	# /issues → /issues/list, /orders → /orders/list), not at the bare route. The
+	# exact-route map misses those, so the list view showed no breadcrumb. If the
+	# path is `<known>/list`, resolve it to the same label. Detail pages
+	# (`<route>/<name>`) and the "new" form (`<route>/new`) set their own parents
+	# via website_route_rules, so we only special-case the `/list` suffix here and
+	# never touch other sub-routes.
+	if not label and route.endswith("/list"):
+		label = _WEBSHOP_BREADCRUMB_PAGES.get(route[: -len("/list")])
+
+	if not label:
+		return
+
+	# Frappe's standard portal list contexts (Sales Order → /orders, Sales
+	# Invoice → /invoices, Shipment → /shipments, Issue → /issues) ship with
+	# `no_breadcrumbs: True`, and breadcrumbs.html bails on that flag before it
+	# ever looks at `parents`. This hook runs in post_process_context — after
+	# the doctype's get_list_context — so clearing it here wins.
+	context["no_breadcrumbs"] = False
+	context["parents"] = [{"label": _("Home"), "route": "/webshop"}]
+	context["title"] = _(label)
 
 
 def is_customer():

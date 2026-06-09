@@ -44,7 +44,9 @@
 	{%- set at_stock_cap = (max_bunches > 0 and bunches >= max_bunches) -%}
 
 	<tr data-name="{{ d.name }}" data-uom="{{ effective_uom }}" data-custom-length="{{ d.custom_length or '' }}" data-custom-box-type="{{ d.custom_box_type or '' }}">
-		<td style="width: 60%;">
+		{#- Column widths are governed by .cart-table CSS (nth-child), not inline
+		    styles, so the scrolling body lines up with the fixed thead/tfoot. -#}
+		<td>
 			<div class="d-flex">
 				<div class="cart-item-image mr-4">
 					{% if d.thumbnail %}
@@ -57,30 +59,17 @@
 				</div>
 
 				<div class="d-flex w-100" style="flex-direction: column;">
+					{#- Stem length is folded into the title (e.g. "White Majolika-53CM"),
+					    like the item-stemlength naming (Athena-50CM). The separate
+					    "Length:" line and the "Box Type:" line are intentionally
+					    dropped from the cart display. -#}
 					<div class="item-title mb-1 mr-3">
-						{{ d.get("web_item_name") or d.item_name }}
+						{{ d.get("web_item_name") or d.item_name }}{% if d.custom_length %}-{{ d.custom_length }}{% endif %}
 					</div>
 
-					{% if d.custom_length %}
-					<span class="item-subtitle mr-2 mt-1">
-						{{ _('Length') }}: <strong>{{ d.custom_length }}</strong>
-					</span>
-					{% endif %}
 					{% if effective_uom %}
-					<span class="item-subtitle mr-2">
+					<span class="item-subtitle mr-2 mt-1">
 						{{ _('Pack') }}: <strong>{{ effective_uom }}</strong>
-					</span>
-					{% endif %}
-					{% if d.custom_box_type %}
-					{%- set box_min_qty = frappe.db.get_value('Box Type', d.custom_box_type, 'min_order_qty') if frappe.get_meta('Box Type').has_field('min_order_qty') else 0 -%}
-					{%- set box_min_qty_int = (box_min_qty | int) if box_min_qty else 0 -%}
-					<span class="item-subtitle mr-2">
-						{{ _('Box Type') }}: <strong>{{ d.custom_box_type }}</strong>
-						{% if box_min_qty_int > 0 %}
-							<span class="text-muted" style="font-size:0.85em;">
-								({{ _('min') }} {{ box_min_qty_int }} {{ _('bunches') }})
-							</span>
-						{% endif %}
 					</span>
 					{% endif %}
 					{% if total_stems %}
@@ -88,12 +77,36 @@
 						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>
 					{% endif %}
+					{#- Box ID is assigned by the cart Box Type's pack rate: lines are
+					    packed into boxes of `packrate` stems (grouped by farm), same
+					    logic as the /order-stock packer. Box Label is an optional
+					    free-text note saved on this cart row. -#}
+					<div class="cart-item-box-info">
+						{% if d.get('custom_box_id') %}
+						<span class="item-subtitle cart-box-id-label">
+							{{ _('Box ID') }}:
+							<input type="number"
+								min="1"
+								step="1"
+								class="form-control cart-box-id"
+								value="{{ d.custom_box_id }}"
+								data-child-docname="{{ d.name }}"
+								title="{{ _('Box ID (editable)') }}">
+						</span>
+						{% endif %}
+						<input type="text"
+							class="form-control cart-box-label"
+							value="{{ d.get('_box_label') or '' }}"
+							maxlength="140"
+							data-child-docname="{{ d.name }}"
+							placeholder="{{ _('Box label (optional)') }}">
+					</div>
 				</div>
 			</div>
 		</td>
 
 		<!-- Qty column (in bunches) -->
-		<td class="text-right" style="width: 25%;">
+		<td>
 			<div class="d-flex">
 				{% set disabled = 'disabled' if d.is_free_item else '' %}
 				<div class="input-group number-spinner mt-1 mb-4">
@@ -141,7 +154,7 @@
 		</td>
 
 		<!-- Price column -->
-		<td class="text-right item-subtotal column-sm-view w-100">
+		<td class="text-right item-subtotal column-sm-view">
 			{{ item_subtotal(d) }}
 		</td>
 	</tr>

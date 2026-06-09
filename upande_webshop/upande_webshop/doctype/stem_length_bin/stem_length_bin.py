@@ -142,6 +142,14 @@ def get_stock_by_length(item_code):
 	from upande_webshop.upande_webshop.product_data_engine.query import (
 		_all_storefront_warehouses,
 	)
+	from upande_webshop.upande_webshop.utils.shelf_stock import (
+		get_shelf_qty_by_length,
+		use_shelf_stock,
+	)
+
+	# Shelf stock is keyed by item + stem length already; not warehouse-scoped.
+	if use_shelf_stock():
+		return get_shelf_qty_by_length(item_code)
 
 	ws_warehouse = frappe.db.get_value(
 		"Website Item", {"item_code": item_code}, "website_warehouse"
@@ -149,6 +157,16 @@ def get_stock_by_length(item_code):
 	warehouses = _all_storefront_warehouses(ws_warehouse)
 	if not warehouses:
 		return {}
+
+	# When the age-bin source is enabled, read Stem Length Bin per length with the
+	# harvest-age FIFO buckets as fallback for lengths the Stem Length Bin lacks.
+	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+		get_age_bin_qty_by_length,
+		use_stem_length_age_bin,
+	)
+
+	if use_stem_length_age_bin():
+		return get_age_bin_qty_by_length(item_code, warehouses)
 
 	rows = frappe.db.get_all(
 		"Stem Length Bin",

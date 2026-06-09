@@ -6,7 +6,7 @@ def execute():
 
 	Going forward the age bin is maintained incrementally by the stock-movement
 	hook (update_stem_length_bin.on_stock_entry_submit/cancel). This one-off
-	seeds it from history so the Product Overview age filter has data on day one.
+	seeds it from history so harvest-age data is available on day one.
 
 	Mirrors the exclusion logic the age filter previously used (scanned / sold /
 	rejected / locally-transferred batches are excluded), groups by harvest date,

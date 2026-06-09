@@ -19,8 +19,7 @@ add_to_apps_screen = [
 		"name": "upande_webshop",
 		"logo": "/assets/upande_webshop/images/UpandeLogo.png",
 		"title": "Webshop",
-		"route": "/app/upande-webshop",
-		# "has_permission": "upande_webshop.api.permission.has_app_permission"
+		"route": "/app/upande-webshop"
 	}
 ]
 
@@ -232,7 +231,6 @@ override_doctype_class = {
 # ----------------
 before_request = [
     "upande_webshop.upande_webshop.shopping_cart.utils.redirect_non_desk_users_from_desk",
-    "upande_webshop.upande_webshop.shopping_cart.utils.block_other_webshop_pages_when_po_only",
 ]
 after_request = ["upande_webshop.upande_webshop.shopping_cart.utils.redirect_customer_after_login"]
 

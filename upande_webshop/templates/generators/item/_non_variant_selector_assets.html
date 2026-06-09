@@ -63,6 +63,47 @@ ships styles + the class definition, plus
 		overflow: hidden;
 		text-overflow: ellipsis;
 	}
+
+	/* Dark mode: the surfaces above hard-code light hex (#fff / #fafbfc /
+	   #f7f7f9 / #f4f5f6), which never adapt. Repaint them with the theme's
+	   dark ramp. These rules live in the same <style> block as the originals
+	   so source order (dark after light) lets them win on equal specificity. */
+	/* Selectable (available, not-yet-selected) length buttons: raised dark surface
+	   with a clearly visible border so they read as clickable chips. */
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--gray-500);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn:hover:not(:disabled):not(.oos) {
+		border-color: var(--ws-accent, #0289f7);
+		color: var(--ws-accent, #0289f7);
+	}
+	/* Out-of-stock lengths: recede — darker, muted, struck through — so the
+	   available ones stand out against them. */
+	[data-theme="dark"] .inline-non-variant-selector .stem-length-btn.oos {
+		color: var(--text-muted);
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	/* Selected length: solid accent fill. (--primary-color flips to the accent in
+	   dark mode via webshop_cart.scss; pin it here so the active chip is obvious.) */
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn.active {
+		background: var(--ws-accent, #0289f7);
+		border-color: var(--ws-accent, #0289f7);
+		color: #fff;
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row {
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row .length-tag {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--dark-border-color);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row .length-stock { color: var(--text-muted); }
+	[data-theme="dark"] .inline-non-variant-selector .length-row .total-stems { background: var(--gray-800); }
 </style>
 
 <script>

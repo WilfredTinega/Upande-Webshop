@@ -7,14 +7,31 @@ $(() => {
 
 			let view_type = localStorage.getItem("product_view") || "List View";
 
-			// Render Product Views, Filters & Search
-			new webshop.ProductView({
+			// Render Product Views, Filters & Search. Keep the instance on
+			// webshop.product_view so the inline "Clear All" handler (index.html)
+			// can re-render the listing in place instead of reloading the page.
+			webshop.product_view = new webshop.ProductView({
 				view_type: view_type,
 				products_section: $('#product-listing'),
 				item_group: me.item_group
 			});
 
 			this.bind_card_actions();
+			this.bind_breadcrumb_actions();
+		}
+
+		bind_breadcrumb_actions() {
+			// The "Home" breadcrumb routes back to /webshop — the page we're
+			// already on. A normal click triggers a full reload that lands you
+			// right back here, which reads as a janky no-op. Suppress navigation
+			// when a breadcrumb link resolves to the current page.
+			$(".breadcrumb-container").on("click", "a", function (e) {
+				let target = this.pathname.replace(/\/$/, "");
+				let here = window.location.pathname.replace(/\/$/, "");
+				if (target === here) {
+					e.preventDefault();
+				}
+			});
 		}
 
 		bind_card_actions() {
