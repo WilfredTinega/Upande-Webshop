@@ -17,12 +17,37 @@ def execute():
 	if not frappe.db.table_exists("Stem Length Age Bin"):
 		return
 
+	# The whole Grading harvest-age flow is owned by upande_tambuzi: the header
+	# flags below (custom_harvest_batch_no, custom_scanned_packing, custom_sold,
+	# custom_transfered_to_local, custom_rejected) and the per-row custom_length
+	# are Custom Fields that only exist where that app is installed. On a site
+	# without it (e.g. mona) there is nothing to backfill and the columns are
+	# absent, so referencing them in SQL would hard-error — bail out cleanly.
+	required_header_cols = (
+		"custom_harvest_batch_no",
+		"custom_scanned_packing",
+		"custom_sold",
+		"custom_transfered_to_local",
+		"custom_rejected",
+		"custom_stem_length",
+	)
+	if not all(frappe.db.has_column("Stock Entry", c) for c in required_header_cols):
+		return
+
+	# Stock Entry Detail.custom_length is the authoritative per-row length, but it
+	# is a Custom Field that not every site has installed. Where it's missing, fall
+	# back to the header field alone — mirroring the live hook's item.get() default.
+	if frappe.db.has_column("Stock Entry Detail", "custom_length"):
+		length_expr = "COALESCE(sed.custom_length, se.custom_stem_length)"
+	else:
+		length_expr = "se.custom_stem_length"
+
 	# Aggregate net qty into each warehouse, per (item, length_str, harvest_date).
 	rows = frappe.db.sql(
-		"""
+		f"""
 		SELECT
 			sed.item_code AS item_code,
-			COALESCE(sed.custom_length, se.custom_stem_length) AS length_str,
+			{length_expr} AS length_str,
 			sed.t_warehouse AS warehouse,
 			DATE(SUBSTRING_INDEX(se.custom_harvest_batch_no, '/', -1)) AS harvest_date,
 			SUM(sed.transfer_qty) AS qty
