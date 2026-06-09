@@ -36,6 +36,25 @@ def _cart_item_doctype():
 	return "Sales Order Item" if _cart_doctype() == "Sales Order" else "Quotation Item"
 
 
+def _delivery_point_doctype():
+	"""Return the Delivery Point doctype name as it exists on THIS site.
+
+	The doctype is named "Delivery Point" (singular) in upande_webshop and
+	upande_kaitet, but "Delivery Points" (plural) in upande_tambuzi. Some sites
+	(e.g. tambuzi) have BOTH installed — one empty, one populated — so we prefer
+	whichever actually holds records, then fall back to whichever exists. The
+	cart dropdown query and link validation then target the right table on every
+	site. Returns None if neither exists.
+	"""
+	existing = [n for n in ("Delivery Point", "Delivery Points") if frappe.db.exists("DocType", n)]
+	if not existing:
+		return None
+	# Prefer the doctype that has data — on dual-install sites the records live
+	# in only one of them.
+	populated = [n for n in existing if frappe.db.count(n)]
+	return (populated or existing)[0]
+
+
 def _cart_party_name(quotation):
 	"""Return the party name from a cart doc, regardless of doctype.
 
@@ -241,6 +260,10 @@ def _assign_sequential_box_ids(doc):
 	to set it. Downstream pick-list automation re-derives box ids during
 	packing, so the values written here are just placeholders to clear the
 	mandatory validator.
+
+	When the cart has a Box Type whose pack rate is known, defer to the
+	pack-rate packer instead so qty changes / adds keep box ids consistent with
+	the box-type selection (rather than reverting to a 1..N placeholder).
 	"""
 	items = doc.get("items") or []
 	if not items:
@@ -248,9 +271,319 @@ def _assign_sequential_box_ids(doc):
 	child_meta = frappe.get_meta(items[0].doctype)
 	if not child_meta.has_field("custom_box_id"):
 		return
+
+	box_type = doc.get("custom_box_type")
+	if box_type and frappe.get_meta("Box Type").has_field("packrate"):
+		pack_rate = cint(frappe.db.get_value("Box Type", box_type, "packrate") or 0)
+		if pack_rate > 0:
+			_assign_box_ids_by_pack_rate(doc, pack_rate)
+			return
+
 	for idx, item in enumerate(items, start=1):
 		if not item.get("custom_box_id"):
 			item.custom_box_id = idx
+
+
+# Farm packing order — mirrors the /order-stock create_order_stock_order script:
+# Pendekeza first, then Burguret, then Turaco, then anything else.
+_FARM_PACK_ORDER = {"Pendekeza": "0", "Burguret": "1", "Turaco": "2"}
+
+
+def _farm_of(warehouse):
+	"""Reduce a warehouse name to its farm, e.g.
+	'Burguret Available for Sale - TL' -> 'Burguret'."""
+	w = str(warehouse or "")
+	farm = (
+		w.replace(" Available for Sale - TL", "")
+		.replace(" Receiving Cold Store - TL", "")
+		.replace(" - TL", "")
+		.strip()
+	)
+	return farm or "Other"
+
+
+def _merge_identical_rows(doc):
+	"""Merge cart rows that are identical except for qty back into a single line.
+
+	The split helper (`_split_rows_exceeding_pack_rate`) carves an oversized line
+	into box-sized sibling rows. When the pack rate later *increases* (a bigger
+	box type is chosen), those siblings would otherwise stay split forever, even
+	though they now fit in one box. Merging them first — before the re-split below
+	— makes the pipeline symmetric: a larger box recombines what a smaller box
+	split, a smaller box re-splits the merged total.
+
+	Two rows merge only when they match on every order-relevant attribute:
+	item_code, uom, conversion_factor, custom_length, custom_box_type, source
+	warehouse, and additional_notes. Requiring additional_notes to match means a
+	manually-noted row is never silently folded into another (and split siblings,
+	which inherit the parent's notes, still merge). The first row of each group is
+	resized to the summed qty; later siblings are dropped. No-op when nothing
+	matches, so re-running on an unmergeable cart leaves it untouched.
+	"""
+	items = doc.get("items") or []
+	if len(items) < 2:
+		return
+	child_meta = frappe.get_meta(items[0].doctype)
+	if not child_meta.has_field("custom_box_id"):
+		return
+
+	has_total_stems = child_meta.has_field("custom_total_stems")
+
+	def _key(r):
+		return (
+			r.item_code,
+			r.uom or "",
+			flt(r.conversion_factor or 1),
+			(r.get("custom_length") or "") if child_meta.has_field("custom_length") else "",
+			(r.get("custom_box_type") or "") if child_meta.has_field("custom_box_type") else "",
+			r.get("custom_source_warehouse") or r.get("warehouse") or "",
+			r.get("additional_notes") or "",
+		)
+
+	merged = {}
+	ordered = []
+	changed = False
+	for r in items:
+		k = _key(r)
+		head = merged.get(k)
+		if head is None:
+			merged[k] = r
+			ordered.append(r)
+			continue
+		# Fold this sibling's qty into the first row sharing its key.
+		cf = flt(head.conversion_factor or 1) or 1
+		head.qty = cint(head.qty or 0) + cint(r.qty or 0)
+		head.stock_qty = head.qty * cf
+		if has_total_stems:
+			head.custom_total_stems = head.qty * cf
+		changed = True
+
+	if changed:
+		doc.items = ordered
+		for idx, r in enumerate(ordered, start=1):
+			r.idx = idx
+
+
+def _split_rows_exceeding_pack_rate(doc, pack_rate):
+	"""Split any cart row whose total stems exceed one box (`pack_rate`) into
+	box-sized rows, so a single line never spans more than one box.
+
+	A line of N stems at a pack rate of `cap` stems/box becomes
+	ceil(N / cap) rows: full box-sized chunks plus a remainder row. Splitting
+	respects bunch granularity — stems = qty(bunches) × conversion_factor, so
+	each chunk holds floor(cap / stems_per_bunch) whole bunches. A bunch that's
+	itself larger than the box can't be split, so such a row is left whole (the
+	packer will still give it its own box id).
+
+	Idempotent: rows produced here are ≤ one box, so re-running this helper on
+	an already-split cart is a no-op. New rows inherit every field of the parent
+	row except qty/stem totals; they're appended and will be persisted by the
+	caller's quotation.save().
+	"""
+	items = doc.get("items") or []
+	if not items:
+		return
+	child_meta = frappe.get_meta(items[0].doctype)
+	if not child_meta.has_field("custom_box_id"):
+		return
+
+	cap = cint(pack_rate)
+	if cap <= 0:
+		return
+
+	has_total_stems = child_meta.has_field("custom_total_stems")
+	new_items = []
+	changed = False
+	# Iterate a snapshot: doc.append("items", …) below mutates the live
+	# doc.items list, which `items` aliases. Looping the live list would re-visit
+	# (and re-append) the clones we add. Snapshot the originals up front so each
+	# source row is processed exactly once.
+	for r in list(items):
+		cf = flt(r.conversion_factor or 1) or 1
+		qty = cint(r.qty or 0)
+		total_stems = qty * cf
+		# Fits in one box (or can't be split below a single bunch) — keep as-is.
+		bunches_per_box = int(cap // cf) if cf else 0
+		if total_stems <= cap or bunches_per_box < 1 or qty <= bunches_per_box:
+			new_items.append(r)
+			continue
+
+		changed = True
+		remaining = qty
+		first = True
+		while remaining > 0:
+			chunk = min(bunches_per_box, remaining)
+			remaining -= chunk
+			if first:
+				# Resize the original row in place so its docname (and any
+				# manual box label) is preserved on the first chunk.
+				r.qty = chunk
+				r.stock_qty = chunk * cf
+				if has_total_stems:
+					r.custom_total_stems = chunk * cf
+				new_items.append(r)
+				first = False
+			else:
+				# Copy EVERY field from the parent row, then override only the
+				# quantity/stem fields. Whitelisting individual fields here dropped
+				# item_name, rate, amount, description, etc., so split rows saved
+				# with "Value missing for: Item Name / Amount". Cloning the whole row
+				# carries pricing + descriptive fields through; we strip the row's
+				# identity (name/idx/parent) so Frappe inserts it as a brand-new
+				# child rather than aliasing the original.
+				clone = r.as_dict()
+				for k in ("name", "idx", "parent", "parentfield", "parenttype",
+						"creation", "modified", "modified_by", "owner", "docstatus"):
+					clone.pop(k, None)
+				clone["qty"] = chunk
+				clone["conversion_factor"] = cf
+				clone["stock_qty"] = chunk * cf
+				if has_total_stems:
+					clone["custom_total_stems"] = chunk * cf
+				# Re-derive amount-like fields from the carried-over rate so the new
+				# row's totals match its (smaller) qty; rate/price_list_rate come
+				# straight from the parent. _apply_length_price_db reprices after.
+				rate = flt(clone.get("rate") or 0)
+				clone["amount"] = rate * chunk
+				if clone.get("base_rate") is not None:
+					clone["base_amount"] = flt(clone.get("base_rate") or 0) * chunk
+				new_items.append(doc.append("items", clone))
+
+	if changed:
+		# Reorder so split rows sit next to their origin; idx is re-stamped by
+		# the packer below.
+		doc.items = new_items
+
+
+def _assign_box_ids_by_pack_rate(doc, pack_rate):
+	"""Pack the cart's item rows into boxes of `pack_rate` stems and stamp a
+	`custom_box_id` per box, grouping by farm (Pendekeza, Burguret, Turaco, then
+	others). Stems = qty * conversion_factor. Uses first-fit packing: a line joins
+	the first open box of its farm that still has room (so any cart item can share
+	a box that isn't full yet, regardless of cart order), opening a new box only
+	when none fits. Lines keep their cart order; box ids may therefore repeat
+	non-contiguously down the list (e.g. box 1, box 2, box 1 again).
+
+	Falls back to the 1..N placeholder when there's no usable pack rate or the
+	child doctype lacks custom_box_id.
+
+	Sibling rows left over from a previous (smaller) box are merged back first,
+	then rows whose stems exceed one box are split into box-sized rows so a single
+	cart line never straddles more than one box; each resulting row then gets its
+	own sequential box id. Merge-then-split makes box-type changes symmetric: a
+	bigger box recombines lines a smaller box split, a smaller box re-splits them.
+	"""
+	items = doc.get("items") or []
+	if not items:
+		return
+	if not frappe.get_meta(items[0].doctype).has_field("custom_box_id"):
+		return
+
+	cap = cint(pack_rate)
+	if cap <= 0:
+		# No capacity to pack against — keep the simple placeholder.
+		_assign_sequential_box_ids(doc)
+		return
+
+	# Recombine any split siblings into their single source line, then carve
+	# oversized lines into box-sized rows. Merging first means a pack-rate
+	# increase collapses lines a smaller box previously split, and the re-split
+	# below re-divides the merged total against the new (larger) capacity.
+	_merge_identical_rows(doc)
+	_split_rows_exceeding_pack_rate(doc, cap)
+	items = doc.get("items") or []
+
+	# Group rows by farm and remember a stable sort key for the farm order.
+	groups = {}
+	order_keys = {}
+	for r in items:
+		farm = _farm_of(r.get("custom_source_warehouse") or r.get("warehouse"))
+		order_keys[farm] = _FARM_PACK_ORDER.get(farm, "9") + farm
+		groups.setdefault(farm, []).append(r)
+
+	# First-fit packing: a line lands in the FIRST already-open box of its farm
+	# that still has room, not just the most-recently-opened one. This lets a small
+	# line top up an earlier box a bigger line left partly empty, so boxes fill up
+	# regardless of cart order — only when no open box fits does a new one open.
+	# Box ids stay scoped per farm (a box never mixes farms); the row order in the
+	# cart is preserved (we don't reshuffle lines, only which box they reference).
+	ordered = []
+	box = 0
+	for sk in sorted(order_keys.values()):
+		farm = sk[1:]
+		open_boxes = []  # list of [box_id, fill] for this farm, in open order
+		for r in groups[farm]:
+			stems = (r.qty or 0) * (r.conversion_factor or 1)
+			# Find the first open box this line fits into (fill + stems <= cap).
+			target = next((b for b in open_boxes if b[1] + stems <= cap), None)
+			if target is None:
+				# Nothing fits it (or it's the first line) — open a new box. A line
+				# bigger than a whole box still gets its own box id; splitting to box
+				# size already happened in _split_rows_exceeding_pack_rate above.
+				box += 1
+				target = [box, 0]
+				open_boxes.append(target)
+			r.custom_box_id = target[0]
+			target[1] += stems
+			ordered.append(r)
+		# Farms don't share boxes: the next farm starts fresh (open_boxes is per-farm),
+		# and box ids simply continue counting up.
+
+	for idx, r in enumerate(ordered, start=1):
+		r.idx = idx
+	doc.items = ordered
+
+
+def _max_box_id_for_delivery_date(delivery_date, exclude_so=None):
+	"""Highest `custom_box_id` already used by SUBMITTED Sales Orders delivering
+	on `delivery_date`. Returns 0 when none exist (or the field/date is absent).
+
+	Box ids are continuous per delivery day across orders: the day's first order
+	uses 1..N, the next continues at N+1, and so on. Only docstatus=1 (submitted)
+	orders count — draft/abandoned carts never consume numbers — and the order
+	currently being submitted is excluded so re-runs don't double-count it.
+	"""
+	if not delivery_date:
+		return 0
+	if not frappe.db.has_column("Sales Order Item", "custom_box_id"):
+		return 0
+	max_id = frappe.db.sql(
+		"""
+		SELECT MAX(soi.custom_box_id)
+		FROM `tabSales Order Item` soi
+		INNER JOIN `tabSales Order` so ON so.name = soi.parent
+		WHERE so.docstatus = 1
+		  AND so.delivery_date = %(dd)s
+		  AND (%(exclude)s IS NULL OR so.name != %(exclude)s)
+		""",
+		{"dd": getdate(delivery_date), "exclude": exclude_so},
+	)
+	return cint(max_id[0][0]) if (max_id and max_id[0][0] is not None) else 0
+
+
+def _continue_box_ids_across_orders(doc):
+	"""Re-base this order's per-order box ids (1..N) onto the running total for
+	its delivery date, so box numbering continues from where the previous order
+	for that day stopped.
+
+	Call this at checkout AFTER box ids are assigned and the delivery date is
+	finalized, but BEFORE submit. Adds the day's current max box id (over already
+	submitted Sales Orders) as an offset to every row's custom_box_id. No-op when
+	the child doctype lacks custom_box_id, the cart is empty, or it's the day's
+	first order (offset 0).
+	"""
+	items = doc.get("items") or []
+	if not items:
+		return
+	if not frappe.get_meta(items[0].doctype).has_field("custom_box_id"):
+		return
+
+	offset = _max_box_id_for_delivery_date(doc.get("delivery_date"), exclude_so=doc.get("name"))
+	if offset <= 0:
+		return
+	for r in items:
+		if r.get("custom_box_id"):
+			r.custom_box_id = cint(r.custom_box_id) + offset
 
 
 def _validate_cart_stock(doc):
@@ -317,6 +650,12 @@ def place_order():
 	if box_err:
 		return {"error": box_err}
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
+
+	# Sales-Order-as-cart mode: the cart IS a draft Sales Order. Checkout just
+	# submits it in place (no Quotation→SO conversion) and reserves stems.
+	if quotation.doctype == "Sales Order":
+		return _place_sales_order_cart(quotation, cart_settings)
+
 	quotation.company = cart_settings.company
 
 	quotation.flags.ignore_permissions = True
@@ -363,6 +702,11 @@ def place_order():
 			)
 		_validate_cart_stock(sales_order)
 
+	# Box numbering continues from the previous order for this delivery date:
+	# now that delivery_date is finalized above, re-base the 1..N box ids onto
+	# the day's running total before the order is submitted and its boxes count.
+	_continue_box_ids_across_orders(sales_order)
+
 	sales_order.flags.ignore_permissions = True
 	sales_order.insert()
 	sales_order.submit()
@@ -371,6 +715,49 @@ def place_order():
 		frappe.local.cookie_manager.delete_cookie("cart_count")
 
 	return sales_order.name
+
+
+def _place_sales_order_cart(so, cart_settings):
+	"""Submit a draft Sales-Order cart in place.
+
+	Used when "Use Sales Order as Cart" is on: the cart already IS the order, so
+	checkout submits it (docstatus 0→1) rather than converting a Quotation. Each
+	line keeps its chosen source warehouse.
+
+	Stem reservation is NOT done here — submitting the SO fires the
+	`on_sales_order_submit` hook, which is the single point that bumps Stem Length
+	Bin reserved_qty for every line (using each line's custom_source_warehouse).
+	Reserving here too would double-count.
+	"""
+	so.company = cart_settings.company
+
+	# Default delivery to at least tomorrow on header and lines.
+	tomorrow = add_days(nowdate(), 1)
+	if not so.delivery_date or getdate(so.delivery_date) < getdate(tomorrow):
+		so.delivery_date = tomorrow
+	for item in so.get("items") or []:
+		if not item.delivery_date or getdate(item.delivery_date) < getdate(tomorrow):
+			item.delivery_date = so.delivery_date
+
+	_assign_sequential_box_ids(so)
+	# Continue box numbering from the previous order for this delivery date (the
+	# date is finalized just above). Excludes this SO itself — it's a draft cart
+	# (docstatus 0) so the submitted-only query already skips it, but pass its
+	# name for safety against re-runs.
+	_continue_box_ids_across_orders(so)
+
+	so.flags.ignore_permissions = True
+	so.order_type = "Sales"  # leave the cart; becomes a normal Sales Order
+	so.save()
+	so.submit()  # fires on_sales_order_submit → reserves each line's stems once
+
+	# Clear the active-cart selection so the next view doesn't reopen this order.
+	frappe.cache.delete_value(_active_cart_customer_key())
+
+	if hasattr(frappe.local, "cookie_manager"):
+		frappe.local.cookie_manager.delete_cookie("cart_count")
+
+	return so.name
 
 
 @frappe.whitelist()
@@ -493,6 +880,20 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 	from upande_webshop.upande_webshop.product_data_engine.query import (
 		_all_storefront_warehouses,
 	)
+	from upande_webshop.upande_webshop.utils.shelf_stock import (
+		get_shelf_qty,
+		use_shelf_stock,
+	)
+
+	item_meta = frappe.db.get_value(
+		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
+	) or frappe._dict()
+	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	# Plain items read from the shelf when shelf mode is on, scoped to the given
+	# stem length if any. Not warehouse-scoped.
+	if not is_variant_or_template and use_shelf_stock():
+		return get_shelf_qty(item_code, custom_length or None)
 
 	warehouse = frappe.db.get_value(
 		"Website Item", {"item_code": item_code}, "website_warehouse"
@@ -508,11 +909,6 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 	if not warehouses:
 		return 0
 
-	item_meta = frappe.db.get_value(
-		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
-	) or frappe._dict()
-	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
-
 	if is_variant_or_template:
 		total = frappe.db.sql(
 			"""SELECT COALESCE(SUM(actual_qty), 0)
@@ -524,20 +920,25 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 		)
 		return flt(total[0][0]) if total else 0
 
-	if custom_length:
-		total = frappe.db.sql(
-			"""SELECT COALESCE(SUM(actual_qty), 0)
-			   FROM `tabStem Length Bin`
-			   WHERE item_code = %s AND stem_length = %s AND warehouse IN ({})""".format(
-				",".join(["%s"] * len(warehouses))
-			),
-			[item_code, custom_length, *warehouses],
-		)
-		return flt(total[0][0]) if total else 0
+	# Plain-item availability:
+	#   - age-bin on : Stem Length Bin per length with Age Bin fallback
+	#   - age-bin off: core Bin (no length dimension; a length-specific ask just
+	#     falls back to the item's total Bin qty)
+	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+		get_age_bin_qty_by_length,
+		use_stem_length_age_bin,
+	)
 
+	if use_stem_length_age_bin():
+		qty_by_length = get_age_bin_qty_by_length(item_code, warehouses)
+		if custom_length:
+			return flt(qty_by_length.get(custom_length, 0))
+		return flt(sum(qty_by_length.values()))
+
+	# Flag off: plain items read core Bin, same source as variants.
 	total = frappe.db.sql(
 		"""SELECT COALESCE(SUM(actual_qty), 0)
-		   FROM `tabStem Length Bin`
+		   FROM `tabBin`
 		   WHERE item_code = %s AND warehouse IN ({})""".format(
 			",".join(["%s"] * len(warehouses))
 		),
@@ -947,7 +1348,47 @@ def guess_territory():
 	)
 
 
+def _box_pack_rate(box_type):
+	"""Stems-per-box for a Box Type, parsed from its `packrate` field.
+
+	`Box Type.packrate` is a Select of stem counts ("240", "120", ...). Returns
+	an int, or 0 when the box type / pack rate is missing or unparseable (0 →
+	"no pack rate", so the caller skips the Box ID).
+	"""
+	if not box_type:
+		return 0
+	try:
+		return int(flt(frappe.db.get_value("Box Type", box_type, "packrate") or 0))
+	except (TypeError, ValueError):
+		return 0
+
+
+def _decorate_items_with_box_info(doc):
+	"""Stamp each cart row with `_box_id` and `_box_label` for display.
+
+	`_box_id` = ceil(total_stems / pack_rate): the number of boxes the line
+	fills given the cart-level Box Type's pack rate. 0 when there's no box type,
+	no pack rate, or no stems (template hides it then). Box Type is a cart-level
+	field on tambuzi (`Quotation.custom_box_type`), so all rows share one rate.
+
+	`_box_label` mirrors the row's optional `custom_box_label` text when that
+	column exists — display only, never required.
+	"""
+	import math
+
+	box_type = doc.get("custom_box_type")
+	pack_rate = _box_pack_rate(box_type)
+	child_dt = doc.items[0].doctype if doc.get("items") else None
+	has_box_label = bool(child_dt) and frappe.db.has_column(child_dt, "custom_box_label")
+
+	for d in doc.get("items", []):
+		total_stems = flt(d.get("custom_total_stems") or 0)
+		d._box_id = int(math.ceil(total_stems / pack_rate)) if (pack_rate and total_stems) else 0
+		d._box_label = (d.get("custom_box_label") or "") if has_box_label else ""
+
+
 def decorate_quotation_doc(doc):
+	_decorate_items_with_box_info(doc)
 	for d in doc.get("items", []):
 		item_code = d.item_code
 		fields = ["web_item_name", "thumbnail", "website_image", "description", "route"]
@@ -1021,6 +1462,108 @@ def _ensure_contact_linked_to_customer(contact_name, customer_name):
 	contact.save()
 
 
+def _active_cart_customer_key(user=None):
+	return f"active_cart_customer:{user or frappe.session.user}"
+
+
+def _user_is_portal_user_of(customer, user=None):
+	"""True if `user` is a Portal User on `customer` (rep authorised on it)."""
+	user = user or frappe.session.user
+	return bool(
+		frappe.db.exists(
+			"Portal User", {"parent": customer, "parenttype": "Customer", "user": user}
+		)
+	)
+
+
+@frappe.whitelist()
+def set_active_cart_customer(customer):
+	"""Set which customer's cart the session is currently viewing/editing.
+
+	A sales rep is a Portal User on several customers; this picks the active one
+	so /cart, update_cart and checkout all operate on that customer's draft SO.
+	Rejected if the user isn't authorised on the customer (unless admin).
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		frappe.throw(_("Please log in."), frappe.PermissionError)
+	if not frappe.db.exists("Customer", customer):
+		frappe.throw(_("Customer {0} not found.").format(customer))
+
+	is_admin = user == "Administrator" or "System Manager" in frappe.get_roles(user)
+	if not is_admin and not _user_is_portal_user_of(customer, user):
+		frappe.throw(
+			_("You are not authorised to act for customer {0}.").format(customer),
+			frappe.PermissionError,
+		)
+
+	frappe.cache.set_value(_active_cart_customer_key(user), customer)
+	return {"customer": customer}
+
+
+def _active_cart_customer(user=None):
+	"""The session's selected cart customer, if still valid for this user."""
+	user = user or frappe.session.user
+	customer = frappe.cache.get_value(_active_cart_customer_key(user))
+	if not customer:
+		return None
+	is_admin = user == "Administrator" or "System Manager" in frappe.get_roles(user)
+	if is_admin or _user_is_portal_user_of(customer, user):
+		return customer
+	return None
+
+
+@frappe.whitelist()
+def get_cart_customers():
+	"""Customers (with an open draft-SO cart) the rep may switch between on /cart.
+
+	Returns [{customer, has_cart, active}]. Always includes customers the user
+	is a Portal User on; flags which already have an open Shopping Cart SO and
+	which is the active selection.
+	"""
+	user = frappe.session.user
+	if user == "Guest":
+		return []
+
+	portal_customers = frappe.get_all(
+		"Portal User",
+		filters={"user": user, "parenttype": "Customer"},
+		pluck="parent",
+	)
+	portal_customers = list(dict.fromkeys(portal_customers))
+
+	cart_sos = frappe.get_all(
+		"Sales Order",
+		filters={
+			"contact_email": user,
+			"order_type": "Shopping Cart",
+			"docstatus": 0,
+		},
+		fields=["name", "customer", "total_qty"],
+	)
+	# customer -> total item qty across their open cart(s)
+	cart_qty = {}
+	for so in cart_sos:
+		cart_qty[so.customer] = cart_qty.get(so.customer, 0) + (so.total_qty or 0)
+	with_carts = set(cart_qty)
+
+	# Union: portal customers + any customer that already has a cart for this user.
+	names = list(dict.fromkeys(list(portal_customers) + list(with_carts)))
+	active = _active_cart_customer(user)
+	rows = [
+		{
+			"customer": n,
+			"customer_name": frappe.db.get_value("Customer", n, "customer_name") or n,
+			"has_cart": n in with_carts,
+			"cart_qty": int(cart_qty.get(n, 0)),
+			"active": n == active,
+		}
+		for n in names
+	]
+	rows.sort(key=lambda r: (not r["has_cart"], r["customer_name"].lower()))
+	return rows
+
+
 def _get_cart_doc(party=None):
 	"""Return the open draft cart document of the configured doctype.
 
@@ -1031,6 +1574,10 @@ def _get_cart_doc(party=None):
 	"""
 	if not party:
 		party = get_party()
+
+	# The cart always operates on the Customer linked to the logged-in portal
+	# user (resolved by get_party()). There is no customer switcher — each portal
+	# user places Sales Orders for their own customer only.
 
 	target_doctype = _cart_doctype()
 
@@ -1679,6 +2226,57 @@ def update_cart_line_code(line_code=None):
 
 
 @frappe.whitelist()
+def update_cart_item_box_label(child_docname, box_label=None):
+	"""Save the optional per-item Box Label on a cart row (display-only field).
+
+	Writes `custom_box_label` directly on the Quotation/Sales Order Item row.
+	No-op (silently) when the column isn't present on this site, so sites
+	without the field don't error. The row is matched by its child docname and
+	verified to belong to the current cart before writing.
+	"""
+	quotation = _get_cart_quotation()
+	child_dt = quotation.items[0].doctype if quotation.get("items") else None
+	if not child_dt or not frappe.db.has_column(child_dt, "custom_box_label"):
+		return {"box_label": ""}
+
+	# Only allow editing rows that belong to this cart.
+	row = next((i for i in quotation.get("items") if i.name == child_docname), None)
+	if not row:
+		return {"box_label": ""}
+
+	value = (box_label or "").strip() or None
+	frappe.db.set_value(child_dt, child_docname, "custom_box_label", value, update_modified=False)
+	return {"name": child_docname, "box_label": value or ""}
+
+
+@frappe.whitelist()
+def update_cart_item_box_id(child_docname, box_id=None):
+	"""Persist a manually-edited Box ID on a cart row.
+
+	The cart auto-assigns `custom_box_id` by packing lines into boxes of the
+	Box Type's pack rate, but the user may override it. This writes the edited
+	value directly to the row (like the box label) without re-packing, so the
+	override sticks until the cart structure changes (qty/box-type change),
+	which re-runs the packer. No-op when the column is absent. The row is
+	verified to belong to the current cart before writing.
+	"""
+	quotation = _get_cart_quotation()
+	child_dt = quotation.items[0].doctype if quotation.get("items") else None
+	if not child_dt or not frappe.db.has_column(child_dt, "custom_box_id"):
+		return {"box_id": None}
+
+	row = next((i for i in quotation.get("items") if i.name == child_docname), None)
+	if not row:
+		return {"box_id": None}
+
+	value = cint(box_id) if box_id not in (None, "") else None
+	if value is not None and value < 1:
+		value = 1
+	frappe.db.set_value(child_dt, child_docname, "custom_box_id", value, update_modified=False)
+	return {"name": child_docname, "box_id": value}
+
+
+@frappe.whitelist()
 def update_cart_delivery_point(delivery_point):
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_delivery_point"):
@@ -1688,13 +2286,62 @@ def update_cart_delivery_point(delivery_point):
 			)
 		)
 
-	if delivery_point and not frappe.db.exists("Delivery Point", delivery_point):
+	dp_doctype = _delivery_point_doctype()
+	if delivery_point and not (dp_doctype and frappe.db.exists(dp_doctype, delivery_point)):
 		frappe.throw(_("Delivery Point {0} does not exist.").format(delivery_point))
 
 	quotation.custom_delivery_point = delivery_point or None
 	quotation.flags.ignore_permissions = True
 	quotation.save()
 	return {"name": quotation.name, "delivery_point": delivery_point or ""}
+
+
+@frappe.whitelist()
+def update_cart_consignee(consignee):
+	"""Cart-level Consignee. Stored on the cart's custom_consignee (Data) field —
+	we keep that field a plain Data column so the existing pack-list / dispatch
+	fetch_from chains keep working; the cart just writes the chosen Consignees
+	master name into it."""
+	quotation = _get_cart_quotation()
+	if not quotation.meta.has_field("custom_consignee"):
+		frappe.throw(_("Consignee is not set up on this cart."))
+
+	if consignee and not frappe.db.exists("Consignees", consignee):
+		frappe.throw(_("Consignee {0} does not exist.").format(consignee))
+
+	quotation.custom_consignee = consignee or None
+	quotation.flags.ignore_permissions = True
+	quotation.save()
+	return {"name": quotation.name, "consignee": consignee or ""}
+
+
+@frappe.whitelist()
+def search_consignees(txt=None, limit=20):
+	"""Storefront Link-search for the cart's Consignee field. Webshop customers
+	don't usually have read access to Consignees, so bypass permissions and
+	return name + label (mirrors search_delivery_points)."""
+	if not _get_cart_quotation():
+		return []
+
+	if not frappe.db.exists("DocType", "Consignees"):
+		return []
+
+	conditions = "WHERE IFNULL(disable, 0) = 0"
+	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
+	if txt:
+		conditions += " AND name LIKE %(txt)s"
+
+	rows = frappe.db.sql(
+		f"""
+		SELECT name FROM `tabConsignees`
+		{conditions}
+		ORDER BY name ASC
+		LIMIT %(limit)s
+		""",
+		args,
+		as_dict=True,
+	)
+	return [{"value": r.name, "label": r.name, "description": ""} for r in rows]
 
 
 @frappe.whitelist()
@@ -1707,14 +2354,19 @@ def search_delivery_points(txt=None, limit=20):
 	if not _get_cart_quotation():
 		return []
 
+	dp_doctype = _delivery_point_doctype()
+	if not dp_doctype:
+		return []
+
 	conditions = ""
 	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
 	if txt:
 		conditions = "WHERE name LIKE %(txt)s"
 
+	# Table name is `tab` + doctype name — singular or plural per site.
 	rows = frappe.db.sql(
 		f"""
-		SELECT name FROM `tabDelivery Point`
+		SELECT name FROM `tab{dp_doctype}`
 		{conditions}
 		ORDER BY name ASC
 		LIMIT %(limit)s
@@ -1756,11 +2408,33 @@ def update_cart_box_type(box_type):
 		for item in quotation.get("items", []):
 			item.custom_box_type = value
 
+	# Selecting a box type fixes the pack rate (stems/box), so re-pack the cart
+	# lines into boxes of that capacity and re-stamp custom_box_id — same packing
+	# logic as the /order-stock create_order_stock_order script. The helper reads
+	# the cart's custom_box_type (just set above) and packs by its pack rate,
+	# falling back to the 1..N placeholder when the box carries no pack rate.
+	_assign_sequential_box_ids(quotation)
+
 	quotation.flags.ignore_permissions = True
 	quotation.save()
+	_apply_length_price_db(quotation)
+	set_cart_count(quotation)
+
 	# Box type drives pricing on per-row flows (pack rate / min_order_qty), so
-	# reload the cart page to pick up recomputed line totals.
-	return {"name": quotation.name, "box_type": box_type or "", "reload": bool(propagate)}
+	# return the re-rendered cart fragments and let the client swap them in
+	# place — no full page reload.
+	quotation = _get_cart_quotation()
+	context = get_cart_quotation(quotation)
+	return {
+		"name": quotation.name,
+		"box_type": box_type or "",
+		"items": frappe.render_template("templates/includes/cart/cart_items.html", context),
+		"total": frappe.render_template("templates/includes/cart/cart_items_total.html", context),
+		"taxes_and_totals": frappe.render_template(
+			"templates/includes/cart/cart_payment_summary.html", context
+		),
+		"cart_count": cint(quotation.get("total_qty")) if quotation else 0,
+	}
 
 
 @frappe.whitelist()
@@ -1778,7 +2452,7 @@ def search_box_types(txt=None, limit=20):
 
 	rows = frappe.db.sql(
 		f"""
-		SELECT name FROM `tabBox Type`
+		SELECT name, packrate FROM `tabBox Type`
 		{conditions}
 		ORDER BY name ASC
 		LIMIT %(limit)s
@@ -1786,7 +2460,10 @@ def search_box_types(txt=None, limit=20):
 		args,
 		as_dict=True,
 	)
-	return [{"value": r.name, "label": r.name, "description": ""} for r in rows]
+	return [
+		{"value": r.name, "label": r.name, "description": "", "packrate": r.packrate or ""}
+		for r in rows
+	]
 
 
 @frappe.whitelist()

@@ -2,7 +2,7 @@
 
 :root {
 	--green-info: #38A160;
-	--product-bg-color: white;
+	--product-bg-color: var(--card-bg);
 	--body-bg-color:  var(--gray-50);
 }
 
@@ -13,11 +13,27 @@ body.product-page {
 // ─── Hide Frappe top navbar on webshop pages (logged-in only, applied via JS) ─
 // JS adds this class only when frappe.session.user !== 'Guest',
 // so guests on /webshop still see the Frappe navbar with Login.
+// Plain navbar removal for generic portal pages that are NOT webshop pages
+// (e.g. /index "My Account", the base URL). The website still renders Frappe's
+// top navbar showing the "Webshop" brand there; this hides it WITHOUT reserving
+// the 44px the webshop subnav needs — those pages have no subnav.
+body.hide-website-navbar {
+	header.navbar,
+	nav.navbar {
+		display: none !important;
+	}
+}
+
 body.hide-frappe-navbar {
 	header.navbar,
 	nav.navbar {
 		display: none !important;
 	}
+
+	// The webshop sub-navbar (#webshop-subnav) is position:fixed and 44px tall,
+	// so it's out of flow — reserve that space at the top of the page or content
+	// would start underneath it.
+	padding-top: 44px;
 
 	// Align page content with the webshop sub-navbar's inner container
 	// (max-width 1200px, centred, 1rem horizontal padding — see #webshop-subnav .webshop-subnav-inner).
@@ -35,13 +51,565 @@ body.hide-frappe-navbar {
 			padding-left: 0;
 			padding-right: 0;
 		}
+
+		// The breadcrumb lives in its own Bootstrap .container above <main>
+		// (web.html: .page-breadcrumbs > .breadcrumb-container.container). It is
+		// NOT inside main, so the rule above doesn't reach it — left to itself it
+		// keeps the default container max-width + gutter and sits indented/narrower
+		// than the now-flush content. Cancel its gutter/cap too so "Home > Webshop"
+		// tracks the full-width content edge instead of staying put.
+		.page-breadcrumbs .breadcrumb-container.container {
+			max-width: none;
+			padding-left: 0;
+			padding-right: 0;
+		}
 	}
+}
+
+// Breadcrumb separator: use a plain "/" in both light and dark mode. Frappe's
+// default is an SVG chevron (var(--right-arrow-svg)) whose baked-in stroke is
+// invisible on the dark page; a literal slash reads clearly on either surface
+// and gives the "Home / Page" style. The dark block repeats the colour so it
+// wins on specificity there.
+.breadcrumb-item + .breadcrumb-item::before {
+	content: "/";
+	color: var(--text-muted);
+	width: auto;
+	height: auto;
+	background: none;
+	margin-right: 0.25rem;
+}
+
+// Dark theme overrides for website pages. The desk's full dark.scss only
+// ships in the desk bundle, so website pages need their own variable
+// overrides for the "Toggle Theme" choice to actually flip colors.
+// Values mirror apps/frappe/frappe/public/scss/desk/dark.scss so the look
+// matches the desk's "Timeless Night" exactly — uses the same espresso gray
+// ramp that website/variables.scss already imports.
+[data-theme="dark"] {
+	// gray-700/800 nudges from desk/dark.scss
+	--gray-700: #383838;
+	--gray-800: #232323;
+
+	// Type
+	--text-neutral: var(--gray-50);
+	--text-dark: var(--gray-900);
+	--text-muted: var(--gray-400);
+	--text-light: var(--gray-300);
+	--text-color: var(--gray-50);
+	--heading-color: var(--gray-50);
+
+	// SVG
+	--icon-fill: transparent;
+	--icon-stroke: var(--gray-300);
+
+	// Layout
+	--bg-color: var(--gray-900);
+	--fg-color: var(--gray-900);
+	--subtle-accent: var(--gray-800);
+	--subtle-fg: var(--gray-700);
+	--fg-hover-color: var(--gray-800);
+	--card-bg: var(--gray-900);
+	--disabled-text-color: var(--gray-400);
+	--disabled-control-bg: var(--gray-800);
+	--control-bg: var(--gray-800);
+	--control-bg-on-gray: var(--gray-800);
+	--awesomebar-focus-bg: var(--control-bg);
+	--awesomplete-hover-bg: var(--gray-800);
+	--modal-bg: var(--gray-900);
+	--toast-bg: var(--modal-bg);
+	--popover-bg: var(--bg-color);
+
+	// Buttons
+	--btn-default-bg: var(--gray-800);
+	--btn-default-hover-bg: var(--gray-700);
+	// Frappe's `.btn.btn-primary` is `background: var(--btn-primary); color: var(--neutral)`.
+	// The desk's dark.scss pairs `--btn-primary: gray-300` with `--neutral: black` for an
+	// inverted (light-button / dark-text) primary. On website pages --neutral is NOT flipped,
+	// AND --primary / --primary-color resolve to near-black (#171717 / gray-900) — so the
+	// button is either washed-out light-gray (white text, unreadable) or a black button that
+	// vanishes into the dark page. Give the webshop a VISIBLE accent for primary actions
+	// (Save Order, Add to Cart, Place Order, toggle-view, login) with white text.
+	--ws-accent: #0289f7;          // blue-500 — readable on dark
+	--ws-accent-hover: #007be0;    // blue-600
+	--btn-primary: var(--ws-accent);
+	--primary: var(--ws-accent);
+	--primary-color: var(--ws-accent);
+	--neutral: #fff;
+
+	// Borders
+	--border-primary: var(--gray-200);
+	--border-color: var(--gray-800);
+	--dark-border-color: var(--gray-600);
+	--table-border-color: var(--border-color);
+	--highlight-color: var(--gray-700);
+	--btn-group-border-color: var(--gray-700);
+	// gray-700 (#383838) is nearly the control surface itself — placeholders
+	// (e.g. "Search for Products") were invisible. Lift to a readable muted gray.
+	--placeholder-color: var(--gray-500);
+
+	// Indicator backgrounds (used by the "In stock / Out of stock" pills)
+	--bg-green: var(--green-900);
+	--bg-red: var(--red-600);
+	--bg-gray: var(--gray-600);
+	--text-on-green: var(--green-100);
+	--text-on-red: var(--red-50);
+	--text-on-gray: var(--gray-50);
+
+	color-scheme: dark;
+
+	background-color: var(--bg-color);
+	color: var(--text-color);
+
+	body {
+		background-color: var(--bg-color);
+		color: var(--text-color);
+	}
+
+	// Webshop sub-navbar
+	#webshop-subnav {
+		background: var(--fg-color);
+		border-bottom: 1px solid var(--border-color);
+	}
+	.webshop-subnav-link,
+	.webshop-subnav-shop-label {
+		color: var(--text-color);
+	}
+	.webshop-subnav-dropdown-menu {
+		background: var(--card-bg);
+		border: 1px solid var(--border-color);
+	}
+	.webshop-subnav-dropdown-item {
+		color: var(--text-color);
+		&:hover { background: var(--fg-hover-color); color: var(--text-color); }
+	}
+	.webshop-subnav-dropdown-divider {
+		background: var(--border-color);
+	}
+
+	// Cards & tiles
+	.card,
+	.po-tile,
+	.po-modal {
+		background: var(--card-bg);
+		border-color: var(--border-color);
+		color: var(--text-color);
+	}
+	.po-modal-header,
+	.po-modal-footer {
+		border-color: var(--border-color);
+	}
+
+	// --card-bg is gray-900 (== the page background), so the modal blends into
+	// the backdrop and its header text vanishes. Lift the panel to gray-800 with
+	// a visible border, and force the title/close glyph to a readable colour
+	// (the <h5> title would otherwise inherit a near-black heading colour).
+	.po-modal {
+		background: var(--gray-800);
+		border: 1px solid var(--gray-700);
+		box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+	}
+	.po-modal-title { color: var(--text-color); }
+	.po-modal-close {
+		color: var(--text-light);
+		&:hover { color: var(--text-color); }
+	}
+
+	// Tables
+	.table,
+	.po-variety-table {
+		color: var(--text-color);
+		background: transparent;
+	}
+	.po-variety-table th,
+	.po-variety-table td,
+	.table th,
+	.table td {
+		border-color: var(--border-color);
+	}
+
+	// Form controls. Native <select>/<textarea> and Bootstrap's .form-select do
+	// NOT carry the .form-control class, so they fall through to the browser's
+	// light default (white bg, near-black text) — invisible on a dark page.
+	// Paint every input-ish control with the dark control surface.
+	.form-control,
+	.form-select,
+	select,
+	textarea,
+	input[type="text"],
+	input[type="search"],
+	input[type="number"],
+	input[type="email"],
+	input[type="tel"],
+	input[type="date"] {
+		background: var(--control-bg);
+		// --border-color is gray-800 (== --control-bg == the lifted card surface),
+		// so a control reads as flat text with no edge — users can't tell it's
+		// editable. Give every control a clearly visible 1px border + the cart
+		// card's own surface is gray-800, so darken the control to gray-900 so the
+		// field sits BELOW the card as an inset well. The border is the key
+		// affordance: it bounds the field so it reads as "fill me in".
+		background: var(--gray-900);
+		border: 1px solid var(--gray-600);
+		color: var(--text-color);
+
+		&::placeholder { color: var(--placeholder-color); }
+		&:hover { border-color: var(--gray-500); }
+		&:focus {
+			background: var(--gray-900);
+			color: var(--text-color);
+			border-color: var(--ws-accent);
+			box-shadow: 0 0 0 2px rgba(2, 137, 247, 0.25);
+		}
+	}
+	// Native dropdown option list (rendered by the OS on some platforms — pin it
+	// so the popup isn't white-on-white).
+	select option,
+	.form-select option {
+		background: var(--control-bg);
+		color: var(--text-color);
+	}
+	// Form labels / help text on web-forms and the product-detail page.
+	label,
+	.control-label,
+	.help-box,
+	.form-label,
+	.web-form-field .label-area {
+		color: var(--text-color);
+	}
+	.help-box,
+	.text-muted,
+	small.text-muted { color: var(--text-muted) !important; }
+
+	// Theme switcher tiles. The modal panel is gray-800, so drop each tile to
+	// gray-900 (an inset well) with a visible border so it reads as its own
+	// option distinct from the panel behind it.
+	.ws-theme-tile {
+		background: var(--gray-900);
+		border-color: var(--gray-600);
+		&:hover { border-color: var(--gray-500); }
+		// Clear accent ring on the active choice so you can see which is selected.
+		&.selected { border-color: var(--ws-accent); box-shadow: 0 0 0 1px var(--ws-accent); }
+	}
+	.ws-theme-tile-label { color: var(--text-color); }
+
+	// Links must stay readable on hover (default Bootstrap darkens toward black,
+	// which disappears on a dark page). Use the accent for hovered links.
+	a:not(.btn):hover,
+	.breadcrumb-item a:hover,
+	.webshop-subnav-link:hover {
+		color: var(--ws-accent);
+	}
+	// Breadcrumb + generic body links at rest.
+	a:not(.btn) { color: var(--text-light); }
+	.breadcrumb-item.active span,
+	.breadcrumb-item span { color: var(--text-muted); }
+
+	// Breadcrumb separator: Frappe's default is an SVG chevron (var(--right-arrow-svg))
+	// whose stroke is baked dark, so it's invisible on the dark page. Replace it
+	// with a plain "/" in a muted-but-legible colour.
+	.breadcrumb-item + .breadcrumb-item::before {
+		content: "/";
+		color: var(--text-muted);
+		// Override the inline-svg sizing the default rule assumes.
+		width: auto;
+		height: auto;
+		background: none;
+		margin-right: 0.25rem;
+	}
+
+	// Toasts (frappe.show_alert → .alert.desk-alert). Frappe's toast.scss ships
+	// only in the DESK bundle, so on website pages the toast renders unstyled —
+	// effectively dark text on a near-transparent/light box, unreadable on the
+	// dark page. Restyle it here: a solid dark surface, light text, and a colored
+	// left accent per indicator so the severity still reads at a glance.
+	#alert-container .desk-alert,
+	.desk-alert {
+		background-color: var(--gray-800) !important;
+		color: var(--text-color);
+		border: 1px solid var(--dark-border-color, var(--gray-700));
+		border-left: 4px solid var(--text-muted);
+		box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+
+		.alert-message { color: var(--text-color); }
+		.alert-subtitle,
+		.alert-body { color: var(--text-light); }
+
+		// Icon + close glyph inherit a readable light tone.
+		.icon { fill: currentColor; stroke: currentColor; }
+		.close {
+			color: var(--text-light);
+			background: none;
+			&:hover { color: var(--text-color); }
+		}
+
+		// Severity accent on the left edge (the icon colour Frappe sets inline
+		// stays; this just guarantees a visible cue on the dark surface).
+		&.red    { border-left-color: #ff6b6b; }
+		&.orange,
+		&.yellow { border-left-color: #f0a020; }
+		&.green  { border-left-color: #51cf66; }
+		&.blue   { border-left-color: var(--ws-accent); }
+	}
+
+	// Outline / secondary buttons
+	.btn-outline-secondary {
+		color: var(--text-color);
+		border-color: var(--border-color);
+		&:hover { background: var(--fg-hover-color); color: var(--text-color); }
+	}
+
+	// ── Product grid / listing ──────────────────────────────────────────────
+	// The light-mode product styles hard-code dark grays (--gray-700/800) for
+	// text and `white`/--gray-100 for image placeholders. In dark mode the gray
+	// ramp is inverted, so --gray-800 becomes near-black text on a dark card —
+	// invisible.
+	//
+	// SPECIFICITY: the originals are nested as `.item-card-group-section .X`
+	// (0,2,0). A bare `[data-theme="dark"] .X` is only (0,1,1) and LOSES, which
+	// is why the first attempt didn't apply. We mirror the originals' parent so
+	// the compiled selectors reach (0,2,1) and win.
+	.item-card-group-section {
+		.product-title { color: var(--text-color); }
+		.product-category { color: var(--text-muted); }
+		.product-price {
+			color: var(--text-color);
+			.striked-price { color: var(--text-muted); }
+		}
+
+		// The card title is wrapped in a bare <a href> (item_card_body macro) with
+		// no text-decoration:none. On :hover the website's global anchor style
+		// recolors it to the link color, which reads as a dark/odd tint on the dark
+		// card. Pin the anchor (and the title it wraps) to the card text color in
+		// every state so hovering a card never makes its title illegible.
+		.card a,
+		.list-row a {
+			color: var(--text-color);
+			&:hover,
+			&:focus {
+				color: var(--text-color);
+				.product-title { color: var(--text-color); }
+			}
+		}
+
+		// Card surface must read as a raised panel against the page. --card-bg is
+		// gray-900 (== page bg) in dark mode, so the card would be invisible —
+		// lift it to gray-800 and give a visible border so each card is bounded.
+		.card {
+			background: var(--gray-800);
+			border-color: var(--dark-border-color);
+			&:hover { border-color: var(--gray-500); }
+		}
+
+		// Image placeholder tiles (the "WM" / "PO" letter boxes): a touch darker
+		// than the card so the letter glyph sits on its own panel.
+		.no-image,
+		.no-image-list {
+			background: var(--gray-900);
+			color: var(--text-light);
+		}
+		.card-img-container { background: var(--gray-900); }
+	}
+
+	// ── List view (toggle → rows) ────────────────────────────────────────────
+	// .list-row uses background:var(--card-bg) (=gray-900=page bg in dark) and has
+	// no border, so rows are invisible against the page and run together. Give each
+	// row a raised gray-800 surface + border like the grid cards, and make the list
+	// image tile a distinct dark panel so the "WM/PO" glyph reads.
+	#products-list-area {
+		.list-row {
+			background: var(--gray-800);
+			border: 1px solid var(--dark-border-color);
+			&:hover, &:focus-within { border-color: var(--gray-500); }
+		}
+		// Image panel: recess it below the gray-800 row (gray-900) and give the
+		// bordered tile a visible dark border on all sides. !important to beat the
+		// base .list-image rule which also uses !important.
+		.list-image {
+			background: var(--gray-900) !important;
+			border-color: var(--dark-border-color) !important;
+		}
+		.no-image-list {
+			background: transparent;
+			color: var(--text-light);
+		}
+	}
+
+	// Product code + other placeholder/image surfaces that live outside the
+	// card-group wrapper (list view, recommendations, cart) — these originals
+	// are (0,1,0)/(0,2,0), so a plain dark-scoped (0,1,1)/(0,2,1) wins.
+	.product-code { color: var(--text-muted); }
+	.no-image-item,
+	.no-image-r-item,
+	.no-image-cart-item {
+		background: var(--subtle-accent);
+		color: var(--text-muted);
+	}
+
+	// Product-image wrapper on the item-detail page. The product_image macro adds
+	// Bootstrap's `.border`, whose colour is --border-color (== gray-800 ≈ the page
+	// bg in dark mode), so the placeholder tile (e.g. "WM") has no visible edge.
+	// Give the wrapper a clearly visible border so it reads as an image frame.
+	.product-image.border,
+	.product-image {
+		border: 1px solid var(--gray-600) !important;
+	}
+
+	// ── Filters sidebar ─────────────────────────────────────────────────────
+	// The originals are scoped under `[data-doctype="Item Group"], #page-index`
+	// (the webshop index renders under #page-index). #page-index is an ID, so a
+	// dark selector WITHOUT it loses (ID beats any number of classes). Mirror
+	// both parents inside the dark scope so we out-specify them.
+	#page-index,
+	[data-doctype="Item Group"] {
+		.filters-section {
+			.filters-title,
+			.filter-title { color: var(--text-color); }
+			.filter-label { color: var(--text-muted); }       // section labels (ITEM CODE)
+			.checkbox .label-area { color: var(--text-color); } // checkbox item text
+			.clear-filters { color: var(--text-muted); }
+			.filter-lookup-input {
+				background-color: var(--control-bg);
+				border-color: var(--border-color);
+				color: var(--text-color);
+				&::placeholder { color: var(--placeholder-color); }
+				&:focus { border-color: var(--primary); }
+			}
+		}
+		.page-header { color: var(--text-color); }
+	}
+
+	// Category chips/pills used above the grid.
+	.category-chip,
+	.category-pill {
+		background: var(--card-bg);
+		border-color: var(--border-color);
+		color: var(--text-color);
+	}
+}
+
+// Full width mode: lift the 1200px cap so content spans the viewport.
+// Class name mirrors the desk's `body.full-width` (set by
+// frappe.ui.toolbar.toggle_full_width) so the same localStorage flag
+// (container_fullwidth) drives both desk and webshop.
+body.full-width {
+	#webshop-subnav .webshop-subnav-inner {
+		max-width: none;
+	}
+
+	&.hide-frappe-navbar .page-content-wrapper {
+		max-width: none;
+	}
+}
+
+// Plain-HTML modal scaffolding shared across portal pages (frappe.ui.Dialog
+// can't render controls outside /app — see project_webshop_portal_no_make_control).
+.po-modal-backdrop {
+	position: fixed;
+	inset: 0;
+	background: rgba(0, 0, 0, 0.45);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 1060;
+	padding: 1rem;
+}
+.po-modal {
+	// Explicit light fallbacks: on website pages outside /app the Frappe theme
+	// variables aren't always defined, so a bare var(--card-bg) can resolve to
+	// transparent/white and the modal reads as low-contrast. Pin readable
+	// light-mode values; the [data-theme="dark"] block overrides them.
+	background: var(--card-bg, #ffffff);
+	color: var(--text-color, #1f272e);
+	border: 1px solid var(--border-color, #d1d8dd);
+	border-radius: 0.5rem;
+	width: 100%;
+	max-width: 420px;
+	max-height: calc(100vh - 2rem);
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+.po-modal-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 0.75rem 1rem;
+	border-bottom: 1px solid var(--border-color, #d1d8dd);
+}
+.po-modal-title {
+	margin: 0;
+	font-size: 1rem;
+	font-weight: 600;
+	color: var(--heading-color, var(--text-color, #1f272e));
+}
+.po-modal-close {
+	background: transparent;
+	border: none;
+	font-size: 1.4rem;
+	line-height: 1;
+	color: var(--text-muted, #6c7680);
+	cursor: pointer;
+	padding: 0 0.25rem;
+
+	&:hover { color: var(--text-color, #1f272e); }
+}
+.po-modal-body {
+	padding: 1rem;
+	overflow-y: auto;
+}
+
+// Theme switcher fallback dialog (used when frappe.ui.ThemeSwitcher isn't
+// loaded — i.e. on website pages outside /app). Visual idiom mirrors the
+// desk's "Switch Theme" tile grid.
+.ws-theme-grid {
+	display: grid;
+	// Only two options (Light / Dark) — two equal columns, no empty third cell.
+	grid-template-columns: repeat(2, 1fr);
+	gap: 0.75rem;
+}
+.ws-theme-tile {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 0.5rem;
+	padding: 0.75rem 0.5rem;
+	// Lift the tile off the modal surface with a subtle fill + visible 2px border
+	// so each option reads as its own selectable panel in light mode (the dark
+	// block overrides both). --subtle-accent is the light gray-50 surface.
+	background: var(--subtle-accent, #f4f5f6);
+	border: 2px solid var(--border-color, #d1d8dd);
+	border-radius: 0.5rem;
+	cursor: pointer;
+	transition: border-color 0.12s ease, box-shadow 0.12s ease;
+
+	&:hover {
+		border-color: var(--gray-500, #98a1a9);
+	}
+	&.selected {
+		border-color: var(--primary, #2490ef);
+		box-shadow: 0 0 0 1px var(--primary, #2490ef);
+	}
+}
+.ws-theme-swatch {
+	width: 48px;
+	height: 48px;
+	border-radius: 50%;
+	// A 2px contrasting ring so the white "Light" swatch is visible against the
+	// light tile (otherwise it's white-on-near-white and disappears).
+	border: 2px solid var(--gray-400, #b8c2cc);
+}
+.ws-theme-tile-label {
+	font-size: 0.85rem;
+	font-weight: 500;
+	color: var(--text-color, #1f272e);
+	text-align: center;
 }
 
 .item-breadcrumbs {
 	.breadcrumb-container {
 		a {
-			color: var(--gray-900);
+			color: var(--text-color);
 		}
 	}
 }
@@ -52,7 +620,7 @@ body.hide-frappe-navbar {
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	background: white;
+	background: var(--card-bg);
 	box-shadow: 0px 1px 2px rgba(0, 0, 0, 0.08), 0px 1px 2px 1px rgba(0, 0, 0, 0.06);
 	border-radius: 100px;
 }
@@ -101,15 +669,23 @@ body.hide-frappe-navbar {
 }
 
 .no-image-item {
+	// Match the grid/list placeholder: a plain abbreviation tile (e.g. "WM") on
+	// the subtle surface — same idiom as .no-image / .no-image-list, just scaled
+	// up to the product-detail image size.
 	height: 340px;
 	width: 340px;
-	background: var(--gray-100);
+	max-width: 100%;
+	background: var(--subtle-accent);
 	border-radius: var(--border-radius);
-	font-size: 2rem;
-	color: var(--gray-500);
+	// gray-600 reads on the light --subtle-accent surface (was --text-muted /
+	// gray-400, invisible in light mode); dark block repaints it for dark.
+	color: var(--gray-600);
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	font-size: 4rem;
+	font-weight: 600;
+	text-transform: uppercase;
 }
 
 .item-card-group-section {
@@ -118,9 +694,18 @@ body.hide-frappe-navbar {
 		align-items: center;
 		justify-content: center;
 
+		// Give the card a clearly bounded surface so its edges read against the
+		// page background. --card-bg / --border-color flip per theme (see the
+		// dark block), so this works in both light and dark mode.
+		background: var(--card-bg, #fff);
+		border: 1px solid var(--border-color, #ebeef0);
+		border-radius: var(--border-radius-lg, 10px);
+		overflow: hidden;
+
 		&:hover {
 			box-shadow: 0px 16px 60px rgba(0, 0, 0, 0.08), 0px 8px 30px -20px rgba(0, 0, 0, 0.04);
-			transition: box-shadow 400ms;
+			border-color: var(--border-color);
+			transition: box-shadow 400ms, border-color 150ms;
 		}
 	}
 
@@ -164,21 +749,29 @@ body.hide-frappe-navbar {
 	.no-image {
 		@include flex(flex, center, center, null);
 		height: 180px;
-		background: var(--gray-100);
+		background: var(--subtle-accent);
 		width: 100%;
 		border-radius: var(--border-radius) var(--border-radius) 0 0;
 		font-size: 2rem;
-		color: var(--gray-500);
+		// --text-muted is gray-400 (#c7c7c7) in LIGHT mode — near-invisible on the
+		// near-white --subtle-accent. gray-600 (#7c7c7c) reads clearly here; the
+		// dark block below repaints it to a light glyph for the dark surface.
+		color: var(--gray-600);
 	}
 
 	.no-image-list {
 		@include flex(flex, center, center, null);
 		height: 150px;
 		width: 150px;
-		background: var(--gray-100);
-		border-radius: var(--border-radius);
-		font-size: 1.25rem;
-		color: var(--gray-500);
+		// Fill the list image panel (it sits inside .list-image which now carries
+		// the subtle surface + divider). Keep the glyph legible against it.
+		background: transparent;
+		border-radius: 0;
+		font-size: 1.5rem;
+		font-weight: 600;
+		// gray-600 so the abbreviation is visible on the light --subtle-accent tile
+		// (was --text-muted / gray-400, invisible in light mode).
+		color: var(--gray-600);
 		margin: 0;
 	}
 
@@ -189,7 +782,7 @@ body.hide-frappe-navbar {
 
 	.product-title {
 		font-size: 14px;
-		color: var(--gray-800);
+		color: var(--text-color);
 		font-weight: 500;
 	}
 
@@ -222,7 +815,7 @@ body.hide-frappe-navbar {
 		.striked-price {
 			font-weight: 500;
 			font-size: 15px;
-			color: var(--gray-500);
+			color: var(--text-muted);
 		}
 	}
 
@@ -305,7 +898,7 @@ body.hide-frappe-navbar {
 }
 
 .list-row {
-	background-color: white;
+	background-color: var(--card-bg);
 	padding: 0 !important;
 	margin: 0 !important;
 	border-radius: 8px;
@@ -372,8 +965,8 @@ body.hide-frappe-navbar {
 		}
 
 		.filter-lookup-input {
-			background-color: white;
-			border: 1px solid var(--gray-300);
+			background-color: var(--control-bg);
+			border: 1px solid var(--border-color);
 
 			&:focus {
 				border: 1px solid var(--primary);
@@ -383,7 +976,7 @@ body.hide-frappe-navbar {
 		.filter-label {
 			font-size: 11px;
 			font-weight: 600;
-			color: var(--gray-700);
+			color: var(--text-muted);
 			text-transform: uppercase;
 		}
 
@@ -391,10 +984,21 @@ body.hide-frappe-navbar {
 			border-bottom: 1px solid var(--table-border-color);
 		}
 
+		// ERPNext's web bundle caps the scrollable value list at
+		// `.filter-options { max-height: 300px }` (0,1,0). Override it so the list
+		// isn't a short, fiddly box. On the /webshop page the real sizing comes
+		// from the flex layout in www/webshop/index.html (the .filters-column flex
+		// column makes .filter-options the single scroll region, filling the
+		// viewport); this just lifts the erpnext cap everywhere the filter renders.
+		.filter-options {
+			max-height: none !important;
+			overflow-y: auto;
+		}
+
 		.checkbox {
 			.label-area {
 				font-size: 13px;
-				color: var(--gray-800);
+				color: var(--text-color);
 			}
 		}
 	}
@@ -413,13 +1017,22 @@ body.hide-frappe-navbar {
 }
 
 .list-image {
-	border: none !important;
 	overflow: hidden;
 	width: 150px;
 	height: 150px;
 	flex: 0 0 150px;
 	max-width: 150px;
-	background-color: white;
+	// Distinct image-panel surface, fully BORDERED so the placeholder reads as a
+	// bounded tile within the row (not just a divider from the body). --subtle-accent
+	// / --border-color flip per theme, so this works in both light and dark mode.
+	background-color: var(--subtle-accent) !important;
+	border: 1px solid var(--border-color) !important;
+	border-radius: var(--border-radius, 6px) !important;
+	margin: 12px !important;        // inset the tile so its border sits inside the row
+	width: 126px;                    // 150 − 2×12 margin so total footprint is unchanged
+	height: 126px;
+	flex-basis: 126px;
+	max-width: 126px;
 	padding: 0 !important;
 	display: flex;
 	align-items: stretch;
@@ -481,7 +1094,7 @@ body.hide-frappe-navbar {
 
 	.product-description {
 		font-size: 13px;
-		color: var(--gray-800);
+		color: var(--text-color);
 	}
 
 	.product-image {
@@ -550,7 +1163,7 @@ body.hide-frappe-navbar {
 			font-size: 16px !important;
 			color: var(--text-color);
 			.tag-icon {
-				--icon-stroke: var(--gray-500);
+				--icon-stroke: var(--text-muted);
 			}
 		}
 
@@ -591,9 +1204,9 @@ body.hide-frappe-navbar {
 
 			.no-image-r-item {
 				display: flex; justify-content: center;
-				background-color: var(--gray-200);
+				background-color: var(--subtle-accent);
 				align-items: center;
-				color: var(--gray-400);
+				color: var(--text-muted);
 				margin-top: .15rem;
 				border-radius: 6px;
 				height: 100%;
@@ -608,7 +1221,7 @@ body.hide-frappe-navbar {
 			width: 60%;
 
 			a {
-				color: var(--gray-800);
+				color: var(--text-color);
 				font-weight: 400;
 			}
 
@@ -620,7 +1233,7 @@ body.hide-frappe-navbar {
 
 			.striked-item-price {
 				font-weight: 500;
-				color: var(--gray-500);
+				color: var(--text-muted);
 			}
 		}
 	}
@@ -661,7 +1274,7 @@ body.hide-frappe-navbar {
 				.form-group {
 					.control-label {
 						font-size: var(--text-md);
-						color: var(--gray-700);
+						color: var(--text-color);
 					}
 
 					.help-box {
@@ -687,7 +1300,7 @@ body.hide-frappe-navbar {
 	border-bottom: 1px solid var(--table-border-color);
 
 	.heading {
-		color: var(--gray-500);
+		color: var(--text-muted);
 	}
 }
 
@@ -697,7 +1310,7 @@ body.hide-frappe-navbar {
 		width: fit-content;
 		padding: 6px 12px;
 		margin-bottom: 8px;
-		background-color: #ecf5fe;
+		background-color: var(--subtle-accent);
 		font-size: 14px;
 		border-radius: 18px;
 		color: var(--blue-500);
@@ -797,7 +1410,99 @@ body.hide-frappe-navbar {
 				}
 			}
 
+			// Make only the line items scroll vertically, keeping the
+			// table header and totals (tfoot) fixed in place. The scrolling
+			// body reserves a scrollbar gutter, so head/foot pad the same
+			// width on the right to keep all columns aligned.
+			$cart-scrollbar-width: 6px;
+
+			thead, tfoot {
+				display: table;
+				width: 100%;
+				table-layout: fixed;
+				padding-right: $cart-scrollbar-width;
+			}
+
+			// Separating line under the column titles (Item / Quantity / Price) so
+			// the header reads as the head of the item list. Sits above the first
+			// item card with a little breathing room.
+			thead {
+				border-bottom: 1px solid var(--border-color);
+				margin-bottom: 12px;
+			}
+
+			// Shared column widths across head, body rows and foot so the
+			// fixed table layout lines every column up.
+			thead th,
+			.cart-items tr td {
+				&:nth-child(1) { width: 60%; }
+				&:nth-child(2) { width: 25%; }
+				&:nth-child(3) { width: 15%; }
+				&:nth-child(4) { width: 0; padding: 0; }
+			}
+
+			// Quantity column: align the header label over the qty controls.
+			// The body cell's content is a left-aligned flex, so the header
+			// must left-align too (its default) and neither side may be pushed
+			// right — the qty <td> carries `text-right` in markup, override it.
+			thead th:nth-child(2) {
+				text-align: left;
+			}
+			.cart-items tr td:nth-child(2) {
+				text-align: left;
+				.d-flex {
+					justify-content: flex-start;
+				}
+			}
+
 			.cart-items {
+				display: block;
+				max-height: 420px;
+				overflow-y: auto;
+				scrollbar-width: thin;
+
+				&::-webkit-scrollbar {
+					width: $cart-scrollbar-width;
+				}
+				&::-webkit-scrollbar-thumb {
+					background-color: var(--border-color);
+					border-radius: 3px;
+				}
+				&::-webkit-scrollbar-track {
+					background: transparent;
+				}
+
+				tr {
+					display: table;
+					width: 100%;
+					table-layout: fixed;
+
+					// Each line item reads as its own bounded card so adjacent
+					// items are clearly separated (previously rows ran together
+					// with no visible divider). The surface is a touch lighter than
+					// the cart card, with a 1px border and rounded corners.
+					// border-collapse:separate so the row's own border draws (a
+					// collapsed table would merge/drop it) and overflow:hidden so
+					// cell backgrounds clip to the rounded corners.
+					border-collapse: separate;
+					overflow: hidden;
+					background: var(--subtle-accent);
+					border: 1px solid var(--border-color);
+					border-radius: 8px;
+					margin-bottom: 12px;
+				}
+
+				// The per-row card already supplies the boundary, so drop the
+				// table cells' own borders (they'd draw stray lines inside the
+				// card) and give the row interior some breathing padding.
+				tr td {
+					border: none !important;
+					padding-top: 12px !important;
+					padding-bottom: 12px !important;
+					&:first-child { padding-left: 12px !important; }
+					&:last-child { padding-right: 12px !important; }
+				}
+
 				.item-title {
 					width: 80%;
 					font-size: 14px;
@@ -859,7 +1564,9 @@ body.hide-frappe-navbar {
 			}
 
 			.item-column {
-				width: 50%;
+				// Match the body's first-column width (nth-child(1) = 60%) so the
+				// fixed header lines up with the scrolling rows.
+				width: 60%;
 				@media (max-width: 992px) {
 					width: 70%;
 				}
@@ -867,12 +1574,12 @@ body.hide-frappe-navbar {
 
 			.remove-cart-item {
 				border-radius: 6px;
-				border: 1px solid var(--gray-100);
+				border: 1px solid var(--border-color);
 				width: 28px;
 				height: 28px;
 				font-weight: 300;
-				color: var(--gray-700);
-				background-color: var(--gray-100);
+				color: var(--text-color);
+				background-color: var(--subtle-accent);
 				float: right;
 				cursor: pointer;
 				margin-top: .25rem;
@@ -882,7 +1589,11 @@ body.hide-frappe-navbar {
 			.remove-cart-item-logo {
 				margin-top: 2px;
 				margin-left: 2.2px;
-				fill: var(--gray-700) !important;
+				fill: var(--text-color) !important;
+				// Let clicks fall through to .remove-cart-item: without this the
+				// <svg>/<path> can swallow the click in some browsers and the
+				// delegated remove handler never fires.
+				pointer-events: none;
 			}
 		}
 
@@ -895,7 +1606,7 @@ body.hide-frappe-navbar {
 		.payment-summary {
 			h6 {
 				padding-bottom: 1rem;
-				border-bottom: solid 1px var(--gray-200);
+				border-bottom: solid 1px var(--border-color);
 			}
 
 			table {
@@ -907,12 +1618,12 @@ body.hide-frappe-navbar {
 				}
 
 				&.grand-total {
-					border-top: solid 1px var(--gray-200);
+					border-top: solid 1px var(--border-color);
 				}
 			}
 
 			.bill-label {
-				color: var(--gray-600);
+				color: var(--text-muted);
 			}
 
 			.bill-content {
@@ -925,7 +1636,7 @@ body.hide-frappe-navbar {
 
 			.btn-coupon-code {
 				font-size: 14px;
-				border: dashed 1px var(--gray-400);
+				border: dashed 1px var(--border-color);
 				box-shadow: none;
 			}
 		}
@@ -935,7 +1646,7 @@ body.hide-frappe-navbar {
 			min-width: 105px;
 			.cart-btn {
 				border: none;
-				background: var(--gray-100);
+				background: var(--subtle-accent);
 				box-shadow: none;
 				width: 24px;
 				height: 28px;
@@ -944,7 +1655,7 @@ body.hide-frappe-navbar {
 				display: flex;
 				font-size: 20px;
 				font-weight: 300;
-				color: var(--gray-700);
+				color: var(--text-color);
 
 				&:disabled {
 					opacity: 0.45;
@@ -956,9 +1667,52 @@ body.hide-frappe-navbar {
 				height: 28px;
 				font-size: 13px;
 				&:disabled {
-					background: var(--gray-100);
+					background: var(--subtle-accent);
 					opacity: 0.65;
 				}
+			}
+		}
+
+		// Per-item Box ID (derived) + optional Box Label input, shown under
+		// the item details in the first column.
+		.cart-item-box-info {
+			margin-top: 0.5rem;
+			display: flex;
+			align-items: center;
+			// Keep "Box ID: N" and the box-label input on the SAME line. The narrow
+			// 60% item column made flex-wrap push the input onto its own row; nowrap
+			// keeps them inline and the input shrinks to fit (see flex-shrink below).
+			flex-wrap: nowrap;
+			gap: 0.5rem;
+
+			.item-subtitle {
+				margin: 0;
+				flex: 0 0 auto;   // "Box ID: N" keeps its intrinsic width
+				white-space: nowrap;
+			}
+
+			.cart-box-label {
+				height: 28px;
+				font-size: 13px;
+				// Shrink to share the row with the Box ID label instead of forcing
+				// a fixed 180px that no longer fits and triggers a wrap.
+				flex: 1 1 auto;
+				min-width: 0;
+				max-width: 180px;
+			}
+
+			.cart-box-id-label {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.35rem;
+			}
+
+			.cart-box-id {
+				height: 28px;
+				font-size: 13px;
+				width: 64px;
+				display: inline-block;
+				padding: 0 0.4rem;
 			}
 		}
 
@@ -981,13 +1735,44 @@ body.hide-frappe-navbar {
 .no-image-cart-item {
 	max-height: 112px;
 	display: flex; justify-content: center;
-	background-color: var(--gray-200);
+	background-color: var(--subtle-accent);
 	align-items: center;
 	color: var(--gray-400);
 	margin-top: .15rem;
 	border-radius: 6px;
 	height: 100%;
 	font-size: 24px;
+}
+
+// ─── Product listing: scroll the grid/list inside its own area ───────────────
+// The grid/list scroll behaviour itself lives in www/webshop/index.html (the
+// page locks html/body and makes #product-listing a flex column whose toolbar
+// is pinned and whose #products-grid-area / #products-list-area scroll). Here we
+// only style that single inner scrollbar to match the cart's thin scrollbar, and
+// trim the leftover <br> the renderer inserts before the area so the flex column
+// doesn't gain a stray gap.
+#product-listing {
+	> br { display: none; }
+
+	#products-grid-area,
+	#products-list-area {
+		// Trailing space so the last row isn't flush against the scroll edge,
+		// and a little right padding so cards don't sit under the scrollbar.
+		padding-bottom: 1rem;
+		padding-right: 0.25rem;
+		scrollbar-width: thin;
+
+		&::-webkit-scrollbar {
+			width: 6px;
+		}
+		&::-webkit-scrollbar-thumb {
+			background-color: var(--border-color);
+			border-radius: 3px;
+		}
+		&::-webkit-scrollbar-track {
+			background: transparent;
+		}
+	}
 }
 
 .cart-empty.frappe-card {
@@ -1013,7 +1798,7 @@ body.hide-frappe-navbar {
 
 	.card-text {
 		font-size: 13px;
-		color: var(--gray-700);
+		color: var(--text-color);
 	}
 
 	.card-link {
@@ -1220,7 +2005,7 @@ body.hide-frappe-navbar {
 	height: 32px;
 
 	border-radius: 50%;
-	border: 1px solid var(--gray-100);
+	border: 1px solid var(--border-color);
 	box-shadow: 0px 2px 6px rgba(17, 43, 66, 0.08), 0px 1px 4px rgba(17, 43, 66, 0.1);
 }
 
@@ -1243,11 +2028,11 @@ body.hide-frappe-navbar {
 	}
 
 	.spec-label {
-		color: var(--gray-600);
+		color: var(--text-muted);
 	}
 
 	.spec-content {
-		color: var(--gray-800);
+		color: var(--text-color);
 	}
 }
 
@@ -1256,14 +2041,14 @@ body.hide-frappe-navbar {
 }
 
 .ratings-reviews-section {
-	border-top: 1px solid #E2E6E9;
+	border-top: 1px solid var(--border-color);
 	padding: .5rem 1rem;
 }
 
 .reviews-header {
 	font-size: 20px;
 	font-weight: 600;
-	color: var(--gray-800);
+	color: var(--text-color);
 	display: flex;
 	align-items: center;
 	padding: 0;
@@ -1277,8 +2062,8 @@ body.hide-frappe-navbar {
 	border: none !important;
 	box-shadow: none;
 
-	color: var(--gray-900);
-	background-color: var(--gray-100);
+	color: var(--text-color);
+	background-color: var(--subtle-accent);
 
 	&:hover {
 		box-shadow: var(--btn-shadow);
@@ -1303,7 +2088,7 @@ body.hide-frappe-navbar {
 	flex-direction: column;
 	align-items: center;
 
-	border-right: solid 1px var(--gray-100);
+	border-right: solid 1px var(--border-color);
 }
 
 .user-review-title {
@@ -1323,7 +2108,7 @@ body.hide-frappe-navbar {
 }
 
 .ratings-pill {
-	background-color: var(--gray-100);
+	background-color: var(--subtle-accent);
 	padding: .5rem 1rem;
 	border-radius: 66px;
 }
@@ -1332,18 +2117,18 @@ body.hide-frappe-navbar {
 	max-width: 80%;
 	line-height: 1.6;
 	padding-bottom: 0.5rem;
-	border-bottom: 1px solid #E2E6E9;
+	border-bottom: 1px solid var(--border-color);
 }
 
 .review-signature {
 	display: flex;
 	font-size: 13px;
-	color: var(--gray-500);
+	color: var(--text-muted);
 	font-weight: 400;
 
 	.reviewer {
 		padding-right: 8px;
-		color: var(--gray-600);
+		color: var(--text-muted);
 	}
 }
 
@@ -1371,11 +2156,11 @@ body.hide-frappe-navbar {
 }
 
 #search-results-container {
-	border: 1px solid var(--gray-200);
+	border: 1px solid var(--border-color);
 	padding: .25rem 1rem;
 
 	.category-chip {
-		background-color: var(--gray-100);
+		background-color: var(--subtle-accent);
 		border: none !important;
 		box-shadow: none;
 	}
@@ -1385,16 +2170,16 @@ body.hide-frappe-navbar {
 		border-radius: var(--border-radius);
 
 		&:hover {
-			background-color: var(--gray-100);
+			background-color: var(--subtle-accent);
 		}
 	}
 }
 
 #search-box {
-	background-color: white;
+	background-color: var(--control-bg);
 	height: 100%;
 	padding-left: 2.5rem;
-	border: 1px solid var(--gray-200);
+	border: 1px solid var(--border-color);
 }
 
 .search-icon {
@@ -1413,15 +2198,15 @@ body.hide-frappe-navbar {
 	float: right;
 
 	.btn {
-		background-color: var(--gray-100);
-		border: 1px solid var(--gray-300);
-		color: var(--gray-700);
+		background-color: var(--subtle-accent);
+		border: 1px solid var(--border-color);
+		color: var(--text-color);
 		transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
 
 		&:hover {
-			background-color: var(--gray-200);
-			border-color: var(--gray-400);
-			color: var(--gray-900);
+			background-color: var(--subtle-accent);
+			border-color: var(--border-color);
+			color: var(--text-color);
 		}
 
 		.icon {
@@ -1453,7 +2238,7 @@ body.hide-frappe-navbar {
 	width: -webkit-fill-available;
 	padding: 50px;
 	text-align: center;
-	background-color: #F9FAFA;
+	background-color: var(--subtle-accent);
 	border-top-left-radius: calc(0.75rem - 1px);
 	border-top-right-radius: calc(0.75rem - 1px);
 }
@@ -1463,7 +2248,7 @@ body.hide-frappe-navbar {
 
 [data-path="cart"] {
 	.modal-backdrop {
-		background-color: var(--gray-50); // lighter backdrop only on cart freeze
+		background-color: var(--subtle-accent); // lighter backdrop only on cart freeze
 	}
 }
 
@@ -1475,7 +2260,7 @@ body.hide-frappe-navbar {
 }
 
 .brand-line {
-	color: gray;
+	color: var(--text-muted);
 }
 
 .btn-next, .btn-prev {
@@ -1483,9 +2268,9 @@ body.hide-frappe-navbar {
 }
 
 .alert-error {
-	color: #e27a84;
-	background-color: #fff6f7;
-	border-color: #f5c6cb;
+	color: var(--text-on-red);
+	background-color: var(--bg-red);
+	border-color: var(--red-600);
 }
 
 .font-md {
@@ -1540,8 +2325,14 @@ body.hide-frappe-navbar {
 
 // ─── Webshop Sub-Navbar ───────────────────────────────────────────────────────
 #webshop-subnav {
-	position: sticky;
+	// `position: fixed` rather than `sticky`: the subnav is a direct <body> child,
+	// and the website layout's overflow on <html>/<body> silently disables sticky
+	// for body's own children. Fixed is immune to ancestor overflow clipping.
+	// The 44px the bar occupies is reserved via the body padding-top rule below.
+	position: fixed;
 	top: 0;
+	left: 0;
+	right: 0;
 	z-index: 1000;
 	background: var(--fg-color, #fff);
 	border-bottom: 1px solid var(--border-color, #e2e8f0);
@@ -1648,7 +2439,7 @@ body.hide-frappe-navbar {
 			white-space: nowrap;
 
 			&:hover {
-				background: var(--gray-100, #f1f5f9);
+				background: var(--subtle-accent);
 				color: var(--primary-color);
 			}
 		}
@@ -1689,7 +2480,7 @@ body.hide-frappe-navbar {
 		border: 1px solid var(--border-color, #e2e8f0);
 
 		&:hover {
-			background: var(--gray-100, #f1f5f9);
+			background: var(--subtle-accent);
 			color: var(--primary-color);
 		}
 
@@ -1737,4 +2528,268 @@ body.hide-frappe-navbar {
 
 .w-fit {
 	width: fit-content !important;
+}
+
+// ─── Buttons: make primary actions solid + theme-aware in light AND dark ─────
+// Frappe compiles `.btn-primary-light` with a HARDCODED $gray-300 background
+// (a SCSS literal, not a CSS var) + primary-coloured text. In dark mode that
+// stays a pale box with faint text — unreadable. The webshop's main actions
+// (Past Orders, Continue Shopping, View in cart, View more) use it, so promote
+// it to a real solid primary button that reads in both themes.
+.btn-primary-light,
+.btn-view-more,
+.btn-view-in-cart {
+	background-color: var(--primary) !important;
+	border-color: var(--primary) !important;
+	color: #fff !important;
+
+	&:hover,
+	&:active,
+	&:focus {
+		background-color: var(--primary) !important;
+		border-color: var(--primary) !important;
+		color: #fff !important;
+		filter: brightness(0.92);
+	}
+	.icon { --icon-stroke: #fff; stroke: #fff; }
+}
+
+[data-theme="dark"] {
+	// Neutral buttons (.btn-light / .btn-default / .btn-secondary) compile with
+	// light gray literals → invisible on a dark page. Give them a raised dark
+	// surface, light text and a visible border so they read as real buttons.
+	.btn-light,
+	.btn-default,
+	.btn-secondary,
+	.btn.cart-btn,
+	.btn-change-address,
+	.btn-new-address,
+	.btn-prev,
+	.btn-next {
+		background-color: var(--gray-800) !important;
+		border: 1px solid var(--dark-border-color) !important;
+		color: var(--text-color) !important;
+
+		&:hover,
+		&:active,
+		&:focus {
+			background-color: var(--gray-700) !important;
+			border-color: var(--gray-500) !important;
+			color: var(--text-color) !important;
+		}
+		.icon { --icon-stroke: var(--text-color); stroke: var(--text-color); }
+	}
+
+	// Disabled buttons (e.g. Save Order before required fields are filled): keep
+	// them clearly "off" but still visible against the dark card.
+	.btn:disabled,
+	.btn.disabled {
+		background-color: var(--gray-800) !important;
+		border-color: var(--dark-border-color) !important;
+		color: var(--disabled-text-color) !important;
+		opacity: 1;
+	}
+
+	// Grid/list view toggle: the INACTIVE button used --gray-100 (light) bg.
+	#toggle-view .btn {
+		background-color: var(--gray-800);
+		border-color: var(--dark-border-color);
+		color: var(--text-light);
+
+		&:hover {
+			background-color: var(--gray-700);
+			border-color: var(--gray-500);
+			color: var(--text-color);
+		}
+	}
+	// Active toggle keeps the solid --primary fill defined in #toggle-view above.
+
+	// ── Shopping cart page ───────────────────────────────────────────────────
+	// The cart styles hard-code light grays (--gray-100/200, --gray-600/700) for
+	// surfaces, borders, separator lines and the remove (×) button. In dark mode
+	// these stay light — invisible or glaring on a dark card. Repaint them with
+	// the theme's dark ramp. Selectors mirror the originals' nesting depth so
+	// they win on specificity.
+	.cart-container {
+		// Per-item row card: the cart .frappe-card is gray-800, so a gray-800
+		// row would vanish. Drop the row to gray-900 (sits below the card as a
+		// distinct well) with a visible gray-700 border so each item reads as
+		// its own separated block.
+		.cart-table .cart-items tr {
+			background: var(--gray-900);
+			border: 1px solid var(--gray-500) !important;
+		}
+
+		// Header separating line: gray-800 (the light-mode --border-color) is
+		// invisible on the dark card, so match the item cards' visible gray-500.
+		.cart-table thead {
+			border-bottom-color: var(--gray-500);
+		}
+
+		// Remove-item (×) button: light pill → raised dark pill, light glyph.
+		.cart-table .remove-cart-item {
+			background-color: var(--gray-800);
+			border-color: var(--dark-border-color);
+			color: var(--text-color);
+
+			&:hover { background-color: var(--gray-700); }
+		}
+		.cart-table .remove-cart-item-logo {
+			fill: var(--text-color) !important;
+		}
+
+		// Qty +/- buttons (also caught by the global .cart-btn rule above, but
+		// scope here too so the disabled state reads right on the dark surface).
+		.number-spinner {
+			.cart-btn {
+				background: var(--gray-800);
+				color: var(--text-color);
+			}
+			.cart-qty:disabled {
+				background: var(--gray-800);
+			}
+		}
+
+		// Separator lines in the payment summary used light --gray-200.
+		.payment-summary {
+			h6 { border-bottom-color: var(--border-color); }
+			table.grand-total { border-top-color: var(--border-color); }
+			.bill-label { color: var(--text-muted); }
+			.btn-coupon-code { border-color: var(--dark-border-color); }
+		}
+
+		// Per-item Box ID label + optional Box Label input I added under each
+		// row. The input is a .form-control (caught by the global dark rule),
+		// but pin its colors here so it's unambiguous on the dark card.
+		.cart-item-box-info {
+			.item-subtitle { color: var(--text-muted); }
+			// Match the global dark form-control affordance: inset well (gray-900)
+			// with a clearly visible border so users can tell the box label is an
+			// editable field, not static text.
+			.cart-box-label,
+			.cart-box-id {
+				background: var(--gray-900);
+				border: 1px solid var(--gray-600);
+				color: var(--text-color);
+				&::placeholder { color: var(--placeholder-color); }
+				&:hover { border-color: var(--gray-500); }
+				&:focus {
+					border-color: var(--ws-accent);
+					box-shadow: 0 0 0 2px rgba(2, 137, 247, 0.25);
+				}
+			}
+		}
+	}
+
+	// Cart card surfaces: --card-bg is gray-900 (== page bg) in dark mode, so a
+	// bare .frappe-card would vanish. Lift to gray-800 with a visible border so
+	// each panel (Items, Delivery, Grand Total) reads as a raised card.
+	.cart-container .frappe-card,
+	.cart-empty.frappe-card,
+	.t-and-c-container.frappe-card {
+		background: var(--gray-800);
+		border: 1px solid var(--border-color);
+	}
+
+	// Cart letter-tile placeholders (WM / PO) when no product image — keep them
+	// a touch darker than the lifted card so the glyph sits on its own panel.
+	.no-image-cart-item {
+		background: var(--gray-900);
+		color: var(--text-light);
+	}
+
+	// Cart headings.
+	.shopping-cart-header,
+	.cart-container .cart-items-header,
+	.cart-container .delivery-schedule-title,
+	.cart-container .delivery-field-label {
+		color: var(--text-color);
+	}
+
+	// ── Product detail page ──────────────────────────────────────────────────
+	// .product-container forces `background: var(--product-bg-color) !important`,
+	// and --product-bg-color is hard-set to white at :root — so the big product
+	// cards stay white in dark mode. Repaint the variable (the !important rule
+	// then reads the dark value) and lift the card off the page with a border.
+	--product-bg-color: var(--gray-800);
+
+	// Product-detail card: lift it off the page with a border (the surface itself
+	// flips via --product-bg-color above). The selector labels inside now consume
+	// semantic vars directly (see _variant_selector_root.html /
+	// _non_variant_selector_root.html), so no inline-style overrides are needed.
+	.product-container {
+		border: 1px solid var(--border-color);
+	}
+
+	// ── Frappe standard message / error modal (msgprint, server messages) ──────
+	// frappe.msgprint and validation errors render in Frappe's built-in
+	// .modal-content, which compiles with light surfaces and dark body text. On a
+	// website page our dark vars don't reach it, so the panel stays near-white
+	// with light-gray text — or, where --modal-bg does apply, dark text on a dark
+	// panel. Either way it's unreadable (see the cart's "Sales Order Item Row #N"
+	// errors). Pin a readable dark surface + light text on the whole modal.
+	.modal .modal-content {
+		background-color: var(--gray-900) !important;
+		border: 1px solid var(--dark-border-color);
+		color: var(--text-color);
+	}
+	.modal .modal-header,
+	.modal .modal-footer {
+		background-color: var(--gray-900);
+		border-color: var(--dark-border-color);
+	}
+	.modal .modal-title,
+	.modal .modal-body,
+	// The message text Frappe injects lands in one of these wrappers depending on
+	// version; cover them all so no error line stays dark-on-dark.
+	.modal .modal-body .msgprint,
+	.modal .modal-body .msg-content,
+	.modal .modal-body p {
+		color: var(--text-color) !important;
+	}
+	// Error / validation lines carry red emphasis; keep them red but bright enough
+	// to read on the dark panel (the default --red text is too dark here).
+	.modal .modal-body .msgprint .text-danger,
+	.modal .modal-body .indicator-pill.red,
+	.modal .modal-body strong {
+		color: var(--gray-50) !important;
+	}
+	// Close (×) glyph: Frappe's default is near-black, invisible on dark.
+	.modal .modal-header .btn-modal-close,
+	.modal .modal-header .modal-actions .btn,
+	.modal .modal-header button.close {
+		color: var(--text-color);
+		.icon { --icon-stroke: var(--text-color); stroke: var(--text-color); }
+		opacity: 1;
+	}
+}
+
+// ─── Wishlist heart: visible in both themes ──────────────────────────────────
+// The circular button is a hardcoded white pill in both modes (good contrast on
+// a dark card). The heart glyph is an SVG drawn with --icon-stroke; ensure an
+// unwished heart always shows its pink outline (not the theme's gray stroke)
+// and a filled heart shows the pink fill — independent of theme.
+.like-action,
+.like-action-list,
+.like-action-item-fp {
+	.wish-icon,
+	.icon {
+		--icon-stroke: #F47A7A;
+		stroke: #F47A7A;
+	}
+	.not-wished {
+		--icon-stroke: #F47A7A !important;
+		fill: none;
+	}
+	.wished {
+		--icon-stroke: #F47A7A !important;
+		stroke: #F47A7A !important;
+		fill: #F47A7A !important;
+	}
+}
+// The subnav wishlist link icon (top bar) follows the bar's text colour.
+[data-theme="dark"] .wishlist-icon .icon,
+[data-theme="dark"] .remove-wish-icon {
+	--icon-stroke: var(--text-color);
+	stroke: var(--text-color);
 }

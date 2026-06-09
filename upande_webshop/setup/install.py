@@ -186,14 +186,31 @@ def remove_legacy_pages():
 		frappe.delete_doc("Page", "bulk-publish-items", force=True, ignore_permissions=True)
 
 
+def _delivery_point_doctype():
+	"""Resolve the Delivery Point doctype name for THIS site.
+
+	Named "Delivery Point" (singular) in upande_webshop/upande_kaitet but
+	"Delivery Points" (plural) in upande_tambuzi. Some sites have BOTH installed
+	(one empty, one populated), so prefer whichever holds records, then whichever
+	exists. Point the Link field at that so it resolves and validates. Falls back
+	to the singular so a fresh webshop-only site still creates a usable field.
+	"""
+	existing = [n for n in ("Delivery Point", "Delivery Points") if frappe.db.exists("DocType", n)]
+	if not existing:
+		return "Delivery Point"
+	populated = [n for n in existing if frappe.db.count(n)]
+	return (populated or existing)[0]
+
+
 def add_custom_fields():
+	delivery_point_doctype = _delivery_point_doctype()
 	custom_fields = {
 		"Quotation": [
 			{
 				"fieldname": "custom_delivery_point",
 				"fieldtype": "Link",
 				"label": "Delivery Point",
-				"options": "Delivery Point",
+				"options": delivery_point_doctype,
 				"insert_after": "shipping_address_name",
 			},
 			{

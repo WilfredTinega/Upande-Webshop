@@ -1,8 +1,8 @@
 {
  "actions": [],
- "allow_rename": 0,
+ "allow_import": 1,
  "autoname": "hash",
- "creation": "2026-05-25 00:00:00.000000",
+ "creation": "2026-06-01 00:00:00",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -11,14 +11,10 @@
   "warehouse",
   "column_break_2",
   "stem_length",
-  "section_break_1",
-  "actual_qty",
   "column_break_3",
-  "reserved_qty",
-  "column_break_4",
-  "projected_qty",
-  "section_break_2",
-  "stock_uom"
+  "harvest_date",
+  "section_break_1",
+  "actual_qty"
  ],
  "fields": [
   {
@@ -66,6 +62,20 @@
    "search_index": 1
   },
   {
+   "fieldname": "column_break_3",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "harvest_date",
+   "fieldtype": "Date",
+   "in_filter": 1,
+   "in_list_view": 1,
+   "label": "Harvest Date",
+   "read_only": 1,
+   "reqd": 1,
+   "search_index": 1
+  },
+  {
    "fieldname": "section_break_1",
    "fieldtype": "Section Break"
   },
@@ -76,51 +86,15 @@
    "in_list_view": 1,
    "label": "Actual Qty",
    "read_only": 1
-  },
-  {
-   "fieldname": "column_break_3",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "0.00",
-   "fieldname": "reserved_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Reserved Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "column_break_4",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "0.00",
-   "fieldname": "projected_qty",
-   "fieldtype": "Float",
-   "in_list_view": 1,
-   "label": "Projected Qty",
-   "read_only": 1
-  },
-  {
-   "fieldname": "section_break_2",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "stock_uom",
-   "fieldtype": "Link",
-   "label": "Stock UOM",
-   "options": "UOM",
-   "read_only": 1
   }
  ],
  "hide_toolbar": 1,
  "in_create": 1,
- "index_web_pages_for_search": 0,
  "links": [],
- "modified": "2026-05-25 00:00:00.000000",
+ "modified": "2026-06-01 00:00:00",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
- "name": "Stem Length Bin",
+ "name": "Stem Length Age Bin",
  "owner": "Administrator",
  "permissions": [
   {
@@ -144,8 +118,8 @@
   }
  ],
  "quick_entry": 1,
+ "row_format": "Dynamic",
  "sort_field": "modified",
  "sort_order": "DESC",
- "states": [],
- "track_changes": 0
+ "states": []
 }

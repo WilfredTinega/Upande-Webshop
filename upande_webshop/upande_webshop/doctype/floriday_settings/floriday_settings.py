@@ -5,6 +5,7 @@ import frappe
 import requests
 from frappe.integrations.utils import make_post_request
 from frappe.model.document import Document
+from frappe.utils import flt
 
 SCHEDULER_TASKS = [
 	("at",         "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.refresh_access_token",    "Floriday: Refresh Access Token"),
@@ -410,6 +411,49 @@ def _available_for_sale_warehouses(company=None):
 	return rows
 
 
+def _floriday_flagged_qty_map(item_codes, warehouses):
+	"""Per-(item_code, normalized stem length) qty from the flagged stock source.
+
+	Returns None when neither Floriday-Settings flag is on (caller keeps the SLE
+	qty). Otherwise returns {(item_code, "52cm"): qty, ...}:
+	  - use_shelf_stock      -> kaitet Shelf, summed per length (not warehouse-scoped)
+	  - use_stem_length_age_bin -> Stem Length Bin per length (+ Age Bin gap-fill),
+	                               scoped to the configured warehouses
+
+	Keys use _normalize_stem_length on both sides so "52cm"/"52"/"52 cm" align with
+	the SLE row's normalized stem length used at the call site.
+	"""
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+		_normalize_stem_length,
+	)
+	from upande_webshop.upande_webshop.utils.shelf_stock import (
+		get_shelf_qty_by_length,
+		shelf_stock_enabled,
+	)
+
+	shelf = shelf_stock_enabled("Floriday Settings")
+
+	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+		age_bin_enabled,
+		get_age_bin_qty_by_length,
+	)
+
+	age = age_bin_enabled("Floriday Settings")
+	if not shelf and not age:
+		return None
+
+	qty_map = {}
+	for code in item_codes:
+		if shelf:
+			by_len = get_shelf_qty_by_length(code)
+		else:
+			by_len = get_age_bin_qty_by_length(code, list(warehouses))
+		for stem_length, qty in by_len.items():
+			key = (code, _normalize_stem_length(stem_length))
+			qty_map[key] = qty_map.get(key, 0.0) + flt(qty)
+	return qty_map
+
+
 def _aggregate_floriday_stock(warehouses):
 	"""SLE-aggregated per-(warehouse, item, stem_length) balances joined to
 	Floriday Items. Handles two data models transparently:
@@ -431,6 +475,13 @@ def _aggregate_floriday_stock(warehouses):
 	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import _normalize_stem_length
 
 	use_sle_stem = _site_has_sle_stem_length()
+
+	# Stock-source override: when Floriday Settings opts into shelf or age-bin
+	# stock, the published qty for each (item, stem length) is taken from that
+	# source instead of the SLE sum. The SLE aggregation still drives WHICH
+	# (item, length, trade_item) rows exist; only the qty is swapped. Keyed by
+	# (item_code, normalized stem length). See _floriday_flagged_qty_map.
+	flagged_qty = _floriday_flagged_qty_map(candidate_items, warehouses)
 
 	# Resolve the set of item codes to query SLE for. Custom-field sites query
 	# the template (or whatever item_code is on Floriday Items). Variant sites
@@ -512,13 +563,23 @@ def _aggregate_floriday_stock(warehouses):
 		if not match:
 			continue
 
+		# Swap in shelf/age-bin qty when a stock-source flag is on. The map is
+		# keyed by (item_code, normalized stem length); fall back to the SLE qty
+		# only when no flag is active (flagged_qty is None then).
+		if flagged_qty is not None:
+			qty = flagged_qty.get((row.item_code, norm_target), 0.0)
+			if qty <= 0:
+				continue
+		else:
+			qty = float(row.qty)
+
 		results.append({
 			"warehouse": row.warehouse,
 			"item_code": row.item_code,
 			"item_name": row.item_name,
 			"stem_length": row_stem or match.stem_length,
 			"trade_item_id": match.trade_item_id,
-			"qty": float(row.qty),
+			"qty": qty,
 			"uom": row.uom,
 		})
 

@@ -246,9 +246,10 @@ frappe.ui.form.on("Webshop Settings", {
 	sync_prices: function(frm) {
 		open_sync_dialog(frm, {
 			source: "item_price",
+			show_price_list: true,
 			title: __("Sync Webshop Item Prices"),
 			intro: __(
-				"Refreshes per-length Item Prices for every Website Item from the configured Price List. Runs in the background."
+				"Refreshes per-length Item Prices for every Website Item. Pick a Price List to sync non-variant prices from; any length it lacks falls back to the configured Price List. Runs in the background."
 			),
 		});
 	}
@@ -594,7 +595,7 @@ function open_bulk_publish_dialog(frm) {
 	refresh();
 }
 
-function open_sync_dialog(frm, { source, title, intro }) {
+function open_sync_dialog(frm, { source, title, intro, show_price_list }) {
 	const d = new frappe.ui.Dialog({
 		title,
 		fields: [
@@ -603,6 +604,21 @@ function open_sync_dialog(frm, { source, title, intro }) {
 				fieldname: "intro_html",
 				options: `<p class="text-muted small">${intro}</p>`,
 			},
+			...(show_price_list
+				? [
+						{
+							fieldtype: "Link",
+							fieldname: "price_list",
+							label: __("Sync prices from (Price List)"),
+							options: "Price List",
+							// Selling price lists only — buying lists aren't storefront rates.
+							get_query: () => ({ filters: { selling: 1, enabled: 1 } }),
+							description: __(
+								"Leave blank to use the configured Price List. Applies to non-variant items; missing lengths fall back to the configured list."
+							),
+						},
+				  ]
+				: []),
 			{
 				fieldtype: "Section Break",
 				fieldname: "progress_section",
@@ -652,9 +668,11 @@ function open_sync_dialog(frm, { source, title, intro }) {
 			};
 			d.$wrapper.on("hidden.bs.modal", cleanup);
 
+			const price_list = show_price_list ? d.get_value("price_list") : null;
+
 			frappe.call({
 				method: "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.sync_prices",
-				args: { run_async: 1, source },
+				args: { run_async: 1, source, price_list: price_list || undefined },
 				callback: (r) => {
 					const result = (r && r.message) || {};
 					if (!result.enqueued) {
@@ -662,8 +680,12 @@ function open_sync_dialog(frm, { source, title, intro }) {
 						frm._upande_inline_progress_msg.text(__("Could not start sync."));
 						return;
 					}
+					const src = result.source || source;
+					const pl = result.price_list || price_list;
 					frm._upande_inline_progress_msg.text(
-						__("Sync running in background (source: {0}).", [result.source || source])
+						pl
+							? __("Sync running in background (source: {0}, price list: {1}).", [src, pl])
+							: __("Sync running in background (source: {0}).", [src])
 					);
 				},
 				error: () => {

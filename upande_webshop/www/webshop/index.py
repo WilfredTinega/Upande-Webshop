@@ -27,10 +27,4 @@ def get_context(context):
 		cint(frappe.db.get_single_value("Webshop Settings", "products_per_page")) or 20
 	)
 
-	meta = frappe.get_meta("Webshop Settings")
-	if meta.has_field("full_width"):
-		context.full_width = cint(
-			frappe.db.get_single_value("Webshop Settings", "full_width")
-		)
-
 	context.no_cache = 1

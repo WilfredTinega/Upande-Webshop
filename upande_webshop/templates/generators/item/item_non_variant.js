@@ -1,10 +1,34 @@
 // Non-variant product page: multi-select stem lengths.
 // Each selected length gets its own bunches input and its own
 // Quotation Item row (one update_cart call per length).
+//
+// Box type, pack-rate, and MOQ are NOT chosen here — they belong on the cart
+// page. This page only picks stem lengths, bunch size, and qty.
 
-const _nv_pack_rate_cache = {};
 const _nv_bunch_size_cache = {};
 const _nv_length_price_cache = {};
+const _nv_item_uoms_cache = {};
+
+function nv_fetch_item_uoms(item_code) {
+	// Returns { uoms: [{uom, bunch_size}], default_uom } — the global Bunch UOM
+	// set. Drives the per-length Bunch Size dropdown (mirrors the variant flow).
+	if (!item_code) return Promise.resolve({ uoms: [], default_uom: null });
+	if (_nv_item_uoms_cache[item_code] !== undefined) {
+		return Promise.resolve(_nv_item_uoms_cache[item_code]);
+	}
+	return new Promise((resolve) => {
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_item_uoms',
+			args: { item_code },
+			callback: (r) => {
+				const result = (r && r.message) || { uoms: [], default_uom: null };
+				_nv_item_uoms_cache[item_code] = result;
+				resolve(result);
+			},
+			error: () => resolve({ uoms: [], default_uom: null }),
+		});
+	});
+}
 
 function nv_fetch_bunch_size(item_code) {
 	if (!item_code) return Promise.resolve({ size: 1, uom: null });
@@ -22,26 +46,6 @@ function nv_fetch_bunch_size(item_code) {
 				resolve(result);
 			},
 			error: () => resolve({ size: 1, uom: null }),
-		});
-	});
-}
-
-function nv_fetch_pack_rate(box_name, length_cm) {
-	if (!box_name || !length_cm) return Promise.resolve({ pack_rate: null });
-	const key = `${box_name}|${length_cm}`;
-	if (_nv_pack_rate_cache[key] !== undefined) {
-		return Promise.resolve(_nv_pack_rate_cache[key]);
-	}
-	return new Promise((resolve) => {
-		frappe.call({
-			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_pack_rate',
-			args: { box_name, length_cm },
-			callback: (r) => {
-				const result = (r && r.message) || { pack_rate: null };
-				_nv_pack_rate_cache[key] = result;
-				resolve(result);
-			},
-			error: () => resolve({ pack_rate: null }),
 		});
 	});
 }
@@ -77,17 +81,18 @@ class InlineNonVariantSelector {
 		const symbols = { USD: '$', EUR: '€', GBP: '£', KES: 'KSh' };
 		this._currency = symbols[this._currency_code] || (this._currency_code + ' ');
 
-		// Map<length, { stock_qty, per_stem_rate, num_stems, pack_rate }>
+		// Map<length, { stock_qty, per_stem_rate, num_stems, num_bunches,
+		//   bunch_size, bunch_uom, user_edited }>
+		// bunch_size/bunch_uom are per-length so each row's Bunch Size dropdown
+		// can be set independently (mirrors the variant flow).
 		this.length_state = new Map();
-		this.selected_box_type = '';
 		this.bunch_size = 1;
 		this.bunch_uom = null;
+		// Global Bunch UOM options for the per-row dropdown.
+		this.bunch_uoms = [];
 		this._on_backorder = false;
 
 		this.$stem_toggle = $root.find('.stem-length-toggle');
-		this.$box_area = $root.find('.box-type-area');
-		this.$box_toggle = $root.find('.box-type-toggle');
-		this.$pack_rate_display = $root.find('.pack-rate-display');
 		this.$totals_area = $root.find('.totals-area');
 		this.$length_rows = $root.find('.length-rows');
 		this.$grand_totals = $root.find('.grand-totals');
@@ -97,18 +102,54 @@ class InlineNonVariantSelector {
 		this.$status_area = $root.find('.status-area');
 		this.$variant_label_area = $root.find('.variant-label-area');
 		this.$add_to_cart = $root.find('.btn-add-to-cart-non-variant');
-		this.$moq_label = $root.find('.moq-label');
+
+		// Compact mode (wishlist): pick a length and it's staged automatically at
+		// qty 1 as a read-only green summary line — no per-length editing block.
+		// Add to Cart posts each staged length, then drops the item from the
+		// wishlist. Mirrors the variant selector's compact flow.
+		this.compact = $root.attr('data-compact') === '1';
 
 		nv_fetch_bunch_size(this.item_code).then((info) => {
 			this.bunch_size = Math.max(parseInt(info.size) || 1, 1);
 			this.bunch_uom = info.uom || null;
-			this.length_state.forEach((_, length) => this.autofill_bunches_for(length));
+			// Seed any rows staged before this resolved (e.g. from cache) with the
+			// default bunch size/uom; don't clobber a user's dropdown choice.
+			this.length_state.forEach((state) => {
+				if (!state.bunch_size) state.bunch_size = this.bunch_size;
+				if (!state.bunch_uom) state.bunch_uom = this.bunch_uom;
+			});
 			this.refresh_all_rows();
 		});
 
-		this.load_box_types();
+		nv_fetch_item_uoms(this.item_code).then((info) => {
+			this.bunch_uoms = (info && info.uoms) || [];
+			const default_uom = (info && info.default_uom)
+				|| (this.bunch_uoms[0] && this.bunch_uoms[0].uom) || null;
+			// If the bunch-size lookup hasn't set a default uom yet, take the
+			// smallest bunch from the dropdown options.
+			if (!this.bunch_uom && default_uom) {
+				this.bunch_uom = default_uom;
+				this.bunch_size = Math.max(parseInt(this.bunch_uoms[0].bunch_size) || 1, 1);
+			}
+			// Reconcile each staged row's uom against the loaded options so the
+			// rendered dropdown selection and state.bunch_size stay in sync. A
+			// user who already changed a row hasn't — their choice came from these
+			// same options, so it's always present here.
+			this.length_state.forEach((state) => {
+				const match = this.bunch_uoms.find((u) => u.uom === state.bunch_uom);
+				if (!match && default_uom) {
+					state.bunch_uom = default_uom;
+				}
+				const sel = this.bunch_uoms.find((u) => u.uom === state.bunch_uom);
+				if (sel) state.bunch_size = Math.max(parseInt(sel.bunch_size) || 1, 1);
+			});
+			this.refresh_all_rows();
+		});
+
 		this.bind_events();
-		this.restore_from_cache();
+		// Wishlist cards don't persist a selection across loads — only the detail
+		// page restores from localStorage.
+		if (!this.compact) this.restore_from_cache();
 		this.update_addable_state();
 	}
 
@@ -137,48 +178,52 @@ class InlineNonVariantSelector {
 					stock_qty: this.get_stock_qty(value),
 					per_stem_rate: null,
 					num_stems: 0,
-					pack_rate: null,
+					num_bunches: 1,
 					user_edited: false,
+					bunch_size: this.bunch_size,
+					bunch_uom: this.bunch_uom,
 				});
 				$btn.addClass('active');
 				this.fetch_per_stem_rate_for(value);
-				this.fetch_pack_rate_for(value);
 			}
 			this.persist_cache();
 			this.render_length_rows();
 			this.update_addable_state();
 		});
 
-		this.$root.on('click', '.box-type-toggle .box-btn', (e) => {
-			e.preventDefault();
-			const $btn = $(e.currentTarget);
-			const value = String($btn.data('value'));
-			if (this.selected_box_type === value) return;
-			this.selected_box_type = value;
-			$btn.siblings('.box-btn').removeClass('active');
-			$btn.addClass('active');
-			this.persist_cache();
-			this.refresh_moq_for_box().then(() => {
-				this.length_state.forEach((_, length) => this.fetch_pack_rate_for(length));
-			});
-		});
-
-		this.$root.on('input', '.stems-input', (e) => {
+		this.$root.on('input', '.bunches-input', (e) => {
 			const $input = $(e.currentTarget);
 			const length = String($input.closest('.length-row').data('length'));
 			const state = this.length_state.get(length);
 			if (!state) return;
 			let raw = Math.max(parseInt($input.val()) || 0, 0);
-			// Clamp at per-length stock cap. data-max-stems is set on render
-			// from stock_qty; enforce both the spinner-click path and typed/pasted values here.
-			const maxAttr = parseInt($input.attr('data-max-stems'));
+			// Clamp at per-length stock cap. data-max-bunches is set on render from
+			// floor(stock / bunch_size); enforce both the spinner-click path and
+			// typed/pasted values here.
+			const maxAttr = parseInt($input.attr('data-max-bunches'));
 			if (!isNaN(maxAttr) && maxAttr >= 0 && raw > maxAttr) {
 				raw = maxAttr;
 				$input.val(raw);
 			}
-			state.num_stems = raw;
+			state.num_bunches = raw;
 			state.user_edited = true;
 			this.update_row(length);
+			this.update_grand_totals();
+			this.update_addable_state();
+		});
+
+		this.$root.on('change', '.length-row .bunch-uom-select', (e) => {
+			const $sel = $(e.currentTarget);
+			const length = String($sel.closest('.length-row').data('length'));
+			const state = this.length_state.get(length);
+			if (!state) return;
+			state.bunch_uom = $sel.val();
+			state.bunch_size = Math.max(
+				parseInt($sel.find('option:selected').data('bunch-size')) || 1, 1
+			);
+			// Re-render so the stems cap and Total Stems recompute against the
+			// new bunch size for this length.
+			this.render_length_rows();
 			this.update_grand_totals();
 			this.update_addable_state();
 		});
@@ -190,6 +235,12 @@ class InlineNonVariantSelector {
 	}
 
 	render_length_rows() {
+		// Compact mode (wishlist): one green summary line per staged length,
+		// no qty/bunch editing block.
+		if (this.compact) {
+			this.render_compact_rows();
+			return;
+		}
 		this.$length_rows.empty();
 		if (!this.length_state.size) {
 			this.$totals_area.hide();
@@ -203,15 +254,17 @@ class InlineNonVariantSelector {
 			const stockText = (state.stock_qty != null)
 				? `${__('Stock')}: ${Number(state.stock_qty).toLocaleString()}`
 				: '';
-			// Cap bunches at floor(stock_qty / bunch_size). 0 = no cap (stock unknown
-			// or item not stock-tracked). The actual click-time enforcement lives in
-			// the `input` handler — `max` alone doesn't block browser spinner clicks.
-			const bunchSize = this.bunch_size || 1;
-			const maxStems = state.stock_qty != null && state.stock_qty >= 0
-				? Math.floor(Number(state.stock_qty))
+			// User enters bunches (Qty); stems = qty × bunch_size. Cap qty so total
+			// stems never exceed stock. 0 = no cap (stock unknown or not tracked).
+			// Click-time enforcement lives in the `input` handler — `max` alone
+			// doesn't block browser spinner clicks.
+			const bunchSize = state.bunch_size || this.bunch_size || 1;
+			const maxBunches = state.stock_qty != null && state.stock_qty >= 0
+				? Math.floor(Number(state.stock_qty) / bunchSize)
 				: '';
-			const maxAttr = maxStems !== '' ? `max="${maxStems}"` : '';
-			const dataMaxAttr = maxStems !== '' ? `data-max-stems="${maxStems}"` : '';
+			const maxAttr = maxBunches !== '' ? `max="${maxBunches}"` : '';
+			const dataMaxAttr = maxBunches !== '' ? `data-max-bunches="${maxBunches}"` : '';
+			const numBunches = state.num_bunches || 0;
 			return `
 				<div class="length-row" data-length="${frappe.utils.escape_html(length)}">
 					<div>
@@ -222,21 +275,33 @@ class InlineNonVariantSelector {
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
 							${__('Bunch Size')}
 						</label>
-						<input type="number" class="form-control bunch-size-display" value="${this.bunch_size}" readonly>
+						${(() => {
+							const opts = (this.bunch_uoms && this.bunch_uoms.length)
+								? this.bunch_uoms
+								: (state.bunch_uom ? [{ uom: state.bunch_uom, bunch_size: bunchSize }] : []);
+							if (!opts.length) {
+								return `<input type="text" class="form-control bunch-size-display" value="${frappe.utils.escape_html(state.bunch_uom || bunchSize)}" readonly>`;
+							}
+							const options = opts.map((u) => {
+								const sel = u.uom === state.bunch_uom ? 'selected' : '';
+								return `<option value="${frappe.utils.escape_html(u.uom)}" data-bunch-size="${u.bunch_size || 1}" ${sel}>${frappe.utils.escape_html(u.uom)}</option>`;
+							}).join('');
+							return `<select class="form-control bunch-uom-select">${options}</select>`;
+						})()}
 					</div>
 					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">×</div>
 					<div>
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
-							${__('No. of Stems')}
+							${__('Qty')}
 						</label>
-						<input type="number" class="form-control stems-input" value="${state.num_stems || 0}" min="0" ${maxAttr} ${dataMaxAttr}>
+						<input type="number" class="form-control bunches-input" value="${numBunches}" min="0" ${maxAttr} ${dataMaxAttr}>
 					</div>
 					<div style="font-size:18px; font-weight:200; padding-bottom:4px;">=</div>
 					<div>
 						<label class="d-block mb-1" style="font-weight:600; font-size:12px; color:var(--gray-700);">
-							${__('Total Bunches')}
+							${__('Stems')}
 						</label>
-						<input type="number" class="form-control total-bunches" value="0" readonly>
+						<input type="number" class="form-control total-stems" value="0" readonly>
 					</div>
 					<div class="row-line-price ml-auto" style="font-size:13px; color:var(--gray-700); align-self:center;"></div>
 					<div class="row-msg"></div>
@@ -257,6 +322,38 @@ class InlineNonVariantSelector {
 		this.render_length_rows();
 	}
 
+	render_compact_rows() {
+		// Wishlist: one green line per staged length showing total stems and price
+		// — no editing block, no grand totals. Each length is staged at qty 1
+		// (its default), so stems = bunch_size. Add to Cart posts each at that qty.
+		this.$length_rows.empty();
+		this.$grand_totals.hide();
+		if (!this.length_state.size) {
+			this.$totals_area.hide();
+			return;
+		}
+		this.$totals_area.css('display', 'block');
+
+		this.length_state.forEach((state, length) => {
+			const bunchSize = state.bunch_size || this.bunch_size || 1;
+			const num_bunches = state.num_bunches || 1;
+			const stems = num_bunches * bunchSize;
+			state.num_stems = stems;
+			const total = state.per_stem_rate
+				? `${this._currency} ${(state.per_stem_rate * stems).toFixed(2)}`
+				: __('No price configured');
+			this.$length_rows.append(`
+				<div class="length-compact-row" data-length="${frappe.utils.escape_html(length)}"
+					style="color:var(--green-600); font-weight:500; font-size:11px;
+						line-height:1.4; padding:3px 0; white-space:nowrap;
+						overflow:hidden; text-overflow:ellipsis;">
+					${frappe.utils.escape_html(length)}
+					— ${stems.toLocaleString()} ${__('stems')} · ${frappe.utils.escape_html(total)}
+				</div>
+			`);
+		});
+	}
+
 	update_row(length) {
 		const state = this.length_state.get(length);
 		const $row = this.$length_rows.find(
@@ -264,40 +361,35 @@ class InlineNonVariantSelector {
 		);
 		if (!state || !$row.length) return;
 
-		// Refresh the stock cap on the stems input. Stock may have changed since render.
-		const $stems = $row.find('.stems-input');
-		const bunchSize = this.bunch_size || 1;
+		// Refresh the stock cap on the qty (bunches) input. Stock may have changed
+		// since render. Cap = floor(stock / bunch_size) so total stems fit stock.
+		const $bunches = $row.find('.bunches-input');
+		const bunchSize = state.bunch_size || this.bunch_size || 1;
 		if (state.stock_qty != null && state.stock_qty >= 0) {
-			const maxStems = Math.floor(Number(state.stock_qty));
-			$stems.attr('max', maxStems);
-			$stems.attr('data-max-stems', maxStems);
-			if ((state.num_stems || 0) > maxStems) {
-				state.num_stems = maxStems;
-				$stems.val(maxStems);
+			const maxBunches = Math.floor(Number(state.stock_qty) / bunchSize);
+			$bunches.attr('max', maxBunches);
+			$bunches.attr('data-max-bunches', maxBunches);
+			if ((state.num_bunches || 0) > maxBunches) {
+				state.num_bunches = maxBunches;
+				$bunches.val(maxBunches);
 			}
 		} else {
-			$stems.removeAttr('max');
-			$stems.removeAttr('data-max-stems');
+			$bunches.removeAttr('max');
+			$bunches.removeAttr('data-max-bunches');
 		}
 
-		// Calculate bunches from stems: bunches = ceil(stems / bunch_size)
-		const num_stems = state.num_stems || 0;
-		const total_bunches = num_stems > 0 ? Math.ceil(num_stems / bunchSize) : 0;
-		$row.find('.total-bunches').val(total_bunches);
-		$row.find('.bunch-size-display').val(this.bunch_size);
+		// Calculate stems from bunches: stems = bunches × bunch_size
+		const total_bunches = state.num_bunches || 0;
+		const total_stems = total_bunches * bunchSize;
+		state.num_stems = total_stems;
+		$row.find('.total-stems').val(total_stems);
 
 		const $msg = $row.find('.row-msg');
 		const $line_price = $row.find('.row-line-price');
 		const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
-		const moq_bunches = this._moq_bunches || 0;
 
 		let msg = '';
-		if (total_bunches > 0 && moq_bunches > 0 && total_bunches < moq_bunches) {
-			msg = `<small style="color:#e8a000; font-weight:500;">⚠️ ${__(
-				'Minimum order is {0} bunch{1} for this box type.',
-				[moq_bunches, moq_bunches > 1 ? 'es' : '']
-			)}</small>`;
-		} else if (total_stems > 0 && stock_qty != null && stock_qty >= 0 && total_stems > stock_qty) {
+		if (total_stems > 0 && stock_qty != null && stock_qty >= 0 && total_stems > stock_qty) {
 			msg = `<small style="color:#c0392b; font-weight:500;">⚠️ ${__(
 				'Only {0} stems available — reduce bunches.',
 				[stock_qty.toLocaleString()]
@@ -318,12 +410,15 @@ class InlineNonVariantSelector {
 	}
 
 	update_grand_totals() {
+		// Compact mode shows per-length green lines only — no grand totals footer.
+		if (this.compact) return;
 		let bunches = 0;
 		let stems = 0;
 		let grand_price = 0;
 		this.length_state.forEach((state) => {
-			const ns = state.num_stems || 0;
-			const nb = ns > 0 ? Math.ceil(ns / (this.bunch_size || 1)) : 0;
+			const bs = state.bunch_size || this.bunch_size || 1;
+			const nb = state.num_bunches || 0;
+			const ns = nb * bs;
 			bunches += nb;
 			stems += ns;
 			if (state.per_stem_rate) grand_price += state.per_stem_rate * ns;
@@ -347,145 +442,19 @@ class InlineNonVariantSelector {
 			if (!state) return;
 			const rate = parseFloat(result.price_list_rate);
 			state.per_stem_rate = (!isNaN(rate) && rate > 0) ? rate : null;
-			this.update_row(length);
+			if (result.currency) this._currency = result.currency;
+			// Compact rows have no editable DOM — re-render to fill the price line;
+			// the detail page updates the row in place.
+			if (this.compact) this.render_compact_rows();
+			else this.update_row(length);
 			this.update_grand_totals();
 			this.update_addable_state();
 		});
-	}
-
-	fetch_pack_rate_for(length) {
-		const cm = this.length_to_cm(length);
-		if (!cm || !this.selected_box_type) return;
-		nv_fetch_pack_rate(this.selected_box_type, cm).then((result) => {
-			const state = this.length_state.get(length);
-			if (!state) return;
-			state.pack_rate = result.pack_rate;
-			this.autofill_bunches_for(length);
-			this.update_pack_rate_display();
-			this.update_row(length);
-			this.update_grand_totals();
-			this.update_addable_state();
-		});
-	}
-
-	autofill_bunches_for(length) {
-		// One box's worth of stems = pack_rate.
-		// Don't overwrite a value the user has already typed.
-		const state = this.length_state.get(length);
-		if (!state || state.user_edited) return;
-		if (!state.pack_rate) return;
-		const stems = state.pack_rate;
-		if (stems > 0) {
-			state.num_stems = stems;
-			const $input = this.$length_rows.find(
-				`.length-row[data-length="${$.escapeSelector(String(length))}"] .stems-input`
-			);
-			if ($input.length) $input.val(stems);
-		}
-	}
-
-	update_pack_rate_display() {
-		if (!this.selected_box_type) {
-			this.$pack_rate_display.empty();
-			return;
-		}
-		const parts = [];
-		this.length_state.forEach((state, length) => {
-			if (state.pack_rate) {
-				parts.push(`${frappe.utils.escape_html(length)}: <strong>${state.pack_rate} stems/box</strong>`);
-			}
-		});
-		this.$pack_rate_display.html(
-			parts.length
-				? `<small style="color:var(--gray-600);">${parts.join(' · ')}</small>`
-				: ''
-		);
 	}
 
 	length_to_cm(length) {
 		const match = String(length).match(/(\d+)/);
 		return match ? parseInt(match[1]) : null;
-	}
-
-	load_box_types() {
-		if (!this.$box_area.length) return;
-		frappe.call({
-			method: 'upande_webshop.upande_webshop.doctype.box_type.box_type.get_box_types',
-			callback: (r) => {
-				const rows = (r && r.message) || [];
-				if (!rows.length) {
-					this.$box_area.hide();
-					return;
-				}
-				this.$box_toggle.empty();
-				rows.forEach(row => {
-					const label = row.box_type_name || row.name;
-					this.$box_toggle.append(`
-						<button type="button" class="btn box-btn" data-value="${frappe.utils.escape_html(label)}">
-							${frappe.utils.escape_html(label)}
-						</button>
-					`);
-				});
-				this.$box_area.show();
-				this.apply_cached_box_selection();
-			},
-			error: () => this.$box_area.hide(),
-		});
-	}
-
-	apply_cached_box_selection() {
-		if (!this.selected_box_type) return;
-		const $btn = this.$box_toggle.find(
-			`.box-btn[data-value="${$.escapeSelector(this.selected_box_type)}"]`
-		);
-		if (!$btn.length) {
-			this.selected_box_type = '';
-			return;
-		}
-		$btn.addClass('active');
-		this.refresh_moq_for_box().then(() => {
-			this.length_state.forEach((_, length) => this.fetch_pack_rate_for(length));
-		});
-	}
-
-	refresh_moq_for_box() {
-		const box = this.selected_box_type;
-		if (!box) {
-			this._moq_bunches = 0;
-			this.$moq_label.text('');
-			return Promise.resolve();
-		}
-		return new Promise((resolve) => {
-			frappe.call({
-				method: 'upande_webshop.upande_webshop.api.get_box_min_order_qty',
-				args: { box_name: box },
-				callback: (r) => {
-					const bunches = (r && r.message && r.message.min_order_qty) || 0;
-					this._moq_bunches = bunches;
-					this.$moq_label.text(
-						bunches ? ` — MOQ: ${bunches} bunch${bunches > 1 ? 'es' : ''}` : ''
-					);
-					// Seed any rows that haven't been touched yet (pack-rate auto-fill takes precedence and runs after).
-					if (bunches) {
-						this.length_state.forEach((state) => {
-							if (!state.num_stems && !state.user_edited) {
-								// Convert bunches MOQ to stems: stems = bunches * bunch_size
-								state.num_stems = bunches * (this.bunch_size || 1);
-							}
-						});
-						this.render_length_rows();
-						this.update_grand_totals();
-						this.update_addable_state();
-					}
-					resolve();
-				},
-				error: () => {
-					this._moq_bunches = 0;
-					this.$moq_label.text('');
-					resolve();
-				}
-			});
-		});
 	}
 
 	update_addable_state() {
@@ -496,14 +465,13 @@ class InlineNonVariantSelector {
 		let ok = false;
 		let blocked = false;
 		this.length_state.forEach((state) => {
-			const stems = state.num_stems || 0;
-			if (stems <= 0) return;
-			const bunchSize = this.bunch_size || 1;
-			const bunches = stems > 0 ? Math.ceil(stems / bunchSize) : 0;
+			const bunches = state.num_bunches || 0;
+			if (bunches <= 0) return;
+			const bunchSize = state.bunch_size || this.bunch_size || 1;
+			const stems = bunches * bunchSize;
 			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
 			const within_stock = (stock_qty == null) || stems <= stock_qty;
-			const meets_moq = !this._moq_bunches || bunches >= this._moq_bunches;
-			if (within_stock && meets_moq) ok = true;
+			if (within_stock) ok = true;
 			else blocked = true;
 		});
 		this.$add_to_cart.prop('disabled', !ok || blocked);
@@ -513,8 +481,7 @@ class InlineNonVariantSelector {
 		const state = {
 			lengths: Array.from(this.length_state.keys()),
 		};
-		if (this.selected_box_type) state.box_type = this.selected_box_type;
-		if (state.lengths.length === 0 && !state.box_type) {
+		if (state.lengths.length === 0) {
 			localStorage.removeItem(this.get_cache_key());
 		} else {
 			localStorage.setItem(this.get_cache_key(), JSON.stringify(state));
@@ -538,15 +505,14 @@ class InlineNonVariantSelector {
 					stock_qty: this.get_stock_qty(length),
 					per_stem_rate: null,
 					num_stems: 0,
-					pack_rate: null,
+					num_bunches: 1,
 					user_edited: false,
+					bunch_size: this.bunch_size,
+					bunch_uom: this.bunch_uom,
 				});
 				$btn.addClass('active');
 				this.fetch_per_stem_rate_for(String(length));
 			});
-			if (saved.box_type) {
-				this.selected_box_type = String(saved.box_type);
-			}
 			this.render_length_rows();
 			this.update_addable_state();
 		} catch (e) {
@@ -557,14 +523,16 @@ class InlineNonVariantSelector {
 	add_to_cart() {
 		const entries = [];
 		this.length_state.forEach((state, length) => {
-			const ns = state.num_stems || 0;
-			const nb = ns > 0 ? Math.ceil(ns / (this.bunch_size || 1)) : 0;
-			const stems = ns;
-			if (stems <= 0) return;
+			const bs = state.bunch_size || this.bunch_size || 1;
+			const nb = state.num_bunches || 0;
+			const stems = nb * bs;
+			if (nb <= 0) return;
 			const stock_qty = (state.stock_qty != null) ? Number(state.stock_qty) : null;
 			if (stock_qty != null && stems > stock_qty) return;
-			if (this._moq_bunches && nb < this._moq_bunches) return;
-			entries.push({ length, num_bunches: nb, stems, pack_rate: state.pack_rate || 0 });
+			entries.push({
+				length, num_bunches: nb, stems,
+				bunch_size: bs, bunch_uom: state.bunch_uom || this.bunch_uom || null,
+			});
 		});
 
 		if (!entries.length) {
@@ -590,15 +558,12 @@ class InlineNonVariantSelector {
 			const payload = entries.map((entry) => ({
 				item_code: this.item_code,
 				qty: entry.num_bunches,
-				uom: this.bunch_uom || null,
+				uom: entry.bunch_uom || null,
 				additional_notes: [
-					this.selected_box_type ? `Box: ${this.selected_box_type}` : '',
-					entry.pack_rate ? `Pack Rate: ${entry.pack_rate} stems/box` : '',
-					`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
+					`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${entry.bunch_size} stems)`,
 					specs.length ? `Specs: ${specs.join(', ')}` : '',
 				].filter(Boolean).join(' | '),
 				custom_length: entry.length,
-				custom_box_type: this.selected_box_type || null,
 			}));
 			this.$add_to_cart.prop('disabled', true);
 			frappe.call({
@@ -615,19 +580,16 @@ class InlineNonVariantSelector {
 
 		const post_one = (entry) => new Promise((resolve) => {
 			const additional_notes = [
-				this.selected_box_type ? `Box: ${this.selected_box_type}` : '',
-				entry.pack_rate ? `Pack Rate: ${entry.pack_rate} stems/box` : '',
-				`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${this.bunch_size} stems)`,
+				`Total Bunches: ${entry.stems} (${entry.num_bunches} bunches × ${entry.bunch_size} stems)`,
 				specs.length ? `Specs: ${specs.join(', ')}` : '',
 			].filter(Boolean).join(' | ');
 
 			upande_webshop.upande_webshop.shopping_cart.update_cart({
 				item_code: this.item_code,
 				qty: entry.num_bunches,
-				uom: this.bunch_uom || undefined,
+				uom: entry.bunch_uom || undefined,
 				additional_notes,
 				custom_length: entry.length,
-				custom_box_type: this.selected_box_type || undefined,
 				callback: (r) => resolve(!(r && r.exc)),
 			});
 		});
@@ -645,9 +607,38 @@ class InlineNonVariantSelector {
 					indicator: 'green',
 				});
 				$('.btn-view-in-cart').removeClass('hidden');
+				// Wishlist: once a wished item is in the cart, drop it from the
+				// wishlist and remove the card (same as the variant compact flow).
+				if (this.compact) this.remove_from_wishlist_after_add();
 			}
 		};
 		run();
+	}
+
+	remove_from_wishlist_after_add() {
+		// Mirrors InlineVariantSelector.remove_from_wishlist_after_add — the
+		// wishlist module hangs off window.upande_webshop.upande_webshop.wishlist.
+		const wishlist = (window.upande_webshop
+			&& window.upande_webshop.upande_webshop
+			&& window.upande_webshop.upande_webshop.wishlist) || null;
+		const $card = this.$root.closest('.wishlist-card');
+		frappe.call({
+			method: 'upande_webshop.upande_webshop.doctype.wishlist.wishlist.remove_from_wishlist',
+			args: { item_code: this.item_code },
+			callback: (r) => {
+				const new_count = (r && r.message && r.message.wish_count);
+				if (wishlist && wishlist.set_wishlist_count) {
+					wishlist.set_wishlist_count(false, new_count);
+				}
+				$card.fadeOut(300, () => {
+					$card.remove();
+					if (wishlist && parseInt(new_count || 0) === 0 && wishlist.render_empty_state) {
+						$('.page_content').empty();
+						wishlist.render_empty_state();
+					}
+				});
+			},
+		});
 	}
 
 	get_cache_key() {
@@ -655,9 +646,23 @@ class InlineNonVariantSelector {
 	}
 }
 
+// Expose the selector + a mount helper globally so other pages (e.g. the
+// wishlist) can reuse the exact same machinery. Mounting is idempotent: a root
+// already initialized is skipped, so calling mount again is safe.
+window.upande_webshop = window.upande_webshop || {};
+window.upande_webshop.InlineNonVariantSelector = InlineNonVariantSelector;
+window.upande_webshop.mount_non_variant_selectors = function (scope) {
+	const $scope = scope ? $(scope) : $(document);
+	$scope.find('.inline-non-variant-selector').each(function () {
+		const $root = $(this);
+		if ($root.attr('data-nvsel-mounted')) return;
+		const { itemCode, itemName } = $root.data();
+		if (!itemCode) return;
+		$root.attr('data-nvsel-mounted', '1');
+		new InlineNonVariantSelector($root, itemCode, itemName);
+	});
+};
+
 frappe.ready(() => {
-	const $root = $('.inline-non-variant-selector');
-	if (!$root.length) return;
-	const { itemCode, itemName } = $root.data();
-	new InlineNonVariantSelector($root, itemCode, itemName);
+	window.upande_webshop.mount_non_variant_selectors(document);
 });

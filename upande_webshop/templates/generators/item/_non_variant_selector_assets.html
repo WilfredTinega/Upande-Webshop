@@ -1,0 +1,111 @@
+{# Shared CSS + JS for the inline non-variant selector.
+
+Included on the product detail page (item_non_variant.html) and the wishlist page
+so both render the identical InlineNonVariantSelector. The markup root
+(`.inline-non-variant-selector` with data-item-code / data-item-name) is supplied
+by the including page (see _non_variant_selector_root.html); this partial only
+ships styles + the class definition, plus
+`window.upande_webshop.mount_non_variant_selectors(scope)` to mount roots on demand. #}
+<style>
+	.inline-non-variant-selector .attr-toggle .btn {
+		border-radius: 6px;
+		font-size: 13px;
+		padding: 6px 14px;
+		border: 1px solid var(--gray-300);
+		background: #fff;
+		color: var(--gray-800);
+	}
+	.inline-non-variant-selector .attr-toggle .btn:hover:not(:disabled) {
+		border-color: var(--gray-500);
+	}
+	.inline-non-variant-selector .attr-toggle .btn.active {
+		background: var(--primary-color, #2490ef);
+		color: #fff;
+		border-color: var(--primary-color, #2490ef);
+	}
+	.inline-non-variant-selector .attr-toggle .btn:disabled {
+		opacity: 0.45;
+		cursor: not-allowed;
+	}
+	.inline-non-variant-selector .stem-length-btn.oos {
+		text-decoration: line-through;
+		text-decoration-thickness: 2px;
+		color: var(--gray-500);
+		background: #f7f7f9;
+	}
+	.inline-non-variant-selector .stem-length-btn.oos:hover {
+		border-color: var(--gray-300);
+	}
+	.inline-non-variant-selector .length-row {
+		display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap;
+		padding: 8px 10px; border: 1px solid var(--gray-200); border-radius: 6px;
+		background: #fafbfc;
+	}
+	.inline-non-variant-selector .length-row .length-tag {
+		font-weight: 600; font-size: 13px; color: var(--gray-800);
+		padding: 6px 10px; background: #fff; border: 1px solid var(--gray-300);
+		border-radius: 6px;
+	}
+	.inline-non-variant-selector .length-row .length-stock {
+		font-weight: 400; color: var(--gray-500); font-size: 11px; margin-left: 6px;
+	}
+	.inline-non-variant-selector .length-row .form-control { max-width: 100px; font-size: 14px; }
+	.inline-non-variant-selector .length-row .total-stems { font-weight: 700; background: #f4f5f6; }
+	.inline-non-variant-selector .length-row .row-msg { flex-basis: 100%; font-size: 12px; }
+	.inline-non-variant-selector .attr-group { margin-bottom: 12px; }
+	.inline-non-variant-selector .attr-toggle { display: flex; gap: 6px; flex-wrap: wrap; }
+
+	/* Compact mode (wishlist): drop the editing rows/heading and keep the
+	   per-length green summary lines tight so they don't wrap on the narrow card. */
+	.inline-non-variant-selector[data-compact="1"] .length-compact-row {
+		font-size: 11px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	/* Dark mode: the surfaces above hard-code light hex (#fff / #fafbfc /
+	   #f7f7f9 / #f4f5f6), which never adapt. Repaint them with the theme's
+	   dark ramp. These rules live in the same <style> block as the originals
+	   so source order (dark after light) lets them win on equal specificity. */
+	/* Selectable (available, not-yet-selected) length buttons: raised dark surface
+	   with a clearly visible border so they read as clickable chips. */
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--gray-500);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn:hover:not(:disabled):not(.oos) {
+		border-color: var(--ws-accent, #0289f7);
+		color: var(--ws-accent, #0289f7);
+	}
+	/* Out-of-stock lengths: recede — darker, muted, struck through — so the
+	   available ones stand out against them. */
+	[data-theme="dark"] .inline-non-variant-selector .stem-length-btn.oos {
+		color: var(--text-muted);
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	/* Selected length: solid accent fill. (--primary-color flips to the accent in
+	   dark mode via webshop_cart.scss; pin it here so the active chip is obvious.) */
+	[data-theme="dark"] .inline-non-variant-selector .attr-toggle .btn.active {
+		background: var(--ws-accent, #0289f7);
+		border-color: var(--ws-accent, #0289f7);
+		color: #fff;
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row {
+		background: var(--gray-900);
+		border-color: var(--border-color);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row .length-tag {
+		background: var(--gray-800);
+		color: var(--text-color);
+		border-color: var(--dark-border-color);
+	}
+	[data-theme="dark"] .inline-non-variant-selector .length-row .length-stock { color: var(--text-muted); }
+	[data-theme="dark"] .inline-non-variant-selector .length-row .total-stems { background: var(--gray-800); }
+</style>
+
+<script>
+{% include "templates/generators/item/item_non_variant.js" %}
+</script>

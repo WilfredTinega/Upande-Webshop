@@ -2,6 +2,21 @@
 
 {% block title %} {{ _("Shopping Cart") }} {% endblock %}
 
+{% block breadcrumbs %}
+<div class="breadcrumb-container container">
+	<nav aria-label="breadcrumb">
+		<ol class="breadcrumb">
+			<li class="breadcrumb-item">
+				<a href="/webshop">{{ _("Home") }}</a>
+			</li>
+			<li class="breadcrumb-item active" aria-current="page">
+				<span>{{ _("Shopping Cart") }}</span>
+			</li>
+		</ol>
+	</nav>
+</div>
+{% endblock %}
+
 {% block header %}<div class="shopping-cart-header mt-2 mb-6">{{ _("Shopping Cart") }}</div>{% endblock %}
 
 {% block header_actions %}
@@ -23,11 +38,13 @@
 				</div>
 				<table class="table mt-3 cart-table">
 					<thead>
+						{#- No inline widths: column widths come from .cart-table CSS
+						    (nth-child) so the fixed thead lines up with the scrolling body. -#}
 						<tr>
 							<th class="item-column">{{ _('Item') }}</th>
-							<th width="20%">{{ _('Quantity') }}</th>
-							<th width="20%" class="text-right column-sm-view">{{ _('Price') }}</th>
-							<th width="10%" class="column-sm-view"></th>
+							<th>{{ _('Quantity') }}</th>
+							<th class="text-right column-sm-view">{{ _('Price') }}</th>
+							<th class="column-sm-view"></th>
 						</tr>
 					</thead>
 					<tbody class="cart-items">
@@ -90,7 +107,17 @@
 							data-initial-value="{{ doc.custom_delivery_point or '' }}"></div>
 					</div>
 
-					{% if cart_settings.get('show_cart_box_type', 1) %}
+					{% if cart_settings.get('show_consignee') and frappe.get_meta(doc.doctype).has_field('custom_consignee') %}
+					<div class="mt-3">
+						<label for="consignee" class="form-label delivery-field-label">
+							{{ _('Consignee') }}
+						</label>
+						<div id="consignee-wrapper"
+							data-initial-value="{{ doc.get('custom_consignee') or '' }}"></div>
+					</div>
+					{% endif %}
+
+					{% if cart_settings.get('show_box_type') %}
 					<div class="mt-3">
 						<label for="box-type" class="form-label delivery-field-label">
 							{{ _('Box Type') }}

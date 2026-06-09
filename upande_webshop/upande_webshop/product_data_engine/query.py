@@ -4,9 +4,16 @@
 import frappe
 from frappe.utils import flt
 
+from erpnext.utilities.product import get_price
+
 from upande_webshop.upande_webshop.doctype.item_review.item_review import get_customer
-from upande_webshop.upande_webshop.shopping_cart.product_info import get_product_info_for_website
 from upande_webshop.upande_webshop.utils.product import get_non_stock_item_status
+from upande_webshop.upande_webshop.utils.shelf_stock import (
+	get_shelf_qty,
+	get_shelf_qty_by_length,
+	get_shelf_qty_for_items,
+	use_shelf_stock,
+)
 
 
 class ProductQuery:
@@ -139,15 +146,29 @@ class ProductQuery:
 			for v in variants:
 				variant_parent_of[v.name] = v.variant_of
 
-		for leaves, bucket in items_by_warehouse_key.items():
-			if not leaves:
-				for item in bucket:
-					item.stock_qty = 0.0
-				continue
+		# Shelf stock is not warehouse-scoped, so for plain items we resolve qty
+		# once across all items rather than per warehouse-bucket. Variants never
+		# live on a shelf (each is a distinct length already in core Bin).
+		shelf_mode = use_shelf_stock()
+		shelf_qty_by_code = {}
+		if shelf_mode:
+			plain_codes = [i.item_code for i in items if not i.get("has_variants")]
+			shelf_qty_by_code = get_shelf_qty_for_items(plain_codes)
 
+		# Plain-item stock source (shelf mode aside):
+		#   - age-bin on : Stem Length Bin with Age Bin fallback (per-item merge)
+		#   - age-bin off: core Bin, same source as variants
+		from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+			get_age_bin_qty_for_items,
+			use_stem_length_age_bin,
+		)
+
+		age_mode = use_stem_length_age_bin()
+
+		for leaves, bucket in items_by_warehouse_key.items():
 			# Variants are length-resolved at the item level (one variant = one
-			# length), so their qty stays in core Bin. Plain items use Stem Length
-			# Bin and sum across all lengths since the listing has no length context.
+			# length), so their qty stays in core Bin. Plain items follow the source
+			# chosen above; the listing has no length context, so qty is summed.
 			variant_lookup_codes = set()
 			plain_lookup_codes = set()
 			for item in bucket:
@@ -155,34 +176,36 @@ class ProductQuery:
 					variant_lookup_codes.update(
 						code for code, parent in variant_parent_of.items() if parent == item.item_code
 					)
-				else:
+				elif not shelf_mode:
 					plain_lookup_codes.add(item.item_code)
 
 			qty_by_code = {}
 
-			if variant_lookup_codes:
-				rows = frappe.db.get_all(
-					"Bin",
-					filters={
-						"item_code": ("in", list(variant_lookup_codes)),
-						"warehouse": ("in", list(leaves)),
-					},
-					fields=["item_code", "actual_qty"],
-				)
-				for row in rows:
-					qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
+			# Without warehouses we can only resolve shelf-mode plain items (handled
+			# below via shelf_qty_by_code); Bin-backed lookups need a warehouse set.
+			if leaves:
+				# Age-bin off: plain items read core Bin alongside variants.
+				bin_codes = set(variant_lookup_codes)
+				if not age_mode:
+					bin_codes |= plain_lookup_codes
 
-			if plain_lookup_codes:
-				rows = frappe.db.get_all(
-					"Stem Length Bin",
-					filters={
-						"item_code": ("in", list(plain_lookup_codes)),
-						"warehouse": ("in", list(leaves)),
-					},
-					fields=["item_code", "actual_qty"],
-				)
-				for row in rows:
-					qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
+				if bin_codes:
+					rows = frappe.db.get_all(
+						"Bin",
+						filters={
+							"item_code": ("in", list(bin_codes)),
+							"warehouse": ("in", list(leaves)),
+						},
+						fields=["item_code", "actual_qty"],
+					)
+					for row in rows:
+						qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
+
+				# Age-bin on: plain items read Stem Length Bin with Age Bin fallback.
+				if age_mode and plain_lookup_codes:
+					age_totals = get_age_bin_qty_for_items(plain_lookup_codes, list(leaves))
+					for code, qty in age_totals.items():
+						qty_by_code[code] = qty_by_code.get(code, 0.0) + flt(qty)
 
 			for item in bucket:
 				if item.get("has_variants"):
@@ -191,6 +214,8 @@ class ProductQuery:
 						for code, parent in variant_parent_of.items()
 						if parent == item.item_code
 					)
+				elif shelf_mode:
+					total = shelf_qty_by_code.get(item.item_code, 0.0)
 				else:
 					total = qty_by_code.get(item.item_code, 0.0)
 				item.stock_qty = total
@@ -294,29 +319,85 @@ class ProductQuery:
 			self.or_filters.append([field, "like", search])
 
 	def add_display_details(self, result, discount_list, cart_items):
-		"""Add price and availability details in result."""
-		for item in result:
-			product_info = get_product_info_for_website(item.item_code, skip_quotation_creation=True).get(
-				"product_info"
-			)
+		"""Add price and availability details in result.
 
-			if product_info and product_info["price"]:
-				# update/mutate item and discount_list objects
-				self.get_price_discount_info(item, product_info["price"], discount_list)
+		Pricing is the hot path here: the previous implementation called
+		`get_product_info_for_website` once per item, which re-resolved the cart
+		settings, party, price list AND recomputed stock on every iteration
+		(~21 ms/item — the bulk of the listing's render time). The listing only
+		consumes the price, and stock is already attached by `_attach_stock_qty`,
+		so we hoist every invariant out of the loop and call `get_price` directly.
+		"""
+		price_ctx = self._get_price_context()
+
+		# Batch the per-item `is_stock_item` flag (used by get_stock_availability)
+		# into one query instead of a cached_value lookup per row.
+		is_stock_by_code = {}
+		if self.settings.show_stock_availability:
+			rows = frappe.get_all(
+				"Item",
+				filters={"item_code": ("in", [i.item_code for i in result])},
+				fields=["item_code", "is_stock_item"],
+			)
+			is_stock_by_code = {r.item_code: r.is_stock_item for r in rows}
+
+		for item in result:
+			if price_ctx:
+				price = get_price(
+					item.item_code,
+					price_ctx["price_list"],
+					price_ctx["customer_group"],
+					price_ctx["company"],
+					party=price_ctx["party"],
+				)
+				if price:
+					# update/mutate item and discount_list objects
+					self.get_price_discount_info(item, price, discount_list)
 
 			if self.settings.show_stock_availability:
-				self.get_stock_availability(item)
+				self.get_stock_availability(item, is_stock_by_code.get(item.item_code))
 
 			item.in_cart = item.item_code in cart_items
 			item.cart_qty = cart_items.get(item.item_code, 0) if isinstance(cart_items, dict) else 0
 
-			item.wished = False
-			if frappe.db.exists(
-				"Wishlist Item", {"item_code": item.item_code, "parent": frappe.session.user}
-			):
-				item.wished = True
+		# One batched query for the wishlist flag instead of one `exists` per item.
+		wished_codes = self._get_wished_item_codes([i.item_code for i in result])
+		for item in result:
+			item.wished = item.item_code in wished_codes
 
 		return result, discount_list
+
+	def _get_price_context(self):
+		"""Resolve the (invariant per request) inputs `get_price` needs.
+
+		Returns None when prices shouldn't be shown (cart disabled, price hidden
+		for guests), so the caller skips pricing entirely.
+		"""
+		from upande_webshop.upande_webshop.shopping_cart.cart import _set_price_list, get_party
+
+		settings = self.settings
+		if not settings.enabled or not settings.show_price:
+			return None
+		if frappe.session.user == "Guest" and settings.hide_price_for_guest:
+			return None
+
+		return {
+			"price_list": _set_price_list(settings, None),
+			"customer_group": settings.default_customer_group,
+			"company": settings.company,
+			"party": get_party(),
+		}
+
+	def _get_wished_item_codes(self, item_codes):
+		"""Item codes the current user has wishlisted, in one query."""
+		if not item_codes or frappe.session.user == "Guest":
+			return set()
+		rows = frappe.get_all(
+			"Wishlist Item",
+			filters={"item_code": ("in", item_codes), "parent": frappe.session.user},
+			pluck="item_code",
+		)
+		return set(rows)
 
 	def get_price_discount_info(self, item, price_object, discount_list):
 		"""Modify item object and add price details."""
@@ -333,13 +414,14 @@ class ProductQuery:
 				"formatted_discount_rate"
 			)
 
-	def get_stock_availability(self, item):
+	def get_stock_availability(self, item, is_stock_item=None):
 		"""Modify item object and add stock details."""
 		# stock_qty was pre-computed by `_attach_stock_qty` in one batched query.
 		precomputed_qty = item.get("stock_qty")
 		item.in_stock = False
 		warehouse = item.get("website_warehouse")
-		is_stock_item = frappe.get_cached_value("Item", item.item_code, "is_stock_item")
+		if is_stock_item is None:
+			is_stock_item = frappe.get_cached_value("Item", item.item_code, "is_stock_item")
 
 		if item.get("on_backorder"):
 			return
@@ -452,17 +534,34 @@ def get_item_total_qty(item_code, warehouse):
 	"""Total qty for a single item across the storefront warehouse set.
 
 	Variant items (variant_of set) use core Bin — each variant_of = a distinct
-	length, already tracked there. Plain items use Stem Length Bin summed
-	across all lengths. Listing has no length context."""
-	warehouses = _all_storefront_warehouses(warehouse)
-	if not warehouses:
-		return 0.0
+	length, already tracked there. Plain items: when the age-bin source is on,
+	read Stem Length Bin with Age Bin fallback (summed across lengths); otherwise
+	read core Bin. Listing has no length context."""
 	item_meta = frappe.db.get_value(
 		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
 	) or frappe._dict()
 	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
 
-	source = "Bin" if is_variant_or_template else "Stem Length Bin"
+	# Plain items read from the shelf when shelf mode is on (not warehouse-scoped).
+	if not is_variant_or_template and use_shelf_stock():
+		return get_shelf_qty(item_code)
+
+	warehouses = _all_storefront_warehouses(warehouse)
+	if not warehouses:
+		return 0.0
+
+	# Plain items read Stem Length Bin (Age Bin fallback) when the age-bin source
+	# is enabled; variants stay on core Bin (one variant = one length).
+	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+		get_age_bin_qty_for_items,
+		use_stem_length_age_bin,
+	)
+
+	if not is_variant_or_template and use_stem_length_age_bin():
+		return get_age_bin_qty_for_items([item_code], warehouses).get(item_code, 0.0)
+
+	# Flag off: plain items read core Bin, same source as variants.
+	source = "Bin"
 	rows = frappe.db.get_all(
 		source,
 		filters={"item_code": item_code, "warehouse": ("in", warehouses)},

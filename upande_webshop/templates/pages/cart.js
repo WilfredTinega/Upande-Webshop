@@ -20,22 +20,93 @@ $.extend(shopping_cart, {
 		shopping_cart.bind_remove_coupon_code();
 		shopping_cart.bind_delivery_date();
 		shopping_cart.bind_delivery_point();
+		shopping_cart.bind_consignee();
 		shopping_cart.bind_box_type();
 		shopping_cart.bind_line_code();
+		shopping_cart.bind_box_label();
+		shopping_cart.bind_box_id();
+	},
+
+	bind_box_id: function() {
+		// Per-item Box ID (editable). The cart auto-assigns box ids by packing
+		// lines into boxes of the box type's pack rate; this lets the user
+		// override the assigned id. Save on change/blur; skip if unchanged.
+		// Delegated so it survives cart fragment re-renders.
+		var $items = $(".cart-items");
+		if (!$items.length) return;
+
+		$items.on("focus", ".cart-box-id", function() {
+			$(this).data("last-saved", $(this).val());
+		});
+		$items.on("change blur", ".cart-box-id", function() {
+			var $el = $(this);
+			var value = $el.val() || "";
+			if (value !== "" && parseInt(value, 10) < 1) {
+				value = "1";
+				$el.val(value);
+			}
+			if ($el.data("last-saved") === value) return;
+			$el.data("last-saved", value);
+			frappe.call({
+				type: "POST",
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_item_box_id",
+				args: {
+					child_docname: $el.attr("data-child-docname"),
+					box_id: value,
+				},
+			});
+		});
+		$items.on("keydown", ".cart-box-id", function(e) {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				$(this).blur();
+			}
+		});
+	},
+
+	bind_box_label: function() {
+		// Per-item Box Label (optional). Save on blur/Enter; skip if unchanged.
+		// Delegated so it survives cart fragment re-renders (e.g. box-type change).
+		var $items = $(".cart-items");
+		if (!$items.length) return;
+
+		$items.off("focus.wsBoxLabel").on("focus.wsBoxLabel", ".cart-box-label", function() {
+			$(this).data("last-saved", $(this).val());
+		});
+		$items.off("change.wsBoxLabel blur.wsBoxLabel").on("change.wsBoxLabel blur.wsBoxLabel", ".cart-box-label", function() {
+			var $el = $(this);
+			var value = $el.val() || "";
+			if ($el.data("last-saved") === value) return;
+			$el.data("last-saved", value);
+			frappe.call({
+				type: "POST",
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_item_box_label",
+				args: {
+					child_docname: $el.attr("data-child-docname"),
+					box_label: value,
+				},
+			});
+		});
+		$items.off("keydown.wsBoxLabel").on("keydown.wsBoxLabel", ".cart-box-label", function(e) {
+			if (e.key === "Enter") {
+				e.preventDefault();
+				$(this).blur();
+			}
+		});
 	},
 
 	bind_line_code: function() {
 		// Cart-level Line Code (sidebar input). Save on blur/Enter; skip if unchanged.
 		var $input = $("#cart-line-code");
 		if (!$input.length) return;
-		$input.on("focus", function() {
+		$input.off("focus.wsLineCode").on("focus.wsLineCode", function() {
 			$(this).data("last-saved", $(this).val());
 		});
 		// Force uppercase while typing
-		$input.on("input", function() {
+		$input.off("input.wsLineCode").on("input.wsLineCode", function() {
 			$(this).val($(this).val().toUpperCase());
 		});
-		$input.on("change blur", function() {
+		$input.off("change.wsLineCode blur.wsLineCode").on("change.wsLineCode blur.wsLineCode", function() {
 			var $el = $(this);
 			var value = $el.val() || "";
 			if ($el.data("last-saved") === value) return;
@@ -46,7 +117,7 @@ $.extend(shopping_cart, {
 				args: { line_code: value },
 			});
 		});
-		$input.on("keydown", function(e) {
+		$input.off("keydown.wsLineCode").on("keydown.wsLineCode", function(e) {
 			if (e.key === "Enter") {
 				e.preventDefault();
 				$(this).blur();
@@ -91,14 +162,16 @@ $.extend(shopping_cart, {
 	},
 
 	bind_place_order: function() {
-		$(".btn-place-order").on("click", function() {
+		// Namespaced off/on so re-binding (SPA re-init) can't stack handlers and
+		// fire place_order twice — a double order submit.
+		$(".btn-place-order").off("click.wsOrder").on("click.wsOrder", function() {
 			if (!shopping_cart._validate_required_cart_fields()) return;
 			shopping_cart.place_order(this);
 		});
 	},
 
 	bind_request_quotation: function() {
-		$('.btn-request-for-quotation').on('click', function() {
+		$('.btn-request-for-quotation').off('click.wsRfq').on('click.wsRfq', function() {
 			if (!shopping_cart._validate_required_cart_fields()) return;
 			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
 			window.onbeforeunload = null;
@@ -107,7 +180,7 @@ $.extend(shopping_cart, {
 	},
 
 	bind_change_qty: function() {
-		$(".cart-items").on("change", ".cart-qty", function() {
+		$(".cart-items").off("change.wsQty").on("change.wsQty", ".cart-qty", function() {
 			var input = $(this);
 			var item_code = input.attr("data-item-code");
 			var bunches = parseInt(input.val()) || 1;
@@ -129,7 +202,7 @@ $.extend(shopping_cart, {
 			shopping_cart.shopping_cart_update({item_code, qty: bunches, uom, custom_length, custom_box_type, child_docname});
 		});
 
-		$(".cart-items").on('click', '.number-spinner button', function () {
+		$(".cart-items").off('click.wsSpin').on('click.wsSpin', '.number-spinner button', function () {
 			var btn = $(this),
 				input = btn.closest('.number-spinner').find('input'),
 				oldValue = parseInt(input.val().trim()) || 1,
@@ -173,10 +246,15 @@ $.extend(shopping_cart, {
 	},
 
 	bind_remove_cart_item: function() {
-		$(".cart-items").on("click", ".remove-cart-item", (e) => {
+		// Namespaced + .off first so re-running bind_events (e.g. after an SPA
+		// content swap to /cart) can't stack duplicate handlers on .cart-items.
+		$(".cart-items").off("click.wsRemove").on("click.wsRemove", ".remove-cart-item", (e) => {
 			const $btn = $(e.currentTarget);
-			var item_code = $btn.data("item-code");
-			var child_docname = $btn.data("child-docname") || undefined;
+			var item_code = $btn.attr("data-item-code") || $btn.closest("tr").find(".cart-qty").attr("data-item-code");
+			// Prefer the button's data-child-docname; fall back to the row's
+			// data-name (the same value the qty handlers use). Use attr() not
+			// data() to avoid jQuery's cached/coerced values.
+			var child_docname = $btn.attr("data-child-docname") || $btn.closest("tr").attr("data-name") || undefined;
 
 			shopping_cart.shopping_cart_update({
 				item_code: item_code,
@@ -199,12 +277,35 @@ $.extend(shopping_cart, {
 
 		var initial_value = $wrapper.data("initial-value") || "";
 
-		// controls.bundle.js is included on this page (cart.html base_scripts),
-		// so frappe.ui.form.make_control is available synchronously.
-		if (!(frappe.ui && frappe.ui.form && frappe.ui.form.make_control)) {
-			shopping_cart._render_native_date_input($wrapper, initial_value, min_date, min_offset);
+		// controls.bundle.js is included on this page, but on SPA navigation it is
+		// pulled in asynchronously (a fresh <script src>), so make_control may not
+		// exist yet when this runs. Wait briefly for it; only after it fails to
+		// arrive do we fall back to the native <input type="date">. (On a hard load
+		// the bundle is already parsed, so the first check passes immediately.)
+		var has_make_control = function() {
+			return !!(frappe.ui && frappe.ui.form && frappe.ui.form.make_control);
+		};
+		if (!has_make_control()) {
+			var waited = 0;
+			var wait = setInterval(function() {
+				waited += 50;
+				if (has_make_control()) {
+					clearInterval(wait);
+					shopping_cart.bind_delivery_date();   // re-enter now that it's ready
+				} else if (waited >= 2000) {
+					clearInterval(wait);
+					// Bundle never arrived — keep the form usable with a native picker.
+					if (!$wrapper.children().length) {
+						shopping_cart._render_native_date_input($wrapper, initial_value, min_date, min_offset);
+					}
+				}
+			}, 50);
 			return;
 		}
+
+		// Idempotent: a prior native-fallback or control may already be mounted
+		// (re-entry above, or an SPA re-init). Clear before re-mounting.
+		$wrapper.empty();
 
 		var control = frappe.ui.form.make_control({
 			parent: $wrapper.get(0),
@@ -325,6 +426,47 @@ $.extend(shopping_cart, {
 	},
 	// ---- End Delivery Point ----
 
+	// ---- Consignee ----
+	bind_consignee: function() {
+		var $wrapper = $("#consignee-wrapper");
+		if (!$wrapper.length) return;
+
+		var initial_value = $wrapper.data("initial-value") || "";
+
+		frappe.call({
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.search_consignees",
+			args: { txt: "", limit: 500 },
+			callback: function(r) {
+				var rows = (r && r.message) || [];
+				shopping_cart._render_consignee_select($wrapper, rows, initial_value);
+			}
+		});
+	},
+
+	_render_consignee_select: function($wrapper, options, initial_value) {
+		var $select = $('<select class="form-control font-md"></select>');
+		$select.append('<option value="">' + __("Select consignee") + '</option>');
+
+		options.forEach(function(opt) {
+			$select.append('<option value="' + opt.value + '">' + (opt.label || opt.value) + '</option>');
+		});
+
+		if (initial_value) {
+			$select.val(initial_value);
+		}
+
+		$wrapper.empty().append($select);
+
+		$select.on("change", function() {
+			var value = $(this).val() || "";
+			frappe.call({
+				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_consignee",
+				args: { consignee: value },
+			});
+		});
+	},
+	// ---- End Consignee ----
+
 	// ---- Box Type ----
 	bind_box_type: function() {
 		var $wrapper = $("#box-type-wrapper");
@@ -346,26 +488,55 @@ $.extend(shopping_cart, {
 	_render_box_type_select: function($wrapper, options, initial_value) {
 		var $select = $('<select class="form-control font-md"></select>');
 		$select.append('<option value="">' + __("Select box type") + '</option>');
-		
+
+		// box type name -> pack rate, so the inline label can update on change
+		// without another round-trip to the server.
+		var packrate_by_value = {};
 		options.forEach(function(opt) {
+			packrate_by_value[opt.value] = opt.packrate || "";
 			$select.append('<option value="' + opt.value + '">' + (opt.label || opt.value) + '</option>');
 		});
-		
+
 		if (initial_value) {
 			$select.val(initial_value);
 		}
-		
-		$wrapper.empty().append($select);
-		
+
+		// Inline pack rate shown alongside the select once a box type is chosen.
+		var $packrate = $('<span class="box-type-packrate text-muted small ml-2 text-nowrap"></span>');
+		var render_packrate = function(value) {
+			var rate = packrate_by_value[value];
+			if (value && rate) {
+				$packrate.text(__("Pack rate") + ": " + rate).show();
+			} else {
+				$packrate.text("").hide();
+			}
+		};
+
+		var $row = $('<div class="d-flex align-items-center"></div>');
+		$select.addClass("flex-grow-1");
+		$row.append($select).append($packrate);
+		$wrapper.empty().append($row);
+		render_packrate($select.val() || "");
+
 		$select.on("change", function() {
 			var value = $(this).val() || "";
+			render_packrate(value);
+			$select.prop("disabled", true);
 			frappe.call({
 				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_box_type",
 				args: { box_type: value },
 				callback: function(r) {
-					if (r && r.message && r.message.reload) {
-						window.location.reload();
+					var m = r && r.message;
+					if (m && m.items !== undefined) {
+						// Swap the re-rendered cart fragments in place — no reload.
+						$(".cart-items").html(m.items);
+						$(".cart-tax-items").html(m.total);
+						$(".payment-summary").html(m.taxes_and_totals);
+						shopping_cart.set_cart_count();
 					}
+				},
+				always: function() {
+					$select.prop("disabled", false);
 				},
 			});
 		});
@@ -499,7 +670,21 @@ $.extend(shopping_cart, {
 					return;
 				}
 				$(btn).hide();
-				window.location.href = '/orders/' + encodeURIComponent(r.message);
+				// Staff place orders on behalf of customers, so the customer-facing
+				// /orders/<SO> portal page is permission-gated against them ("Not
+				// Permitted"). Confirm the order and return to the storefront so
+				// they can immediately place another.
+				var so = r.message;
+				frappe.show_alert(
+					{
+						message: __("Order {0} created.", [so]),
+						indicator: "green",
+					},
+					8
+				);
+				setTimeout(function () {
+					window.location.href = "/webshop";
+				}, 1200);
 			}
 		});
 	},
@@ -522,13 +707,27 @@ $.extend(shopping_cart, {
 					return;
 				}
 				$(btn).hide();
-				window.location.href = "/orders/" + encodeURIComponent(r.message);
+				// Staff save orders on behalf of customers; the customer-facing
+				// /orders/<SO> portal page is permission-gated against them
+				// ("Not Permitted" / 403). Confirm and return to the storefront
+				// so they can place another order immediately. (Mirrors place_order.)
+				var so = r.message;
+				frappe.show_alert(
+					{
+						message: __("Order {0} saved.", [so]),
+						indicator: "green",
+					},
+					8
+				);
+				setTimeout(function () {
+					window.location.href = "/webshop";
+				}, 1200);
 			}
 		});
 	},
 
 	bind_coupon_code: function() {
-		$(".bt-coupon").on("click", function() {
+		$(".bt-coupon").off("click.wsCoupon").on("click.wsCoupon", function() {
 			shopping_cart.apply_coupon_code(this);
 		});
 	},
@@ -551,7 +750,7 @@ $.extend(shopping_cart, {
 	},
 
 	bind_remove_coupon_code: function() {
-		$(".bt-remove-coupon-code").on("click", function() {
+		$(".bt-remove-coupon-code").off("click.wsRemoveCoupon").on("click.wsRemoveCoupon", function() {
 			shopping_cart.remove_coupon_code(this);
 		});
 	},

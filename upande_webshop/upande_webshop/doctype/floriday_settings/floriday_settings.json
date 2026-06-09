@@ -24,6 +24,10 @@
   "stock_cron_format",
   "column_break_stck",
   "stock_enabled",
+  "stock_source_section",
+  "use_shelf_stock",
+  "column_break_rqhs",
+  "use_stem_length_age_bin",
   "stock_warehouse_section",
   "stock_warehouse",
   "column_break_bvuf",
@@ -587,6 +591,26 @@
    "read_only": 1
   },
   {
+   "fieldname": "stock_source_section",
+   "fieldtype": "Section Break",
+   "label": "Stock Source"
+  },
+  {
+   "default": "0",
+   "description": "Read published quantities from shelf stock",
+   "fieldname": "use_shelf_stock",
+   "fieldtype": "Check",
+   "label": "Use Shelf Stock?"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.use_shelf_stock === 0",
+   "description": "Read published quantities from the Stem Length Bin",
+   "fieldname": "use_stem_length_age_bin",
+   "fieldtype": "Check",
+   "label": "Use Stem Length Age Bin?"
+  },
+  {
    "fieldname": "stock_warehouse_section",
    "fieldtype": "Section Break"
   },
@@ -676,13 +700,17 @@
   {
    "fieldname": "section_break_pkus",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_rqhs",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-27 19:21:24.647210",
+ "modified": "2026-06-10 01:56:59.320755",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Floriday Settings",

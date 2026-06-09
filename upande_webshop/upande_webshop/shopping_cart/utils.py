@@ -146,6 +146,19 @@ def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
 
+	_set_webshop_breadcrumbs(context)
+
+	# Webshop Settings → Full Width: drop the .container wrapper on every
+	# webshop-rendered page (not just /webshop). The desk's navbar toggle does
+	# this globally via body.full-width; this is the website-side equivalent.
+	meta = frappe.get_meta("Webshop Settings")
+	full_width_setting = 0
+	if meta.has_field("full_width") and frappe.db.get_single_value(
+		"Webshop Settings", "full_width"
+	):
+		context["full_width"] = 1
+		full_width_setting = 1
+
 	from frappe.core.doctype.navbar_settings.navbar_settings import get_app_logo
 	import json
 	app_logo = get_app_logo() or ""
@@ -161,20 +174,45 @@ def update_website_context(context):
 
 	user_image = ""
 	user_fullname = frappe.session.user_fullname or frappe.session.user or ""
+	user_theme = "light"
 	if frappe.session.user and frappe.session.user != "Guest":
 		# Read the live User image so a freshly-uploaded photo shows immediately,
 		# rather than the (possibly stale) value cached on the session.
 		user_image = frappe.db.get_value("User", frappe.session.user, "user_image") or ""
+		stored_theme = (
+			frappe.db.get_value("User", frappe.session.user, "desk_theme") or ""
+		).lower()
+		# Only light/dark are offered in the webshop; treat anything else
+		# (e.g. a legacy "Automatic" desk_theme) as light.
+		if stored_theme == "dark":
+			user_theme = "dark"
 	context["webshop_user_image"] = user_image
 	context["webshop_user_fullname"] = user_fullname
 
+	# Apply the user's theme synchronously in <head> so dark mode doesn't flash
+	# light first. Mirrors what frappe.ui.set_theme does on /app, but executed
+	# at parse time instead of after DOMContentLoaded.
+	theme_init = (
+		'(function(){'
+		'try{'
+		f'var defaultMode = {json.dumps(user_theme)};'
+		'var stored = null;'
+		'try { stored = localStorage.getItem("desk_theme_mode"); } catch (e) {}'
+		'var mode = (stored === "dark" || stored === "light") ? stored : defaultMode;'
+		'document.documentElement.setAttribute("data-theme-mode", mode);'
+		'document.documentElement.setAttribute("data-theme", mode);'
+		'} catch (e) {}'
+		'})();'
+	)
 	boot_script = (
 		f'<script>'
+		f'{theme_init}'
 		f'window.webshop_app_logo = {json.dumps(app_logo)};'
 		f'window.webshop_show_bouquets_page = {json.dumps(show_bouquets_page)};'
 		f'window.webshop_user_is_customer = {json.dumps(customer_is_linked)};'
 		f'window.webshop_user_image = {json.dumps(user_image)};'
 		f'window.webshop_user_fullname = {json.dumps(user_fullname)};'
+		f'window.webshop_full_width_default = {json.dumps(bool(full_width_setting))};'
 		f'</script>'
 	)
 	context["head_include"] = (context.get("head_include") or "") + boot_script
@@ -193,6 +231,64 @@ def update_website_context(context):
 
 	context["show_sidebar"] = False
 	context["sidebar_items"] = []
+
+
+# The account-menu pages, keyed by their (leading-slash-stripped) route. Each
+# value is the breadcrumb label shown for that page. Mirrors the dropdown in
+# shopping_cart.js so the trail matches the nav. /webshop is the webshop "home"
+# and is the "Home" root crumb on every other page (and gets no breadcrumb
+# itself).
+_WEBSHOP_BREADCRUMB_PAGES = {
+	"orders": "Orders",
+	"invoices": "Invoices",
+	"cart": "Cart",
+	"bouquet": "Bouquet",
+	"wishlist": "Wishlist",
+	"shipments": "Shipments",
+	"issues": "Issues",
+	"contact": "Contact",
+	"webshop-setting": "Setting",
+}
+
+
+def _set_webshop_breadcrumbs(context):
+	"""Render `Products / <Page>` breadcrumbs on the account-menu pages.
+
+	The standard breadcrumbs.html only renders when `parents` is set on the
+	context. The webshop landing (/webshop) and the doctype list pages
+	(/orders, /invoices, …) don't set it, so no trail shows. Detail pages
+	(e.g. /orders/SO-0001) already populate their own `parents` via
+	website_route_rules — we only touch exact top-level routes here and never
+	clobber an existing trail.
+	"""
+	request = getattr(frappe.local, "request", None)
+	if not request:
+		return
+
+	route = (request.path or "").strip("/")
+	label = _WEBSHOP_BREADCRUMB_PAGES.get(route)
+
+	# Generic Frappe doctype portals render their LIST at `<route>/list` (e.g.
+	# /issues → /issues/list, /orders → /orders/list), not at the bare route. The
+	# exact-route map misses those, so the list view showed no breadcrumb. If the
+	# path is `<known>/list`, resolve it to the same label. Detail pages
+	# (`<route>/<name>`) and the "new" form (`<route>/new`) set their own parents
+	# via website_route_rules, so we only special-case the `/list` suffix here and
+	# never touch other sub-routes.
+	if not label and route.endswith("/list"):
+		label = _WEBSHOP_BREADCRUMB_PAGES.get(route[: -len("/list")])
+
+	if not label:
+		return
+
+	# Frappe's standard portal list contexts (Sales Order → /orders, Sales
+	# Invoice → /invoices, Shipment → /shipments, Issue → /issues) ship with
+	# `no_breadcrumbs: True`, and breadcrumbs.html bails on that flag before it
+	# ever looks at `parents`. This hook runs in post_process_context — after
+	# the doctype's get_list_context — so clearing it here wins.
+	context["no_breadcrumbs"] = False
+	context["parents"] = [{"label": _("Home"), "route": "/webshop"}]
+	context["title"] = _(label)
 
 
 def is_customer():
