@@ -10,6 +10,10 @@
   "offer_cron_format",
   "column_break_offer",
   "offer_enabled",
+  "stock_source_section",
+  "use_shelf_stock",
+  "column_break_dxkb",
+  "use_stem_length_age_bin",
   "offer_stock_section",
   "refresh_stock",
   "post_offers",
@@ -118,6 +122,26 @@
    "fieldname": "refresh_stock",
    "fieldtype": "Button",
    "label": "Refresh Stock"
+  },
+  {
+   "fieldname": "stock_source_section",
+   "fieldtype": "Section Break",
+   "label": "Stock Source"
+  },
+  {
+   "default": "0",
+   "description": "Read offer quantities from shelf stock ",
+   "fieldname": "use_shelf_stock",
+   "fieldtype": "Check",
+   "label": "Use Shelf Stock?"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.use_shelf_stock === 0",
+   "description": "Read offer quantities from the Stem Length Bin ",
+   "fieldname": "use_stem_length_age_bin",
+   "fieldtype": "Check",
+   "label": "Use Stem Length Age Bin?"
   },
   {
    "fieldname": "offer_stock_section",
@@ -446,13 +470,17 @@
    "fieldtype": "Datetime",
    "label": "Next Run",
    "read_only": 1
+  },
+  {
+   "fieldname": "column_break_dxkb",
+   "fieldtype": "Column Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-04 21:40:14.957893",
+ "modified": "2026-06-10 01:57:42.789607",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Biflorica Setting",

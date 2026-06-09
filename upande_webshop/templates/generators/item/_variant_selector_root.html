@@ -11,7 +11,7 @@ Used by the product detail page and the wishlist so both share one markup. #}
 
 	{% if cart_settings.enable_variants | int %}
 	<div class="variant-attributes-area">
-		<div class="variant-attributes-loading" style="color:var(--gray-500); font-size:13px;">
+		<div class="variant-attributes-loading" style="color:var(--text-muted); font-size:13px;">
 			{{ _('Loading variant options...') }}
 		</div>
 	</div>
@@ -22,11 +22,11 @@ Used by the product detail page and the wishlist so both share one markup. #}
 
 	{% if cart_settings.show_bunch | int %}
 	<div class="mt-4 variant-rows-area" style="display:none;">
-		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--gray-700);">
+		<label class="d-block mb-2" style="font-weight:600; font-size:13px; color:var(--text-color);">
 			{{ _('Selected variants') }}
 		</label>
 		<div class="variant-rows" style="display:flex; flex-direction:column; gap:10px;"></div>
-		<div class="grand-totals mt-3" style="display:none; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--gray-700);">
+		<div class="grand-totals mt-3" style="display:none; gap:16px; flex-wrap:wrap; font-size:13px; color:var(--text-color);">
 			<div><strong class="grand-bunches">0</strong> {{ _('bunches') }}</div>
 			<div><strong class="grand-stems">0</strong> {{ _('stems') }}</div>
 		</div>

@@ -22,22 +22,17 @@
   "login_required_to_view_products",
   "show_stock_availability",
   "show_quantity_in_website",
-  "full_width",
   "column_break_13",
   "show_apply_coupon_code_in_website",
   "show_contact_us_button",
   "show_attachments",
-  "show_product_overview",
-  "po_warehouse_display_words",
-  "po_default_view",
   "section_break_18",
   "company",
   "default_customer_group",
-  "quotation_series",
   "column_break_21",
-  "show_cart_box_type",
   "enabled",
   "show_cart_line_code",
+  "show_consignee",
   "checkout_settings_section",
   "enable_checkout",
   "use_sales_order_as_cart",
@@ -58,7 +53,10 @@
   "redirect_on_action",
   "stock_balances_tab",
   "sync_prices",
+  "reserve_stock",
   "column_break_evtt",
+  "use_shelf_stock",
+  "use_stem_length_age_bin",
   "section_break_spad",
   "warehouses",
   "bouquets_tab",
@@ -118,7 +116,7 @@
    "fieldname": "enabled",
    "fieldtype": "Check",
    "in_list_view": 1,
-   "label": "Enable Shopping Cart"
+   "label": "Enable Shopping Cart?"
   },
   {
    "fieldname": "display_settings_section",
@@ -130,12 +128,6 @@
    "fieldname": "show_attachments",
    "fieldtype": "Check",
    "label": "Show Public Attachments"
-  },
-  {
-   "default": "0",
-   "fieldname": "full_width",
-   "fieldtype": "Check",
-   "label": "Full Width"
   },
   {
    "default": "0",
@@ -157,6 +149,7 @@
   },
   {
    "default": "0",
+   "description": "Show the Box Type selector on the cart.",
    "fieldname": "show_box_type",
    "fieldtype": "Check",
    "label": "Show Box Type"
@@ -213,23 +206,10 @@
    "options": "Customer Group"
   },
   {
-   "depends_on": "enabled",
-   "fieldname": "quotation_series",
-   "fieldtype": "Select",
-   "hidden": 1,
-   "label": "Quotation Series"
-  },
-  {
-   "default": "1",
-   "fieldname": "show_cart_box_type",
-   "fieldtype": "Check",
-   "label": "Show Box Type on Cart"
-  },
-  {
    "default": "1",
    "fieldname": "show_cart_line_code",
    "fieldtype": "Check",
-   "label": "Show Line Code on Cart"
+   "label": "Show Line Code?"
   },
   {
    "fieldname": "open_setup_check",
@@ -375,9 +355,11 @@
    "label": "Stock"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock === 0",
    "fieldname": "warehouses",
    "fieldtype": "Table",
    "label": "Warehouses",
+   "mandatory_depends_on": "eval:doc.use_shelf_stock === 0",
    "options": "Webshop Warehouse"
   },
   {
@@ -426,28 +408,6 @@
    "options": "Bouquet Recipe Item"
   },
   {
-   "default": "0",
-   "fieldname": "show_product_overview",
-   "fieldtype": "Check",
-   "label": "Show Product Overview"
-  },
-  {
-   "default": "0",
-   "depends_on": "show_product_overview",
-   "fieldname": "po_warehouse_display_words",
-   "fieldtype": "Int",
-   "label": "Product Overview"
-  },
-  {
-   "default": "Grid",
-   "depends_on": "show_product_overview",
-   "fieldname": "po_default_view",
-   "fieldtype": "Select",
-   "label": "Product Overview View",
-   "options": "Grid\nList",
-   "description": "Layout used to render the Product Overview page."
-  },
-  {
    "fieldname": "display_setting_tab",
    "fieldtype": "Tab Break",
    "label": "Display"
@@ -480,12 +440,38 @@
    "fieldname": "setup_check",
    "fieldtype": "HTML",
    "label": "Setup Check"
+  },
+  {
+   "default": "0",
+   "fieldname": "reserve_stock",
+   "fieldtype": "Check",
+   "label": "Reserve Stock?"
+  },
+  {
+   "default": "0",
+   "fieldname": "use_shelf_stock",
+   "fieldtype": "Check",
+   "label": "Use Shelf Stock?"
+  },
+  {
+   "default": "0",
+   "depends_on": "eval:doc.use_shelf_stock === 0",
+   "fieldname": "use_stem_length_age_bin",
+   "fieldtype": "Check",
+   "label": "Use Stem Length Age Bin?"
+  },
+  {
+   "default": "0",
+   "description": "Show the Consignee selector on the cart (requires a custom_consignee field on the cart document).",
+   "fieldname": "show_consignee",
+   "fieldtype": "Check",
+   "label": "Show Consignee?"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-05-28 22:42:26.267672",
+ "modified": "2026-06-09 23:38:32.050470",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",

@@ -1,7 +1,9 @@
 import frappe
 
 from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+	drawdown_age_bin_fifo,
 	parse_harvest_date,
+	restock_age_bin_fifo,
 	update_age_bin_qty,
 )
 from upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin import (
@@ -77,17 +79,25 @@ def on_stock_entry_submit(doc, method=None):
 
 		# Mirror the movement into the per-harvest-date age bin so the Product
 		# Overview age filter reads an indexed Date column, not a Stock Entry
-		# string-parse. Only entries that carry a harvest batch (Grading inflow,
-		# and transfers that retain it) contribute age data.
-		if harvest_date:
-			if item.t_warehouse:
-				update_age_bin_qty(
-					item.item_code, item.t_warehouse, stem_length, harvest_date, qty
-				)
-			if item.s_warehouse:
+		# string-parse.
+		#
+		# Inflow that carries a harvest batch (Grading, and transfers that retain
+		# it) lands in that exact harvest bucket. Outflow is split:
+		#   - with a harvest batch: decrement that exact bucket.
+		#   - WITHOUT a harvest batch (Material Transfer to Graded Sold, Delivery,
+		#     Issue, ...): draw down oldest-harvest-first. This is the leak fix —
+		#     these outflows used to be skipped, so the age bin only ever grew.
+		if item.t_warehouse and harvest_date:
+			update_age_bin_qty(
+				item.item_code, item.t_warehouse, stem_length, harvest_date, qty
+			)
+		if item.s_warehouse:
+			if harvest_date:
 				update_age_bin_qty(
 					item.item_code, item.s_warehouse, stem_length, harvest_date, -qty
 				)
+			else:
+				drawdown_age_bin_fifo(item.item_code, item.s_warehouse, stem_length, qty)
 
 
 def on_stock_entry_cancel(doc, method=None):
@@ -111,15 +121,18 @@ def on_stock_entry_cancel(doc, method=None):
 		if item.s_warehouse:
 			update_stem_length_bin_qty(item.item_code, item.s_warehouse, stem_length, qty)
 
-		if harvest_date:
-			if item.t_warehouse:
-				update_age_bin_qty(
-					item.item_code, item.t_warehouse, stem_length, harvest_date, -qty
-				)
-			if item.s_warehouse:
+		# Reverse of on_stock_entry_submit (see there for the split rationale).
+		if item.t_warehouse and harvest_date:
+			update_age_bin_qty(
+				item.item_code, item.t_warehouse, stem_length, harvest_date, -qty
+			)
+		if item.s_warehouse:
+			if harvest_date:
 				update_age_bin_qty(
 					item.item_code, item.s_warehouse, stem_length, harvest_date, qty
 				)
+			else:
+				restock_age_bin_fifo(item.item_code, item.s_warehouse, stem_length, qty)
 
 
 def on_sales_order_submit(doc, method=None):

@@ -40,6 +40,84 @@ def parse_harvest_date(batch_no):
 		return None
 
 
+def use_stem_length_age_bin():
+	"""True when the storefront should layer the Stem Length Age Bin (harvest-age
+	FIFO buckets) under the Stem Length Bin for plain-item availability.
+
+	Plain-item stock precedence:
+	  - Flag OFF: read core Bin (item + warehouse), except the per-length picker
+	    which has no Bin equivalent and stays on Stem Length Bin.
+	  - Flag ON : read Stem Length Bin per length, falling back to the Age Bin for
+	    any length with no Stem Length Bin row.
+
+	Guarded by the existence of the Stem Length Age Bin doctype so a site without
+	the tracker never trips on a missing table even if the flag is somehow set.
+	The Age Bin is always WRITTEN (every stock entry buckets by harvest date);
+	this flag only switches the READ path the storefront uses.
+	"""
+	return age_bin_enabled("Webshop Settings")
+
+
+def age_bin_enabled(settings_doctype):
+	"""True when `settings_doctype` (a Single) has use_stem_length_age_bin on and the
+	Stem Length Age Bin doctype exists.
+
+	Lets non-webshop consumers (Biflorica Setting, Floriday Settings) opt into the
+	same Age-Bin read path via their own flag, reusing get_age_bin_qty* below.
+	"""
+	if not frappe.get_cached_value(
+		settings_doctype, settings_doctype, "use_stem_length_age_bin"
+	):
+		return False
+	return bool(frappe.db.exists("DocType", "Stem Length Age Bin"))
+
+
+def _qty_by_length(doctype, item_code, warehouses):
+	"""{stem_length_name: actual_qty} summed for one item from a length-keyed bin
+	doctype (Stem Length Bin or Stem Length Age Bin), scoped to warehouses."""
+	if not warehouses:
+		return {}
+	rows = frappe.db.get_all(
+		doctype,
+		fields=["stem_length", "actual_qty"],
+		filters={"item_code": item_code, "warehouse": ("in", warehouses)},
+	)
+	qty_by_sl = {}
+	for r in rows:
+		if not r.stem_length:
+			continue
+		qty_by_sl[r.stem_length] = qty_by_sl.get(r.stem_length, 0) + flt(r.actual_qty)
+	return qty_by_sl
+
+
+def get_age_bin_qty_by_length(item_code, warehouses):
+	"""Per-length availability with the Age Bin as fallback.
+
+	Reads Stem Length Bin first; for any length missing there, fills the qty from
+	the Stem Length Age Bin. Used when use_stem_length_age_bin() is on.
+	"""
+	sl = _qty_by_length("Stem Length Bin", item_code, warehouses)
+	age = _qty_by_length("Stem Length Age Bin", item_code, warehouses)
+	merged = dict(age)
+	merged.update(sl)  # Stem Length Bin wins; Age Bin only fills the gaps
+	return merged
+
+
+def get_age_bin_qty_for_items(item_codes, warehouses):
+	"""{item_code: total_qty} with the Age Bin as fallback, summed across lengths.
+
+	Per item, sums Stem Length Bin and tops up only the lengths the Stem Length
+	Bin doesn't carry from the Age Bin. Used by the listing grid / item totals
+	when use_stem_length_age_bin() is on."""
+	if not item_codes or not warehouses:
+		return {}
+	item_codes = list(item_codes)
+	totals = {}
+	for code in item_codes:
+		totals[code] = sum(get_age_bin_qty_by_length(code, warehouses).values())
+	return totals
+
+
 def update_age_bin_qty(item_code, warehouse, stem_length, harvest_date, qty_delta):
 	"""Apply qty_delta to the (item, warehouse, length, harvest_date) age row.
 
@@ -81,12 +159,87 @@ def update_age_bin_qty(item_code, warehouse, stem_length, harvest_date, qty_delt
 	# Floor at zero. When a stock-out exceeds what this bucket holds (e.g. the
 	# outbound movement didn't carry the original harvest batch, so the draw-down
 	# lands on the wrong bucket), the bucket bottoms out at 0 rather than going
-	# negative. Over ~a month, as old batches sell through and fresh harvest
-	# rebuilds the buckets, the age bin's totals converge back to the main bin.
+	# negative.
 	current = flt(frappe.db.get_value("Stem Length Age Bin", name, "actual_qty"))
 	new_qty = current + flt(qty_delta)
 	if new_qty < 0:
 		new_qty = 0
 	frappe.db.set_value(
 		"Stem Length Age Bin", name, "actual_qty", new_qty, update_modified=False
+	)
+
+
+def drawdown_age_bin_fifo(item_code, warehouse, stem_length, qty):
+	"""Decrement age-bin buckets for (item, warehouse, length) oldest-harvest-first.
+
+	Used for outbound movements that carry NO harvest batch (Material Transfer to
+	Graded Sold, Delivery, Issue, etc.). Without this, those outflows used to be
+	skipped entirely — the age bin only ever grew, drifting far above the real
+	Bin balance. Drawing down oldest-first mirrors how the freshest stock is held
+	back and the oldest sells first, and keeps the visible Day 0-3 window honest.
+
+	`qty` is a positive number of stems to remove. Buckets are floored at 0; any
+	shortfall beyond what the buckets hold is dropped (the authoritative balance
+	lives in core Bin — the age bin must never block a real movement).
+	"""
+	qty = flt(qty)
+	if not (item_code and warehouse and stem_length) or qty <= 0:
+		return
+
+	rows = frappe.get_all(
+		"Stem Length Age Bin",
+		filters={
+			"item_code": item_code,
+			"warehouse": warehouse,
+			"stem_length": stem_length,
+			"actual_qty": [">", 0],
+		},
+		fields=["name", "actual_qty"],
+		order_by="harvest_date asc",  # oldest harvest first
+	)
+
+	remaining = qty
+	for r in rows:
+		if remaining <= 0:
+			break
+		take = min(flt(r.actual_qty), remaining)
+		new_qty = flt(r.actual_qty) - take
+		frappe.db.set_value(
+			"Stem Length Age Bin", r.name, "actual_qty", new_qty, update_modified=False
+		)
+		remaining -= take
+
+
+def restock_age_bin_fifo(item_code, warehouse, stem_length, qty):
+	"""Reverse of drawdown — used to undo a no-harvest-batch outbound on cancel.
+
+	Puts qty back into the newest existing bucket (best effort). If no bucket
+	exists for the key, nothing is created: a cancel of a movement we couldn't
+	attribute to a harvest date has nowhere correct to land, and inventing a
+	bucket would re-inflate the tracker. The next reconciliation squares it.
+	"""
+	qty = flt(qty)
+	if not (item_code and warehouse and stem_length) or qty <= 0:
+		return
+
+	newest = frappe.get_all(
+		"Stem Length Age Bin",
+		filters={
+			"item_code": item_code,
+			"warehouse": warehouse,
+			"stem_length": stem_length,
+		},
+		fields=["name", "actual_qty"],
+		order_by="harvest_date desc",
+		limit=1,
+	)
+	if not newest:
+		return
+	r = newest[0]
+	frappe.db.set_value(
+		"Stem Length Age Bin",
+		r.name,
+		"actual_qty",
+		flt(r.actual_qty) + qty,
+		update_modified=False,
 	)

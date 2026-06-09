@@ -17,7 +17,10 @@ def get_context(context):
 	if show_attachments():
 		context.attachments = get_attachments(frappe.form_dict.doctype, frappe.form_dict.name)
 
-	context.parents = frappe.form_dict.parents
+	# Breadcrumb: always start at the webshop "Home" (consistent with cart,
+	# wishlist, listing). Honour any explicitly passed parents after it.
+	passed_parents = frappe.form_dict.parents or []
+	context.parents = [{"name": _("Home"), "route": "/webshop"}] + list(passed_parents)
 	context.title = frappe.form_dict.name
 	context.payment_ref = frappe.db.get_value(
 		"Payment Request", {"reference_name": frappe.form_dict.name}, "name"

@@ -8,9 +8,18 @@ webshop.ProductView =  class {
 		Object.assign(this, options);
 		this.preference = this.view_type;
 		this.make();
+
+		// Browser back/forward (after a paging pushState) should re-render the
+		// listing in place too — never a full page reload. get_query_filters()
+		// re-reads `start` from the now-restored URL.
+		if (!webshop._product_popstate_bound) {
+			webshop._product_popstate_bound = true;
+			let me = this;
+			window.addEventListener("popstate", () => me.make(true, true));
+		}
 	}
 
-	make(from_filters=false, preserve_toolbar=false) {
+	make(from_filters=false, preserve_toolbar=false, is_paging=false) {
 		if (preserve_toolbar) {
 			// Remove only product/list/grid areas, keep the toolbar so the search input keeps focus
 			this.products_section.find("#products-grid-area, #products-list-area, .cart-empty, .alert-error").remove();
@@ -19,6 +28,10 @@ webshop.ProductView =  class {
 			this.products_section.empty();
 			this.prepare_toolbar();
 		}
+		// `is_paging` re-renders the next/prev page: it must keep the filters bound
+		// (don't re-bind) but, unlike a filter change, must NOT reset `start` to 0
+		// on the server — otherwise paging always re-fetches page 1.
+		this.is_paging = is_paging;
 		this.get_item_filter_data(from_filters);
 	}
 
@@ -125,10 +138,10 @@ webshop.ProductView =  class {
 					}
 
 					// Bind filter actions
-					if (!from_filters) {
-						// If `get_product_filter_data` was triggered after checking a filter,
-						// don't touch filters unnecessarily, only data must change
-						// filter persistence is handle on filter change event
+					if (!from_filters && !me.is_paging) {
+						// If `get_product_filter_data` was triggered after checking a filter
+						// or via paging, don't touch filters unnecessarily, only data must
+						// change — filter persistence is handled on filter change event.
 						me.bind_filters();
 						me.restore_filters_state();
 					}
@@ -202,35 +215,31 @@ webshop.ProductView =  class {
 		$(".product-paging-area").remove();
 
 		if (this.products) {
-			let paging_html = `
-				<div class="row product-paging-area mt-5">
-					<div class="col-3">
-					</div>
-					<div class="col-9 text-right">
-			`;
 			let query_params = frappe.utils.get_query_params();
 			let start = query_params.start ? cint(JSON.parse(query_params.start)) : 0;
 			let page_length = settings.products_per_page || 0;
 
 			let prev_disable = start > 0 ? "" : "disabled";
-			let next_disable = (this.product_count > page_length) ? "" : "disabled";
+			// Disable Next on the last page: enabled only while more items remain
+			// beyond the current page window.
+			let has_next = page_length > 0 && (start + page_length) < this.product_count;
+			let next_disable = has_next ? "" : "disabled";
 
-			paging_html += `
-				<button class="btn btn-default btn-prev" data-start="${ start - page_length }"
-					style="float: left" ${prev_disable}>
-					${ __("Prev") }
-				</button>`;
-
-			paging_html += `
-				<button class="btn btn-default btn-next" data-start="${ start + page_length }"
-					${next_disable}>
-					${ __("Next") }
-				</button>
+			// Prev pinned to the far LEFT, Next to the far RIGHT, via a full-width
+			// flex with space-between (the old col-3 + col-9/text-right layout left
+			// Prev floating near the centre).
+			let paging_html = `
+				<div class="product-paging-area mt-5 d-flex justify-content-between align-items-center">
+					<button class="btn btn-default btn-prev" data-start="${ start - page_length }" ${prev_disable}>
+						${ __("Prev") }
+					</button>
+					<button class="btn btn-default btn-next" data-start="${ start + page_length }" ${next_disable}>
+						${ __("Next") }
+					</button>
+				</div>
 			`;
 
-			paging_html += `</div></div>`;
-
-			$(".page_content").append(paging_html);
+			$("#product-listing").append(paging_html);
 			this.bind_paging_action();
 		}
 	}
@@ -315,15 +324,32 @@ webshop.ProductView =  class {
 		let me = this;
 		$('.btn-prev, .btn-next').click((e) => {
 			const $btn = $(e.target);
-			me.from_filters = false;
 
 			$btn.prop('disabled', true);
 			const start = $btn.data('start');
 
+			// Update the URL's `start` WITHOUT reloading the page, so the change
+			// is bookmarkable / back-button-friendly. get_query_filters() reads
+			// `start` from the URL, so the in-place re-render below picks it up.
 			let query_params = frappe.utils.get_query_params();
 			query_params.start = start;
 			let path = window.location.pathname + '?' + frappe.utils.get_url_from_dict(query_params);
-			window.location.href = path;
+			history.pushState({ start: start }, '', path);
+
+			// Re-render ONLY the product listing (grid/list + paging), keeping the
+			// toolbar, search box and filters intact. Paging passes is_paging=true
+			// (NOT from_filters): from_filters makes the server reset `start` to 0,
+			// which would make every Next/Prev re-fetch page 1.
+			me.make(false, true, true);
+
+			// Scroll the listing's own scroll container back to the top so the
+			// new page starts at the first card (the column scrolls, not the page).
+			let $scroll = $('#products-grid-area:visible, #products-list-area:visible').first();
+			if ($scroll.length) {
+				$scroll.scrollTop(0);
+			} else {
+				$('#product-listing').scrollTop(0);
+			}
 		});
 	}
 
