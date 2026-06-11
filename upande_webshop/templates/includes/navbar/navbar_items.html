@@ -2,4 +2,9 @@
 
 {% block navbar_right_extension %}
 	{# Cart icon moved to webshop sub-navbar #}
+	{% if frappe.session.user != "Guest" %}
+	<li class="nav-item">
+		<a class="nav-link" href="/customer-feedback">{{ _("Feedback & Claims") }}</a>
+	</li>
+	{% endif %}
 {% endblock %}
