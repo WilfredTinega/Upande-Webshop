@@ -99,20 +99,19 @@ def get_item_for_list_in_html(context):
 def get_parent_item_groups(item_group_name, from_item=False):
 	settings = frappe.get_cached_doc("Webshop Settings")
 
-	base_nav_page = {"name": _("All Products"), "route": "/webshop"}
+	# "Home" is the webshop landing (/webshop), consistent with every other
+	# webshop breadcrumb (cart, wishlist, bouquet, listing). It used to route to
+	# "/" (the site root) plus a separate "All Products" crumb, which left the
+	# webshop and read inconsistently.
+	base_parents = [
+		{"name": _("Home"), "route": "/webshop"},
+	]
 
+	# On the Bouquets flow, keep a second crumb back to the bouquet listing.
 	if from_item and frappe.request.environ.get("HTTP_REFERER"):
-		# base page after 'Home' will vary on Item page
 		last_page = frappe.request.environ["HTTP_REFERER"].split("/")[-1].split("?")[0]
 		if last_page == "bouquet" and settings.get("show_bouquets_page"):
-			base_nav_page = {"name": _("Bouquets"), "route": "/bouquet"}
-		elif last_page in ("all-products", "webshop"):
-			base_nav_page = {"name": _("All Products"), "route": "/webshop"}
-
-	base_parents = [
-		{"name": _("Home"), "route": "/"},
-		base_nav_page,
-	]
+			base_parents.append({"name": _("Bouquets"), "route": "/bouquet"})
 
 	if not item_group_name:
 		return base_parents

@@ -270,45 +270,91 @@ def round_to_nearest_tens(number):
     """
     return int(round(number / 10) * 10)
 
-def get_warehouse_stock_items(warehouse):
+def _biflorica_item_qty_source(warehouse):
+    """Return {item_code: qty} for items with positive stock, honoring the
+    Biflorica Setting stock-source flags.
+
+    Precedence mirrors the webshop's plain-item chain:
+      - use_shelf_stock      -> kaitet Shelf (not warehouse-scoped)
+      - use_stem_length_age_bin -> Stem Length Bin (+ Age Bin gap-fill), scoped
+                                   to the configured warehouse
+      - neither              -> core Bin in the configured warehouse
+    Each integration reads ITS OWN flag from Biflorica Setting.
     """
-    Get all items with stock in the specified warehouse
-    """
+    from upande_webshop.upande_webshop.utils.shelf_stock import (
+        get_shelf_qty_for_items,
+        shelf_stock_enabled,
+    )
+
+    if shelf_stock_enabled("Biflorica Setting"):
+        # Shelf is global; offer every plain item that has stems on a shelf.
+        variety_codes = frappe.get_all(
+            "Shelf Item", filters={"parenttype": "Shelf"}, pluck="variety", distinct=True
+        )
+        variety_codes = [c for c in variety_codes if c]
+        qty_by_code = get_shelf_qty_for_items(variety_codes)
+        return {code: qty for code, qty in qty_by_code.items() if qty > 0}
+
+    from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
+        age_bin_enabled,
+        get_age_bin_qty_for_items,
+    )
+
+    if age_bin_enabled("Biflorica Setting"):
+        slb_codes = frappe.get_all(
+            "Stem Length Bin",
+            filters={"warehouse": warehouse, "actual_qty": [">", 0]},
+            pluck="item_code",
+            distinct=True,
+        )
+        if not slb_codes:
+            return {}
+        qty_by_code = get_age_bin_qty_for_items(slb_codes, [warehouse])
+        return {code: qty for code, qty in qty_by_code.items() if qty > 0}
+
+    # Default: core Bin in the configured warehouse.
     bins = frappe.get_all(
         "Bin",
         fields=["item_code", "actual_qty"],
-        filters={"warehouse": warehouse, "actual_qty": [">", 0]}
+        filters={"warehouse": warehouse, "actual_qty": [">", 0]},
     )
-    
-    if not bins:
+    return {b["item_code"]: b["actual_qty"] for b in bins}
+
+
+def get_warehouse_stock_items(warehouse):
+    """
+    Get all items with stock in the specified warehouse.
+
+    Quantity source follows the Biflorica Setting stock-source flags
+    (use_shelf_stock / use_stem_length_age_bin); see _biflorica_item_qty_source.
+    """
+    qty_by_code = _biflorica_item_qty_source(warehouse)
+    if not qty_by_code:
         return []
-    
-    # Get item details for all items with stock
-    item_codes = [bin["item_code"] for bin in bins]
-    
+
+    item_codes = list(qty_by_code.keys())
+
     # Define fields to fetch from Item doctype
     item_fields = [
-        "item_code", "item_name", "item_group", "variant_of", 
-        "packing", "box_type", "color", "image", "size", 
+        "item_code", "item_name", "item_group", "variant_of",
+        "packing", "box_type", "color", "image", "size",
         "characteristics", "stem_length", "item_length", "length",
         "flower_type", "flower_variety", "flower_size", "stem_size",
         "biflorica_type", "biflorica_variety"
     ]
-    
+
     # Filter to only existing fields
     existing_fields = [f.fieldname for f in frappe.get_meta("Item").fields]
     fetch_fields = [field for field in item_fields if field in existing_fields]
-    
+
     items = frappe.get_all("Item", fields=fetch_fields, filters={"item_code": ["in", item_codes]})
-    
+
     # Combine item details with stock quantities
     items_with_stock = []
     for item in items:
-        bin_info = next((bin for bin in bins if bin["item_code"] == item["item_code"]), None)
-        if bin_info:
-            item["actual_qty"] = bin_info["actual_qty"]
-            items_with_stock.append(item)
-    
+        item["actual_qty"] = qty_by_code.get(item["item_code"], 0)
+        items_with_stock.append(item)
+
     return items_with_stock
 
 def get_item_price(item_code, price_list="Standard Selling"):

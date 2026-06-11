@@ -12,7 +12,10 @@
 		{% if website_image %}
 			<img itemprop="image" class="website-image h-100 w-100" alt="{{ _(alt) }}" src="{{ frappe.utils.quoted(website_image) | abs_url }}">
 		{% else %}
-			<div itemprop="image" class="card-img-top no-image-item">
+			{#- Match the grid/list placeholder: a plain abbreviation tile (e.g. "WM"),
+			    not a broken-image icon. frappe.utils.get_abbr derives the initials
+			    from the item name, same as the card views. -#}
+			<div itemprop="image" class="card-img-top no-image-item" role="img" aria-label="{{ _(alt) or _('No image') }}">
 				{{ frappe.utils.get_abbr(alt) or "NA" }}
 			</div>
 		{% endif %}

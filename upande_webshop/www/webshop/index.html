@@ -2,23 +2,177 @@
 {% extends "templates/web.html" %}
 
 {% block title %}{{ _("All Products") }}{% endblock %}
-{% block header %}
-<div class="mb-6">{{ _("All Products") }}</div>
-{% endblock header %}
+{% block header %}{% endblock header %}
+
+{# Show only "Home" — suppress the trailing "Webshop" page-title segment that
+   the default breadcrumbs.html appends after the parents. #}
+{% block breadcrumbs %}
+	{%- if parents -%}
+	<div class="breadcrumb-container container">
+		<nav aria-label="breadcrumb">
+			<ol class="breadcrumb" itemscope itemtype="http://schema.org/BreadcrumbList">
+				{% for parent in parents %}
+					<li itemprop="itemListElement" itemscope itemtype="http://schema.org/ListItem" class="breadcrumb-item">
+						<a itemprop="item" href="{{ url_prefix }}{{ parent.route | abs_url }}">
+							<span itemprop="name">{{ parent.title or parent.label or parent.name or "" }}</span>
+							<meta itemprop="position" content="{{ loop.index }}" />
+						</a>
+					</li>
+				{% endfor %}
+			</ol>
+		</nav>
+	</div>
+	{%- endif -%}
+{% endblock %}
 
 {% block page_content %}
-<div class="row">
+<style>
+	/* Lock the page so there is no global scrollbar; only inner columns scroll */
+	html, body {
+		overflow: hidden !important;
+		height: 100%;
+	}
+	body .page-content-wrapper,
+	body main {
+		overflow: visible !important;
+	}
+
+	#page-index .webshop-row {
+		display: flex;
+		flex-wrap: nowrap;
+		align-items: flex-start;
+		/* Fill the viewport below the breadcrumb so only inner columns scroll */
+		height: calc(100vh - 130px);
+	}
+	/* The filters column itself must NOT scroll — otherwise it produces a second
+	   (outer) scrollbar next to the inner value-list scroll. Make it a flex column
+	   that fills the row height and clips; the ITEM CODE value list
+	   (.filter-options) is the only scroll region inside it (see below). */
+	#page-index .webshop-row .filters-column {
+		align-self: stretch;
+		height: 100%;
+		max-height: 100%;
+		overflow: hidden;
+		display: flex;
+		flex-direction: column;
+	}
+	/* #product-filters carries Bootstrap's .d-md-block (display:block !important),
+	   so flex needs !important to win on desktop. */
+	#page-index .webshop-row .filters-column .filters-section {
+		display: flex !important;
+		flex-direction: column;
+		min-height: 0;
+		height: 100%;
+	}
+	/* The filter block holding the value list grows to fill the column; its inner
+	   .filter-options scrolls. Overrides the 220px estimate with a real flex fit. */
+	#page-index .webshop-row .filters-column .filter-block:last-child {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		flex: 1 1 auto;
+	}
+	#page-index .webshop-row .filters-column .filter-options {
+		flex: 1 1 auto;
+		min-height: 0;
+		max-height: none !important;
+		overflow-y: auto;
+	}
+	/* #product-listing fills the row but does NOT scroll itself — the toolbar
+	   (search + view toggle) stays pinned at the top and only the product
+	   grid/list area inside it scrolls (see #products-grid-area below). This
+	   avoids a second scrollbar on the column. */
+	#page-index .webshop-row #product-listing {
+		/* Fill the FULL row height (the row uses align-items:flex-start, which would
+		   otherwise collapse this column to its content height — leaving the paging
+		   footer riding up directly under a short grid instead of pinned at the
+		   bottom). align-self:stretch + height:100% make the column span the row, so
+		   the grid area (flex:1 1 auto) grows to fill and pushes the footer down. */
+		align-self: stretch;
+		height: 100%;
+		max-height: 100%;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		/* Breathing room so the toolbar isn't flush against the clip edge (the
+		   search box and view-toggle buttons were getting cut at the top). */
+		padding-top: 8px;
+	}
+	/* The toolbar (search + view toggle) is the fixed header of the flex column:
+	   it must keep its natural height and never be squeezed or scrolled away. */
+	#page-index .webshop-row #product-listing .toolbar {
+		flex: 0 0 auto;
+	}
+	/* The actual scroll region: the rendered grid/list rows. Flex-grows to fill
+	   the space under the fixed toolbar, then scrolls within it. The renderer
+	   gives the grid area a negative top margin (mt-minus-1) that would pull it
+	   up over the toolbar and clip it — reset it here. */
+	#page-index .webshop-row #product-listing #products-grid-area,
+	#page-index .webshop-row #product-listing #products-list-area {
+		flex: 1 1 auto;
+		min-height: 0;
+		/* Gap between the pinned toolbar (search + view toggle) and the first row
+		   of cards so they don't sit flush against / touch the search bar. */
+		margin-top: 12px !important;
+		overflow-y: auto;
+		overflow-x: hidden;
+		/* The area now flex-grows to fill the column, but it is a Bootstrap .row
+		   (display:flex). A flex row's default align-items/align-content:stretch
+		   would stretch the card rows to the full (tall) area — so a single filtered
+		   result balloons to full height. Pin rows to the TOP so cards keep their
+		   natural height and the leftover space below stays empty. */
+		align-content: flex-start;
+		align-items: flex-start;
+	}
+	/* Paging row (Prev / Next) is the FIXED FOOTER of the flex column — it must
+	   NEVER scroll with the cards or get pulled into the grid area. flex:0 0 auto
+	   keeps it at full height pinned below the scroll region; the grid's
+	   `flex: 1 1 auto` fills the space ABOVE it and scrolls within those bounds,
+	   so cards can never reach the footer. An opaque background + top border make
+	   it a solid bar the scrolling cards stop against (no bleed-through), and a
+	   higher z-index guarantees it sits above the scroll layer for clicks. */
+	#page-index .webshop-row #product-listing .product-paging-area {
+		flex: 0 0 auto;
+		margin: 0 !important;
+		padding: 12px 0;
+		position: relative;
+		z-index: 2;
+		background: var(--card-bg, #fff);
+		border-top: 1px solid var(--border-color);
+	}
+	/* Dark mode: page bg is near-black and --border-color (gray-800) is invisible,
+	   so paint the footer bar with the page bg and a clearly visible divider. */
+	[data-theme="dark"] #page-index .webshop-row #product-listing .product-paging-area {
+		background: var(--gray-900);
+		border-top-color: var(--gray-500);
+	}
+
+	/* Mobile: filters stack above the grid, each scrolls within its own box */
+	@media (max-width: 767px) {
+		#page-index .webshop-row {
+			flex-wrap: wrap;
+			height: calc(100vh - 110px);
+		}
+		#page-index .webshop-row .filters-column {
+			max-height: 40%;
+		}
+		#page-index .webshop-row #product-listing {
+			max-height: 60%;
+		}
+	}
+</style>
+<div class="row webshop-row">
 	<!-- Items section -->
 	<div id="product-listing" class="col-12 order-2 col-md-9 order-md-2 item-card-group-section">
 		<!-- Rendered via JS -->
 	</div>
 
 	<!-- Filters Section -->
-	<div class="col-12 order-1 col-md-3 order-md-1">
+	<div class="col-12 order-1 col-md-3 order-md-1 filters-column">
 		<div class="collapse d-md-block mr-4 filters-section" id="product-filters">
 			<div class="d-flex justify-content-between align-items-center mb-5 title-section">
 				<div class="mb-4 filters-title" > {{ _('Filters') }} </div>
-				<a class="mb-4 clear-filters" href="/webshop">{{ _('Clear All') }}</a>
+				<a class="mb-4 clear-filters" href="/webshop" role="button">{{ _('Clear All') }}</a>
 			</div>
 			<!-- field filters -->
 			{% if field_filters %}
@@ -36,15 +190,31 @@
 
 <script>
 	frappe.ready(() => {
-		$('.btn-prev, .btn-next').click((e) => {
-			const $btn = $(e.target);
-			$btn.prop('disabled', true);
-			const start = $btn.data('start');
-			let query_params = frappe.utils.get_query_params();
-			query_params.start = start;
-			let path = window.location.pathname + '?' + frappe.utils.get_url_from_dict(query_params);
-			window.location.href = path;
+		// Clear All filters: reset the listing in place instead of doing a full
+		// page reload. Strips all query params, updates the URL via pushState,
+		// unchecks every filter input, and re-renders just the product listing
+		// through the active ProductView (webshop.product_view).
+		$('.page_content').on('click', '.clear-filters', (e) => {
+			e.preventDefault();
+
+			window.history.pushState('filters', '', window.location.pathname);
+
+			$('.product-filter, .discount-filter').prop('checked', false);
+
+			const view = webshop.product_view;
+			if (view) {
+				view.field_filters = {};
+				view.attribute_filters = {};
+				view.from_filters = true;
+				view.make(true);
+			} else {
+				// Fallback: if the view isn't initialised yet, do the old reload.
+				window.location.href = '/webshop';
+			}
 		});
+
+		// Paging (.btn-prev / .btn-next) is bound in product_ui/views.js
+		// (bind_paging_action) and re-renders in place via pushState — no reload.
 	});
 </script>
 
