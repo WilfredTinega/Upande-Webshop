@@ -115,7 +115,14 @@ webshop.ProductView =  class {
 			},
 			callback: function(result) {
 				if (!result || result.exc || !result.message || result.message.exc) {
-					me.render_no_products_section(true);
+					// Surface the server's reason when there is one (e.g. a missing
+					// Currency Exchange rate), so the empty grid explains itself.
+					let detail = "";
+					try {
+						let msgs = JSON.parse(result._server_messages || "[]");
+						if (msgs.length) detail = JSON.parse(msgs[0]).message || "";
+					} catch (e) { /* no structured message */ }
+					me.render_no_products_section(true, detail);
 				} else {
 					// Sub Category results are independent of Items
 					if (me.item_group && result.message["sub_categories"].length) {
@@ -563,10 +570,15 @@ webshop.ProductView =  class {
 		}
 	}
 
-	render_no_products_section(error=false) {
+	render_no_products_section(error=false, detail) {
+		// Say WHY the grid is empty instead of leaving a blank area. `detail` (when
+		// the server provides one, e.g. a missing Currency Exchange rate) is shown
+		// so the cause is visible rather than silently hiding every product.
 		let error_section = `
 			<div class="mt-4 w-100 alert alert-error font-md">
-				${ __("Something went wrong. Please refresh or contact us.") }
+				${ __("We couldn't load the products.") }
+				${ detail ? `<div class="mt-2 small">${ frappe.utils.escape_html(detail) }</div>` : "" }
+				<div class="mt-2 small text-muted">${ __("Please refresh the page or contact us if this persists.") }</div>
 			</div>
 		`;
 		let no_results_section = `
@@ -574,7 +586,7 @@ webshop.ProductView =  class {
 				<div class="cart-empty-state">
 					<img src="/assets/upande_webshop/images/cart-empty-state.png" alt="Empty Cart">
 				</div>
-				<div class="cart-empty-message mt-4">${ __("No products found") }</p>
+				<div class="cart-empty-message mt-4">${ __("No products match your filters.") }</div>
 			</div>
 		`;
 

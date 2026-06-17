@@ -1,3 +1,5 @@
+import re
+
 import frappe
 import frappe.defaults
 from frappe import _, throw
@@ -272,12 +274,19 @@ def _assign_sequential_box_ids(doc):
 	if not child_meta.has_field("custom_box_id"):
 		return
 
+	# Prefer the cart-level Box Type rate; fall back to the global Webshop
+	# Settings pack rate so box ids still pack sensibly when no box type is set.
+	# (Per-line rates override at display time in _decorate_items_with_box_info;
+	# the packer uses one cart cap for the farm-grouped first-fit layout.)
 	box_type = doc.get("custom_box_type")
+	pack_rate = 0
 	if box_type and frappe.get_meta("Box Type").has_field("packrate"):
 		pack_rate = cint(frappe.db.get_value("Box Type", box_type, "packrate") or 0)
-		if pack_rate > 0:
-			_assign_box_ids_by_pack_rate(doc, pack_rate)
-			return
+	if pack_rate <= 0:
+		pack_rate = _global_pack_rate()
+	if pack_rate > 0:
+		_assign_box_ids_by_pack_rate(doc, pack_rate)
+		return
 
 	for idx, item in enumerate(items, start=1):
 		if not item.get("custom_box_id"):
@@ -630,6 +639,10 @@ def _check_required_cart_fields(quotation):
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
 	if quotation.meta.has_field("custom_delivery_point") and not (quotation.get("custom_delivery_point") or "").strip():
 		return _("Please select a Delivery Point before placing your order.")
+	# Consignee is required at checkout (webshop only — the field's reqd flag is
+	# left off so desk / imported orders are unaffected).
+	if quotation.meta.has_field("custom_consignee") and not quotation.get("custom_consignee"):
+		return _("Please select a Consignee before placing your order.")
 	# Line Code is only required when the cart shows it.
 	if (
 		cint(cart_settings.get("show_cart_line_code", 1))
@@ -707,8 +720,17 @@ def place_order():
 	# the day's running total before the order is submitted and its boxes count.
 	_continue_box_ids_across_orders(sales_order)
 
+	# _make_sales_order may not carry kaitet's mandatory custom fields across from
+	# the Quotation; stamp the roses defaults before insert.
+	_apply_kaitet_order_defaults(sales_order, frappe._dict({"doctype": "Customer", "name": sales_order.customer}))
+	# Stamp each line's source warehouse from its shelf stock so the SO-approval
+	# Material Transfer (handle_sales_order_approval) has a source→target to move.
+	_apply_shelf_source_warehouse(sales_order)
+	_sync_ordered_stems(sales_order)
+
 	sales_order.flags.ignore_permissions = True
 	sales_order.insert()
+	_finalize_kaitet_order_name(sales_order)
 	sales_order.submit()
 
 	if hasattr(frappe.local, "cookie_manager"):
@@ -724,10 +746,9 @@ def _place_sales_order_cart(so, cart_settings):
 	checkout submits it (docstatus 0→1) rather than converting a Quotation. Each
 	line keeps its chosen source warehouse.
 
-	Stem reservation is NOT done here — submitting the SO fires the
-	`on_sales_order_submit` hook, which is the single point that bumps Stem Length
-	Bin reserved_qty for every line (using each line's custom_source_warehouse).
-	Reserving here too would double-count.
+	Stock availability is validated up-front (see _validate_cart_stock); no
+	per-length reservation happens here. Each line keeps its chosen source
+	warehouse so submission draws down core Bin as usual.
 	"""
 	so.company = cart_settings.company
 
@@ -746,9 +767,14 @@ def _place_sales_order_cart(so, cart_settings):
 	# name for safety against re-runs.
 	_continue_box_ids_across_orders(so)
 
+	# Stamp each line's source warehouse from its shelf stock so the SO-approval
+	# Material Transfer (handle_sales_order_approval) has a source→target to move.
+	_apply_shelf_source_warehouse(so)
+	_sync_ordered_stems(so)
 	so.flags.ignore_permissions = True
 	so.order_type = "Sales"  # leave the cart; becomes a normal Sales Order
 	so.save()
+	_finalize_kaitet_order_name(so)
 	so.submit()  # fires on_sales_order_submit → reserves each line's stems once
 
 	# Clear the active-cart selection so the next view doesn't reopen this order.
@@ -784,10 +810,50 @@ def request_for_quotation():
 	quotation.save()
 
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
-	# In Sales-Order-as-cart mode, always leave the SO in draft. Sales staff
-	# submit it from the desk; the webshop never auto-submits orders.
+	# Two-step flow: "Save Order" leaves a Sales-Order-as-cart in draft; the
+	# follow-up "Submit Order" button calls submit_cart_order() to finalize it.
+	# Quotation carts still submit here unless the site keeps them as drafts.
 	if quotation.doctype == "Quotation" and not cint(cart_settings.save_quotations_as_draft):
 		quotation.submit()
+
+	return quotation.name
+
+
+@frappe.whitelist()
+def submit_cart_order():
+	"""Submit the draft Sales-Order cart (step 2 of Save → Submit).
+
+	"Save Order" leaves the SO in draft; this takes it draft → submitted
+	(docstatus 0→1), firing on_submit (handle_sales_order_approval / stem
+	reservation). Re-validates required fields and stock first so the second
+	click can't bypass the same gates the save did.
+	"""
+	quotation = _get_cart_quotation()
+	if quotation.doctype != "Sales Order":
+		frappe.throw(_("This cart has no Sales Order to submit."))
+	if cint(quotation.docstatus) == 1:
+		return quotation.name  # already submitted — idempotent
+
+	required_err = _check_required_cart_fields(quotation)
+	if required_err:
+		return {"error": required_err}
+	box_err = _check_box_type_min_order_qty(quotation)
+	if box_err:
+		return {"error": box_err}
+
+	cart_settings = frappe.get_cached_doc("Webshop Settings")
+	if not cint(cart_settings.get("allow_items_not_in_stock")):
+		_validate_cart_stock(quotation)
+
+	_apply_shelf_source_warehouse(quotation)
+	quotation.flags.ignore_permissions = True
+	_finalize_kaitet_order_name(quotation)
+	quotation.submit()
+
+	# Clear the active-cart selection so the next view starts a fresh cart.
+	frappe.cache.delete_value(_active_cart_customer_key())
+	if hasattr(frappe.local, "cookie_manager"):
+		frappe.local.cookie_manager.delete_cookie("cart_count")
 
 	return quotation.name
 
@@ -873,12 +939,16 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 	Source-of-truth choice:
 	  - Variant or template items resolve length at the item level, so core Bin
 	    already tracks per-length qty. Always read from Bin.
-	  - Plain items (the case Stem Length Bin was built for) read from
-	    Stem Length Bin: a specific length if given, summed across all lengths
-	    in the warehouse(s) otherwise.
+	  - Plain items read core Bin too: Bin has no length dimension, so a
+	    length-specific ask falls back to the item's total Bin qty across the
+	    warehouse(s).
 	"""
+	from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+		get_session_customer_warehouse,
+	)
 	from upande_webshop.upande_webshop.product_data_engine.query import (
 		_all_storefront_warehouses,
+		_resolve_warehouses,
 	)
 	from upande_webshop.upande_webshop.utils.shelf_stock import (
 		get_shelf_qty,
@@ -889,6 +959,25 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
 	) or frappe._dict()
 	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	# Customer-warehouse override takes priority: when the logged-in customer is
+	# pinned to a warehouse (Customer Settings), availability — and the cart's
+	# source warehouse — read from THAT warehouse's Bin, even in shelf mode. This
+	# keeps the add-to-cart check in sync with the per-customer storefront stock.
+	customer_wh = get_session_customer_warehouse()
+	if customer_wh:
+		leaves = _resolve_warehouses(customer_wh)
+		if not leaves:
+			return 0
+		total = frappe.db.sql(
+			"""SELECT COALESCE(SUM(actual_qty), 0)
+			   FROM `tabBin`
+			   WHERE item_code = %s AND warehouse IN ({})""".format(
+				",".join(["%s"] * len(leaves))
+			),
+			[item_code, *leaves],
+		)
+		return flt(total[0][0]) if total else 0
 
 	# Plain items read from the shelf when shelf mode is on, scoped to the given
 	# stem length if any. Not warehouse-scoped.
@@ -920,22 +1009,8 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 		)
 		return flt(total[0][0]) if total else 0
 
-	# Plain-item availability:
-	#   - age-bin on : Stem Length Bin per length with Age Bin fallback
-	#   - age-bin off: core Bin (no length dimension; a length-specific ask just
-	#     falls back to the item's total Bin qty)
-	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-		get_age_bin_qty_by_length,
-		use_stem_length_age_bin,
-	)
-
-	if use_stem_length_age_bin():
-		qty_by_length = get_age_bin_qty_by_length(item_code, warehouses)
-		if custom_length:
-			return flt(qty_by_length.get(custom_length, 0))
-		return flt(sum(qty_by_length.values()))
-
-	# Flag off: plain items read core Bin, same source as variants.
+	# Plain items read core Bin, same source as variants. Bin has no length
+	# dimension, so a length-specific ask falls back to the item's total Bin qty.
 	total = frappe.db.sql(
 		"""SELECT COALESCE(SUM(actual_qty), 0)
 		   FROM `tabBin`
@@ -945,6 +1020,28 @@ def _stock_uom_qty_available(item_code, custom_length=None):
 		[item_code, *warehouses],
 	)
 	return flt(total[0][0]) if total else 0
+
+
+def _sync_ordered_stems(doc):
+	"""Stamp each line's `custom_ordered_quantity` ("Ordered Stems") with its
+	total stems (qty × conversion_factor).
+
+	kaitet's "Enforce Ordered Stems Non-zero" Server Script throws on any Roses
+	Sales Order whose non-"Mix Box" line has custom_ordered_quantity == 0. That
+	script runs on the save/validate event even with controller ignore_validate
+	set, so this must populate the field on the in-memory doc BEFORE save(), not
+	after. No-op on sites/doctypes without the column (mona, tambuzi, Quotation).
+	"""
+	items = doc.get("items") or []
+	if not items:
+		return
+	if not frappe.db.has_column(items[0].doctype, "custom_ordered_quantity"):
+		return
+	for item in items:
+		cf = flt(_stems_per_bunch_from_uom(item.uom)) if item.uom else flt(item.conversion_factor or 1)
+		stems = flt(item.qty) * (cf or 1)
+		if stems > 0:
+			item.custom_ordered_quantity = stems
 
 
 def _apply_length_price_db(quotation):
@@ -1202,6 +1299,7 @@ def update_cart(item_code, qty, additional_notes=None, uom=None, custom_length=N
 		# doesn't skip mandatory checks, so every cart save needs ids stamped.
 		# Helper is a no-op when the field doesn't exist on this cart's child doctype.
 		_assign_sequential_box_ids(quotation)
+		_sync_ordered_stems(quotation)
 		quotation.flags.ignore_permissions = True
 		quotation.flags.ignore_validate = True
 		quotation.payment_schedule = []
@@ -1363,26 +1461,104 @@ def _box_pack_rate(box_type):
 		return 0
 
 
+def _global_pack_rate():
+	"""Stems-per-box default from Webshop Settings.packrate (a Select of stem
+	counts). 0 when unset/unparseable. The fallback when a line carries no rate."""
+	settings = frappe.get_cached_doc("Webshop Settings")
+	if not settings.meta.has_field("packrate"):
+		return 0
+	try:
+		return int(flt(settings.get("packrate") or 0))
+	except (TypeError, ValueError):
+		return 0
+
+
+def _line_pack_rate_field(child_dt):
+	"""Return the per-line pack-rate fieldname present on this cart's item
+	doctype, or None. kaitet ships `custom_packrate` (Link → Packrate) on Sales
+	Order Item and `custom_pack_rate` (Float) on Quotation Item."""
+	meta = frappe.get_meta(child_dt)
+	for fieldname in ("custom_packrate", "custom_pack_rate"):
+		if meta.has_field(fieldname):
+			return fieldname
+	return None
+
+
+def _coerce_pack_rate(value):
+	"""A line's pack-rate value may be a Link to the Packrate doctype (whose name
+	IS the stem count, e.g. "240") or a raw number. Return it as an int, 0 if
+	empty/unparseable."""
+	if value in (None, ""):
+		return 0
+	try:
+		return int(flt(value))
+	except (TypeError, ValueError):
+		# Link to Packrate — its `packrate` field holds the int.
+		rate = frappe.db.get_value("Packrate", value, "packrate")
+		try:
+			return int(flt(rate or 0))
+		except (TypeError, ValueError):
+			return 0
+
+
+def _pack_rate_value_for_field(child_dt, fieldname, rate):
+	"""Coerce an int stems-per-box `rate` into the value the line field expects.
+
+	`custom_packrate` (Sales Order Item) is a Link → Packrate whose record name is
+	the stem count ("240"); store the matching Packrate name if it exists.
+	`custom_pack_rate` (Quotation Item) is a Float; store the number. Returns None
+	when there's nothing sensible to store (so the caller leaves the field blank).
+	"""
+	if not rate or rate <= 0:
+		return None
+	options = frappe.get_meta(child_dt).get_field(fieldname).options
+	if options == "Packrate":
+		name = str(rate)
+		return name if frappe.db.exists("Packrate", name) else None
+	return rate
+
+
+def _line_pack_rate(line, doc):
+	"""Resolve the effective stems-per-box for a single cart line.
+
+	Precedence: the line's own pack-rate field overrides everything; then the
+	cart-level Box Type's rate; then the global Webshop Settings default. Returns
+	0 only when none of those yield a usable rate.
+	"""
+	field = _line_pack_rate_field(line.doctype)
+	if field:
+		rate = _coerce_pack_rate(line.get(field))
+		if rate > 0:
+			return rate
+
+	box_rate = _box_pack_rate(doc.get("custom_box_type"))
+	if box_rate > 0:
+		return box_rate
+
+	return _global_pack_rate()
+
+
 def _decorate_items_with_box_info(doc):
 	"""Stamp each cart row with `_box_id` and `_box_label` for display.
 
 	`_box_id` = ceil(total_stems / pack_rate): the number of boxes the line
-	fills given the cart-level Box Type's pack rate. 0 when there's no box type,
-	no pack rate, or no stems (template hides it then). Box Type is a cart-level
-	field on tambuzi (`Quotation.custom_box_type`), so all rows share one rate.
+	fills. The pack rate is resolved per line (`_line_pack_rate`): the line's own
+	pack-rate field wins, then the cart-level Box Type, then the global Webshop
+	Settings default. 0 when no rate or no stems (template hides it then).
 
-	`_box_label` mirrors the row's optional `custom_box_label` text when that
-	column exists — display only, never required.
+	`_pack_rate` is the resolved per-line rate, surfaced so the cart UI can show
+	and edit it. `_box_label` mirrors the row's optional `custom_box_label` text
+	when that column exists — display only, never required.
 	"""
 	import math
 
-	box_type = doc.get("custom_box_type")
-	pack_rate = _box_pack_rate(box_type)
 	child_dt = doc.items[0].doctype if doc.get("items") else None
 	has_box_label = bool(child_dt) and frappe.db.has_column(child_dt, "custom_box_label")
 
 	for d in doc.get("items", []):
 		total_stems = flt(d.get("custom_total_stems") or 0)
+		pack_rate = _line_pack_rate(d, doc)
+		d._pack_rate = pack_rate
 		d._box_id = int(math.ceil(total_stems / pack_rate)) if (pack_rate and total_stems) else 0
 		d._box_label = (d.get("custom_box_label") or "") if has_box_label else ""
 
@@ -1649,7 +1825,7 @@ def _get_cart_doc(party=None):
 			qdoc = frappe.get_doc(
 				{
 					"doctype": "Quotation",
-					"naming_series": get_shopping_cart_settings().quotation_series
+					"naming_series": get_shopping_cart_settings().get("quotation_series")
 					or "QTN-CART-",
 					"quotation_to": party.doctype,
 					"company": company,
@@ -1667,11 +1843,115 @@ def _get_cart_doc(party=None):
 		)
 		qdoc.contact_email = frappe.session.user
 
+		_apply_kaitet_order_defaults(qdoc, party)
+
 		qdoc.flags.ignore_permissions = True
 		qdoc.run_method("set_missing_values")
 		apply_cart_settings(party, qdoc)
 
 	return qdoc
+
+
+# kaitet's Sales Order has four mandatory custom fields with no UI on the
+# storefront. Stamp the roses-business-unit defaults so cart saves / checkout
+# don't trip "Value missing" validation. Every write is guarded by has_field so
+# this is a no-op on sites without these fields (tambuzi, mona).
+_KAITET_SO_DEFAULTS = {
+	"custom_sales_order_type": "Roses",
+	"custom_business_unit": "Roses",
+	"custom_farm": "Kapkolia",
+}
+
+
+def _apply_shelf_source_warehouse(doc):
+	"""Stamp each line's `custom_source_warehouse` for a Shopping Cart order.
+
+	The source warehouse is chosen per item as the one most used on that item's
+	previous Sales Order lines, restricted to the approved set (see
+	get_history_source_warehouse) with a priority fallback. `warehouse` stays the
+	delivery target. With both set and custom_sales_order_type == "Roses",
+	so_delivery_warehouse.handle_sales_order_approval builds the source→target
+	Material Transfer on submit.
+
+	No-op unless the field exists; never overwrites a value already set on a line.
+	"""
+	from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+		get_warehouse_for_customer,
+	)
+	from upande_webshop.upande_webshop.utils.shelf_stock import (
+		get_history_source_warehouse,
+	)
+
+	items = doc.get("items") or []
+	if not items:
+		return
+	# custom_source_warehouse and custom_length live on the CHILD (Sales Order
+	# Item / Quotation Item), not the parent — check the child's meta.
+	child_meta = frappe.get_meta(items[0].doctype)
+	if not child_meta.has_field("custom_source_warehouse"):
+		return
+
+	# When the order's customer is pinned to a warehouse (Customer Settings), every
+	# line sources from THAT warehouse — the same one their stock was shown from and
+	# added to the cart from. Otherwise each line's source is the one most used for
+	# that item on previous Sales Orders (approved set, with a priority fallback),
+	# so cart orders converge on the warehouses operations actually pick from rather
+	# than wherever shelf stock happens to sit. Never overwrites a value already set.
+	customer_wh = get_warehouse_for_customer(_cart_party_name(doc))
+	for item in items:
+		if item.get("custom_source_warehouse"):
+			continue
+		item.custom_source_warehouse = customer_wh or get_history_source_warehouse(item.item_code)
+
+
+def stamp_source_warehouse_on_submit(doc, method=None):
+	"""Sales Order before_submit hook: stamp each line's source warehouse from its
+	shelf stock, however the SO is submitted (cart button, desk, or API).
+
+	The cart's own checkout calls _apply_shelf_source_warehouse before submit, but
+	an SO can also be submitted straight from the desk; this hook guarantees the
+	source warehouse is set in every path. Guarded to shopping-cart orders so it
+	never touches manually-built / allocation-path SOs that set their own source."""
+	if doc.get("order_type") != "Shopping Cart":
+		return
+	_apply_shelf_source_warehouse(doc)
+
+
+def _apply_kaitet_order_defaults(doc, party):
+	meta = doc.meta
+	for fieldname, value in _KAITET_SO_DEFAULTS.items():
+		if meta.has_field(fieldname) and not doc.get(fieldname):
+			doc.set(fieldname, value)
+
+	# Order Name is a free-form label; mirror the manual roses pattern of using
+	# the customer name (the SO-number suffix is appended at submit, see
+	# _finalize_kaitet_order_name).
+	if meta.has_field("custom_order_name") and not doc.get("custom_order_name"):
+		customer_name = None
+		if party and party.doctype == "Customer":
+			customer_name = frappe.db.get_value("Customer", party.name, "customer_name")
+		doc.set("custom_order_name", customer_name or (party.name if party else ""))
+
+
+def _finalize_kaitet_order_name(doc):
+	"""Append the SO-number suffix to custom_order_name once the doc is named,
+	mirroring the manual roses pattern (e.g. "OASIS-07324"). No-op when the field
+	is absent or the suffix is already present.
+	"""
+	if not doc.meta.has_field("custom_order_name"):
+		return
+
+	# Trailing numeric block of the SO name (e.g. SO-2026-07324 -> 07324).
+	match = re.search(r"(\d+)$", doc.name or "")
+	if not match:
+		return
+	suffix = match.group(1)
+
+	base = (doc.get("custom_order_name") or "").strip()
+	if base.endswith(f"-{suffix}"):
+		return
+	new_name = f"{base}-{suffix}" if base else suffix
+	doc.db_set("custom_order_name", new_name, update_modified=False)
 
 
 def update_party(fullname, company_name=None, mobile_no=None, phone=None):
@@ -2277,6 +2557,43 @@ def update_cart_item_box_id(child_docname, box_id=None):
 
 
 @frappe.whitelist()
+def update_cart_item_pack_rate(child_docname, pack_rate=None):
+	"""Persist a manually-edited per-line pack rate on a cart row.
+
+	The line defaults to the global Webshop Settings pack rate; this lets the user
+	override it per line. After writing, the line's box count (_box_id) is
+	recomputed from the new rate. Blank clears the override so the line falls back
+	to the cart Box Type / global default. No-op when no per-line field exists.
+	"""
+	quotation = _get_cart_quotation()
+	child_dt = quotation.items[0].doctype if quotation.get("items") else None
+	field = _line_pack_rate_field(child_dt) if child_dt else None
+	if not field:
+		return {"pack_rate": None}
+
+	row = next((i for i in quotation.get("items") if i.name == child_docname), None)
+	if not row:
+		return {"pack_rate": None}
+
+	rate = cint(pack_rate) if pack_rate not in (None, "") else 0
+	value = _pack_rate_value_for_field(child_dt, field, rate) if rate > 0 else None
+	frappe.db.set_value(child_dt, child_docname, field, value, update_modified=False)
+
+	# Reflect the new rate in the line's box count for the response.
+	row.set(field, value)
+	import math
+
+	effective = _line_pack_rate(row, quotation)
+	total_stems = flt(row.get("custom_total_stems") or 0)
+	box_id = int(math.ceil(total_stems / effective)) if (effective and total_stems) else 0
+	return {
+		"name": child_docname,
+		"pack_rate": effective or "",
+		"box_id": box_id,
+	}
+
+
+@frappe.whitelist()
 def update_cart_delivery_point(delivery_point):
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_delivery_point"):
@@ -2296,17 +2613,29 @@ def update_cart_delivery_point(delivery_point):
 	return {"name": quotation.name, "delivery_point": delivery_point or ""}
 
 
+def _consignee_doctype():
+	"""Resolve the Consignee master doctype for this site.
+
+	Prefer the singular `Consignee` doctype; fall back to the legacy plural
+	`Consignees` only when `Consignee` isn't installed. Returns None when neither
+	exists (sites without the roses consignee setup)."""
+	for dt in ("Consignee", "Consignees"):
+		if frappe.db.exists("DocType", dt):
+			return dt
+	return None
+
+
 @frappe.whitelist()
 def update_cart_consignee(consignee):
-	"""Cart-level Consignee. Stored on the cart's custom_consignee (Data) field —
-	we keep that field a plain Data column so the existing pack-list / dispatch
-	fetch_from chains keep working; the cart just writes the chosen Consignees
-	master name into it."""
+	"""Cart-level Consignee. Stored on the cart's custom_consignee field — we keep
+	that field as-is so the existing pack-list / dispatch fetch_from chains keep
+	working; the cart just writes the chosen Consignee master name into it."""
 	quotation = _get_cart_quotation()
 	if not quotation.meta.has_field("custom_consignee"):
 		frappe.throw(_("Consignee is not set up on this cart."))
 
-	if consignee and not frappe.db.exists("Consignees", consignee):
+	consignee_dt = _consignee_doctype()
+	if consignee and consignee_dt and not frappe.db.exists(consignee_dt, consignee):
 		frappe.throw(_("Consignee {0} does not exist.").format(consignee))
 
 	quotation.custom_consignee = consignee or None
@@ -2318,22 +2647,30 @@ def update_cart_consignee(consignee):
 @frappe.whitelist()
 def search_consignees(txt=None, limit=20):
 	"""Storefront Link-search for the cart's Consignee field. Webshop customers
-	don't usually have read access to Consignees, so bypass permissions and
-	return name + label (mirrors search_delivery_points)."""
+	don't usually have read access to the Consignee master, so bypass permissions
+	and return name + label (mirrors search_delivery_points)."""
 	if not _get_cart_quotation():
 		return []
 
-	if not frappe.db.exists("DocType", "Consignees"):
+	consignee_dt = _consignee_doctype()
+	if not consignee_dt:
 		return []
 
-	conditions = "WHERE IFNULL(disable, 0) = 0"
+	# Only filter on `disable` when that column exists (the singular `Consignee`
+	# doctype on kaitet has no such field).
+	has_disable = bool(
+		frappe.db.sql(
+			f"SHOW COLUMNS FROM `tab{consignee_dt}` LIKE 'disable'"
+		)
+	)
+	conditions = "WHERE IFNULL(disable, 0) = 0" if has_disable else "WHERE 1 = 1"
 	args = {"txt": f"%{txt or ''}%", "limit": int(limit) if limit else 20}
 	if txt:
 		conditions += " AND name LIKE %(txt)s"
 
 	rows = frappe.db.sql(
 		f"""
-		SELECT name FROM `tabConsignees`
+		SELECT name FROM `tab{consignee_dt}`
 		{conditions}
 		ORDER BY name ASC
 		LIMIT %(limit)s
@@ -2408,12 +2745,25 @@ def update_cart_box_type(box_type):
 		for item in quotation.get("items", []):
 			item.custom_box_type = value
 
+	# Selecting a box type fixes the pack rate: stamp each line's per-line
+	# pack-rate field (custom_packrate / custom_pack_rate) with the Box Type's
+	# rate so the cart's per-line Pack rate dropdown reflects it automatically.
+	# Clearing the box type falls the lines back to the global default.
+	pack_field = _line_pack_rate_field(child_dt)
+	if pack_field:
+		box_rate = _box_pack_rate(value) if value else 0
+		effective = box_rate or _global_pack_rate()
+		pack_value = _pack_rate_value_for_field(child_dt, pack_field, effective)
+		for item in quotation.get("items", []):
+			item.set(pack_field, pack_value)
+
 	# Selecting a box type fixes the pack rate (stems/box), so re-pack the cart
 	# lines into boxes of that capacity and re-stamp custom_box_id — same packing
 	# logic as the /order-stock create_order_stock_order script. The helper reads
 	# the cart's custom_box_type (just set above) and packs by its pack rate,
 	# falling back to the 1..N placeholder when the box carries no pack rate.
 	_assign_sequential_box_ids(quotation)
+	_sync_ordered_stems(quotation)
 
 	quotation.flags.ignore_permissions = True
 	quotation.save()

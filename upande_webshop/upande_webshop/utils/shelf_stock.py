@@ -2,12 +2,12 @@
 
 When Webshop Settings → "Use Shelf Stock?" is enabled, storefront availability is
 read from the kaitet `Shelf`/`Shelf Item` tables (physical stems sitting on
-receiving cold-store shelves) instead of from `Stem Length Bin`.
+receiving cold-store shelves) instead of from core `Bin`.
 
 Shelf rows model plain items only: `Shelf Item.variety` is the Item code,
 `stem_length` is the Stem Length name (e.g. "52cm"), `stem_qty` is the count.
 There is no variant/template concept on the shelf — every distinct length is a
-plain item row, mirroring how `Stem Length Bin` is keyed.
+plain item row.
 
 Shelf qty is NOT filtered by the Webshop Settings warehouse set: the warehouses
 table is hidden when shelf mode is on, and shelf rows carry their own
@@ -77,3 +77,74 @@ def get_shelf_qty_for_items(item_codes):
 	for r in rows:
 		qty_by_code[r.variety] = qty_by_code.get(r.variety, 0.0) + flt(r.stem_qty)
 	return qty_by_code
+
+
+def get_shelf_warehouse(item_code, stem_length=None):
+	"""Warehouse the shelf stock for an item sits in (the source warehouse).
+
+	An item+length can sit on shelves in more than one (receiving cold store)
+	warehouse; we return the one holding the most stems, scoped to `stem_length`
+	when given. This is the value the kaitet allocation path uses as a Sales Order
+	line's `custom_source_warehouse` (source of the SO-approval Material Transfer).
+	Returns None when nothing is on a shelf for that item.
+	"""
+	filters = {"variety": item_code, "parenttype": "Shelf", "stem_qty": (">", 0)}
+	if stem_length:
+		filters["stem_length"] = stem_length
+	rows = frappe.db.get_all(
+		"Shelf Item", filters=filters, fields=["warehouse", "stem_qty"]
+	)
+	qty_by_wh = {}
+	for r in rows:
+		if not r.warehouse:
+			continue
+		qty_by_wh[r.warehouse] = qty_by_wh.get(r.warehouse, 0.0) + flt(r.stem_qty)
+	if not qty_by_wh:
+		return None
+	return max(qty_by_wh, key=qty_by_wh.get)
+
+
+# Source warehouses a Shopping Cart Sales Order line is allowed to use, in
+# fallback-priority order. These are the five warehouses actually used as
+# `custom_source_warehouse` on historical Sales Orders (by volume); anything
+# else (Online/Torongo/Simotwo/packhouse one-offs) is excluded so cart orders
+# converge on the warehouses operations actually pick from.
+ALLOWED_SOURCE_WAREHOUSES = (
+	"Ravine Available for Sale - KR",
+	"Kapkolia Receiving Cold Store - KR",
+	"Karen Available for Sale - KR",
+	"Ravine Graded Sold - KR",
+	"Karen Receiving Cold Store - KR",
+)
+
+
+def get_history_source_warehouse(item_code):
+	"""Source warehouse most used for `item_code` on previous Sales Order lines.
+
+	Looks at submitted Sales Order Item rows for this item and returns the
+	`custom_source_warehouse` that appears most often, restricted to
+	ALLOWED_SOURCE_WAREHOUSES. When the item has no history with any allowed
+	warehouse, falls back to the first allowed warehouse (the overall
+	most-used). Always returns a value from the allowed set — never None — so a
+	cart line always lands on an approved source warehouse.
+	"""
+	allowed = ALLOWED_SOURCE_WAREHOUSES
+	rows = frappe.db.sql(
+		"""
+		SELECT custom_source_warehouse AS wh, COUNT(*) AS cnt
+		FROM `tabSales Order Item`
+		WHERE item_code = %s AND docstatus = 1
+		  AND custom_source_warehouse IN %s
+		GROUP BY custom_source_warehouse
+		""",
+		(item_code, allowed),
+		as_dict=True,
+	)
+	if rows:
+		# Tie-break on the priority order so a tie is resolved deterministically
+		# toward the higher-priority warehouse.
+		return max(
+			rows,
+			key=lambda r: (r["cnt"], -allowed.index(r["wh"])),
+		)["wh"]
+	return allowed[0]

@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2025-08-25 17:45:10.688652",
+ "creation": "2026-06-17 16:24:31.246220",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -24,10 +24,10 @@
   "stock_cron_format",
   "column_break_stck",
   "stock_enabled",
-  "stock_source_section",
   "use_shelf_stock",
-  "column_break_rqhs",
-  "use_stem_length_age_bin",
+  "publish_enabled_stock_only",
+  "stock_source_section",
+  "shelf_stock_actions",
   "stock_warehouse_section",
   "stock_warehouse",
   "column_break_bvuf",
@@ -70,6 +70,7 @@
   "column_break_iqki",
   "so_enabled",
   "sales_order",
+  "period",
   "so_scheduler_section",
   "so_last_run",
   "so_column_break_runtime",
@@ -80,11 +81,20 @@
   "column_break_hdny",
   "of_enabled",
   "order_fullfilment",
+  "of_period",
   "of_scheduler_section",
   "of_last_run",
   "of_column_break_runtime",
   "of_next_run",
   "floriday_setting_tab",
+  "section_break_tikn",
+  "company",
+  "default_farm",
+  "customer",
+  "column_break_xloy",
+  "warehouse",
+  "sales_order_type",
+  "business_unit",
   "section_break_tupy",
   "client_id",
   "grant_type",
@@ -92,7 +102,6 @@
   "warehouse_id",
   "organization_supplier_id",
   "base_url",
-  "warehouse",
   "client_secret",
   "column_break_woir",
   "scope",
@@ -111,12 +120,13 @@
   "section_break_fvbp",
   "token_url",
   "custom_fields_tab",
-  "create_missing_custom_fields",
   "check_custom_fields",
   "column_break_kpvg",
-  "custom_fields_status_html",
+  "create_missing_custom_fields",
   "section_break_pkus",
-  "custom_fields_intro"
+  "custom_fields_status_html",
+  "changelog_section",
+  "changelog_html"
  ],
  "fields": [
   {
@@ -230,6 +240,12 @@
    "label": "Order Fullfilment"
   },
   {
+   "description": "How far back (in hours) to look for Sales Orders to fulfill",
+   "fieldname": "of_period",
+   "fieldtype": "Int",
+   "label": "Period(Hours)"
+  },
+  {
    "fieldname": "of_event_frequency",
    "fieldtype": "Select",
    "label": "Event Frequency",
@@ -276,8 +292,10 @@
    "label": "Floriday Setting"
   },
   {
+   "collapsible": 1,
    "fieldname": "section_break_tupy",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Api Credentials"
   },
   {
    "fieldname": "client_id",
@@ -597,30 +615,32 @@
   },
   {
    "default": "0",
-   "description": "Read published quantities from shelf stock",
    "fieldname": "use_shelf_stock",
    "fieldtype": "Check",
    "label": "Use Shelf Stock?"
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.use_shelf_stock === 0",
-   "description": "Read published quantities from the Stem Length Bin",
-   "fieldname": "use_stem_length_age_bin",
+   "fieldname": "publish_enabled_stock_only",
    "fieldtype": "Check",
-   "label": "Use Stem Length Age Bin?"
+   "label": "Show Only Enabled Stock?"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock",
+   "fieldname": "shelf_stock_actions",
+   "fieldtype": "HTML",
+   "label": "Shelf Stock Actions"
+  },
+  {
+   "depends_on": "eval:doc.use_shelf_stock !==1",
    "fieldname": "stock_warehouse_section",
    "fieldtype": "Section Break"
   },
   {
-   "fetch_from": "warehouse.warehouse_name",
-   "fetch_if_empty": 1,
    "fieldname": "stock_warehouse",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "label": "Stock Warehouse",
-   "read_only": 1
+   "options": "Warehouse"
   },
   {
    "fieldname": "add_stock",
@@ -633,6 +653,7 @@
    "label": "Move Stock"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock !==1",
    "fieldname": "stock_items_section",
    "fieldtype": "Section Break",
    "label": "Stock In Online Available for Sale"
@@ -653,6 +674,7 @@
    "fieldtype": "Column Break"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock !==1",
    "fieldname": "section_break_nvgy",
    "fieldtype": "Section Break",
    "label": "System Available for Sale"
@@ -672,11 +694,6 @@
    "fieldname": "custom_fields_tab",
    "fieldtype": "Tab Break",
    "label": "Actions"
-  },
-  {
-   "fieldname": "custom_fields_intro",
-   "fieldtype": "HTML",
-   "options": "<p class=\"text-muted\">The Floriday integration reads Custom Fields that live on the host site's doctypes, not in this app's fixtures. Use <b>Check Custom Fields</b> to see which are present, then <b>Create Missing Custom Fields</b> to add the ones you select.</p>"
   },
   {
    "fieldname": "check_custom_fields",
@@ -702,7 +719,56 @@
    "fieldtype": "Section Break"
   },
   {
-   "fieldname": "column_break_rqhs",
+   "description": "Sets the time range it fetches the orders",
+   "fieldname": "period",
+   "fieldtype": "Int",
+   "label": "Period(Hours)"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "customer",
+   "fieldtype": "Link",
+   "label": "Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "default_farm",
+   "fieldtype": "Link",
+   "label": "Default Farm",
+   "options": "Farm"
+  },
+  {
+   "fieldname": "business_unit",
+   "fieldtype": "Link",
+   "label": "Business Unit",
+   "options": "Business Unit"
+  },
+  {
+   "fieldname": "sales_order_type",
+   "fieldtype": "Data",
+   "label": "Sales Order Type"
+  },
+  {
+   "fieldname": "changelog_section",
+   "fieldtype": "Section Break",
+   "label": "Recent Changes"
+  },
+  {
+   "fieldname": "changelog_html",
+   "fieldtype": "HTML",
+   "label": "Changelog"
+  },
+  {
+   "fieldname": "section_break_tikn",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_xloy",
    "fieldtype": "Column Break"
   }
  ],
@@ -710,11 +776,11 @@
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-10 01:56:59.320755",
+ "modified": "2026-06-17 23:13:52.678266",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Floriday Settings",
- "owner": "wilfred@upande.com",
+ "owner": "Administrator",
  "permissions": [
   {
    "create": 1,

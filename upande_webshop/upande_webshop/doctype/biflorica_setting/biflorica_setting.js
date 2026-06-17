@@ -155,6 +155,22 @@ frappe.ui.form.on("Biflorica Setting", {
 		inject_button_styles();
 		PRIMARY_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-primary"));
 		WARNING_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-warning"));
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Biflorica",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
+	},
+
+	use_shelf_stock(frm) {
+		// Show/hide the inline Shelf Stock buttons as the toggle changes.
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Biflorica",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
 	},
 
 	update_access_token(frm) {

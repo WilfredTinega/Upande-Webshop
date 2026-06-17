@@ -109,15 +109,6 @@ class WebshopSettings(Document):
 		if not frappe.db.get_value("Tax Rule", {"use_for_shopping_cart": 1}, "name"):
 			frappe.throw(frappe._("Set Tax Rule for shopping cart"), ShoppingCartSetupError)
 
-	def get_tax_master(self, billing_territory):
-		tax_master = self.get_name_from_territory(
-			billing_territory, "sales_taxes_and_charges_masters", "sales_taxes_and_charges_master"
-		)
-		return tax_master and tax_master[0] or None
-
-	def get_shipping_rules(self, shipping_territory):
-		return self.get_name_from_territory(shipping_territory, "shipping_rules", "shipping_rule")
-
 	def on_change(self):
 		old_doc = self.get_doc_before_save()
 
@@ -158,10 +149,8 @@ def get_configured_warehouses():
 def get_warehouse_totals(warehouses):
 	"""Return {warehouse_name: total_actual_qty} for each requested warehouse.
 
-	Mirrors the per-item source-of-truth choice in
-	upande_webshop.utils.product.get_web_item_qty_in_stock:
-	  - Variants and templates (has_variants=1 OR variant_of set) come from Bin.
-	  - Plain items come from Stem Length Bin summed across all lengths.
+	All items — variants, templates and plain — read from core Bin, summing
+	actual_qty per warehouse.
 
 	Group warehouses are expanded to their leaves so a group row aggregates its
 	children. Nothing is persisted; this is a read-only form display.
@@ -191,27 +180,13 @@ def get_warehouse_totals(warehouses):
 	placeholders = ",".join(["%s"] * len(all_leaves))
 	params = tuple(all_leaves)
 
+	# All items read from core Bin, summed per warehouse.
 	bin_rows = frappe.db.sql(
 		f"""
 		SELECT B.warehouse, COALESCE(SUM(B.actual_qty), 0) AS qty
 		FROM `tabBin` B
-		INNER JOIN `tabItem` I ON I.item_code = B.item_code
 		WHERE B.warehouse IN ({placeholders})
-		  AND (I.has_variants = 1 OR (I.variant_of IS NOT NULL AND I.variant_of != ''))
 		GROUP BY B.warehouse
-		""",
-		params,
-		as_dict=True,
-	)
-	slb_rows = frappe.db.sql(
-		f"""
-		SELECT S.warehouse, COALESCE(SUM(S.actual_qty), 0) AS qty
-		FROM `tabStem Length Bin` S
-		INNER JOIN `tabItem` I ON I.item_code = S.item_code
-		WHERE S.warehouse IN ({placeholders})
-		  AND I.has_variants = 0
-		  AND (I.variant_of IS NULL OR I.variant_of = '')
-		GROUP BY S.warehouse
 		""",
 		params,
 		as_dict=True,
@@ -219,8 +194,6 @@ def get_warehouse_totals(warehouses):
 
 	qty_by_leaf = {}
 	for r in bin_rows:
-		qty_by_leaf[r.warehouse] = qty_by_leaf.get(r.warehouse, 0.0) + flt(r.qty)
-	for r in slb_rows:
 		qty_by_leaf[r.warehouse] = qty_by_leaf.get(r.warehouse, 0.0) + flt(r.qty)
 
 	return {
@@ -679,3 +652,109 @@ def get_setup_check_html():
 		parts.append("</tbody></table>")
 
 	return {"html": "".join(parts), "missing": len(missing)}
+
+
+# ---------------------------------------------------------------------------
+# Customer Settings: per-customer warehouse override
+# ---------------------------------------------------------------------------
+# A customer can be pinned to a specific warehouse via the `customer_warehouse`
+# table on Webshop Settings (Customer Settings tab). When a logged-in customer
+# has a mapping, the storefront shows stock from THAT warehouse instead of the
+# default configured set. Enable/disable still uses the global Stem Length Price
+# flag (set_webshop_enabled_stock); this only changes which warehouse the qty is
+# read from and gates the listing to that warehouse's items.
+
+
+def get_customer_warehouse_map():
+	"""{customer: warehouse} from the Webshop Settings customer_warehouse table.
+
+	Last row wins on duplicate customers. Empty when no mappings configured."""
+	settings = frappe.get_cached_doc("Webshop Settings")
+	out = {}
+	for row in settings.get("customer_warehouse") or []:
+		if row.customer and row.warehouse:
+			out[row.customer] = row.warehouse
+	return out
+
+
+def get_warehouse_for_customer(customer):
+	"""Warehouse assigned to `customer`, or None when unmapped."""
+	if not customer:
+		return None
+	return get_customer_warehouse_map().get(customer)
+
+
+def get_session_customer_warehouse():
+	"""Warehouse for the logged-in customer, or None.
+
+	Resolves the session user → Customer (via the cart's permission-free helper)
+	then looks them up in the customer_warehouse table. None for guests, unmapped
+	customers, or when no mappings exist."""
+	from upande_webshop.upande_webshop.shopping_cart.cart import _session_customer_name
+
+	mapping = get_customer_warehouse_map()
+	if not mapping:
+		return None
+	customer = _session_customer_name()
+	return mapping.get(customer) if customer else None
+
+
+@frappe.whitelist()
+def get_customer_warehouse_rows(warehouse):
+	"""Available (item, stem_length, qty, bunch_size) rows for one warehouse.
+
+	Same shape get_warehouse_rows() returns, but scoped to a single `warehouse`
+	(group warehouses expanded to leaves, qty reported under the chosen name) so
+	the Customer Settings picker reuses the exact shelf/warehouse panel + the
+	global enable/disable flow. One row per (warehouse, item) with positive qty;
+	stem_length is "" (length is encoded in the variant code, same as the existing
+	warehouse picker)."""
+	from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
+	from upande_webshop.upande_webshop.doctype.box_type.box_type import (
+		_stems_per_bunch_from_uom,
+	)
+
+	def _bunch(sales_uom, stock_uom):
+		size = _stems_per_bunch_from_uom(sales_uom or stock_uom)
+		return size if size and size > 0 else 1
+
+	if not warehouse:
+		return []
+
+	if frappe.get_cached_value("Warehouse", warehouse, "is_group") == 1:
+		leaves = get_child_warehouses(warehouse) or []
+	else:
+		leaves = [warehouse]
+	if not leaves:
+		return []
+
+	placeholders = ",".join(["%s"] * len(leaves))
+	bins = frappe.db.sql(
+		f"""
+		SELECT b.item_code, i.item_name, i.sales_uom, i.stock_uom, b.actual_qty
+		FROM `tabBin` b
+		JOIN `tabItem` i ON i.name = b.item_code
+		WHERE b.warehouse IN ({placeholders}) AND b.actual_qty > 0
+		""",
+		tuple(leaves),
+		as_dict=True,
+	)
+
+	agg = {}
+	for b in bins:
+		row = agg.get(b.item_code)
+		if not row:
+			row = {
+				"shelf": warehouse,
+				"item_code": b.item_code,
+				"item_name": b.item_name or b.item_code,
+				"stem_length": "",
+				"shelf_qty": 0,
+				"bunch_size": _bunch(b.get("sales_uom"), b.get("stock_uom")),
+			}
+			agg[b.item_code] = row
+		row["shelf_qty"] += int(flt(b.actual_qty))
+
+	rows = [r for r in agg.values() if r["shelf_qty"] > 0]
+	rows.sort(key=lambda r: r["item_name"])
+	return rows

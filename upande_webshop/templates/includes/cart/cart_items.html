@@ -77,10 +77,11 @@
 						{{ _('Total Stems') }}: <strong>{{ total_stems }}</strong>
 					</span>
 					{% endif %}
-					{#- Box ID is assigned by the cart Box Type's pack rate: lines are
-					    packed into boxes of `packrate` stems (grouped by farm), same
-					    logic as the /order-stock packer. Box Label is an optional
-					    free-text note saved on this cart row. -#}
+					{#- Box ID is assigned by the resolved pack rate (cart Box Type →
+					    global Webshop Settings default): lines are packed into boxes
+					    of `packrate` stems (grouped by farm), same logic as the
+					    /order-stock packer. Box Label is an optional free-text note
+					    saved on this cart row. -#}
 					<div class="cart-item-box-info">
 						{% if d.get('custom_box_id') %}
 						<span class="item-subtitle cart-box-id-label">

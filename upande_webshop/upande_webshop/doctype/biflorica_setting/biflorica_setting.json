@@ -1,23 +1,30 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2025-11-18 21:09:26.329106",
+ "creation": "2026-06-17 16:24:31.121623",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "stocks_tab",
+  "offer_stock_section",
+  "refresh_stock",
+  "column_break_veun",
+  "publish_enabled_stock_only",
+  "use_shelf_stock",
+  "column_break_urnx",
+  "create_items_on_biflorica",
+  "section_break_zkbh",
+  "stock_items",
+  "stock_source_section",
+  "shelf_stock_actions",
+  "section_break_munm",
+  "items_to_create_in_biflorica",
   "offers_tab",
   "offer_event_frequency",
   "offer_cron_format",
   "column_break_offer",
-  "offer_enabled",
-  "stock_source_section",
-  "use_shelf_stock",
-  "column_break_dxkb",
-  "use_stem_length_age_bin",
-  "offer_stock_section",
-  "refresh_stock",
   "post_offers",
-  "stock_items",
+  "offer_enabled",
   "live_offers_section",
   "get_offers",
   "live_offers",
@@ -33,8 +40,10 @@
   "deals_filter_section",
   "deals_from_date",
   "deals_to_date",
+  "deals_mutation_date",
   "column_break_deals_filter",
   "deals_limit",
+  "deals_offset",
   "get_deals",
   "deals_action_section",
   "approve_deal",
@@ -50,8 +59,10 @@
   "predeal_filter_section",
   "predeal_from_date",
   "predeal_to_date",
+  "predeal_mutation_date",
   "column_break_predeal_filter",
   "predeal_limit",
+  "predeal_offset",
   "get_predeals",
   "predeal_scheduler_section",
   "predeal_last_run",
@@ -124,24 +135,27 @@
    "label": "Refresh Stock"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock",
    "fieldname": "stock_source_section",
    "fieldtype": "Section Break",
-   "label": "Stock Source"
+   "label": "Shelf Stock "
   },
   {
    "default": "0",
-   "description": "Read offer quantities from shelf stock ",
    "fieldname": "use_shelf_stock",
    "fieldtype": "Check",
    "label": "Use Shelf Stock?"
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.use_shelf_stock === 0",
-   "description": "Read offer quantities from the Stem Length Bin ",
-   "fieldname": "use_stem_length_age_bin",
+   "fieldname": "publish_enabled_stock_only",
    "fieldtype": "Check",
-   "label": "Use Stem Length Age Bin?"
+   "label": "Show Only Enabled Stock?"
+  },
+  {
+   "fieldname": "shelf_stock_actions",
+   "fieldtype": "HTML",
+   "label": "Shelf Stock Actions"
   },
   {
    "fieldname": "offer_stock_section",
@@ -149,6 +163,7 @@
    "label": "Stock Available for Offers"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock===0",
    "fieldname": "stock_items",
    "fieldtype": "Table",
    "label": "Stock Items",
@@ -230,6 +245,12 @@
    "label": "To Date"
   },
   {
+   "description": "Only fetch deals changed on/after this time (incremental sync)",
+   "fieldname": "deals_mutation_date",
+   "fieldtype": "Datetime",
+   "label": "Mutation Date"
+  },
+  {
    "fieldname": "column_break_deals_filter",
    "fieldtype": "Column Break"
   },
@@ -238,6 +259,12 @@
    "fieldname": "deals_limit",
    "fieldtype": "Int",
    "label": "Limit"
+  },
+  {
+   "description": "Pagination offset for the deals fetch",
+   "fieldname": "deals_offset",
+   "fieldtype": "Int",
+   "label": "Offset"
   },
   {
    "fieldname": "deals_action_section",
@@ -317,6 +344,12 @@
    "label": "To Date"
   },
   {
+   "description": "Only fetch predeals changed on/after this time (incremental sync)",
+   "fieldname": "predeal_mutation_date",
+   "fieldtype": "Datetime",
+   "label": "Mutation Date"
+  },
+  {
    "fieldname": "column_break_predeal_filter",
    "fieldtype": "Column Break"
   },
@@ -325,6 +358,12 @@
    "fieldname": "predeal_limit",
    "fieldtype": "Int",
    "label": "Limit"
+  },
+  {
+   "description": "Pagination offset for the predeals fetch",
+   "fieldname": "predeal_offset",
+   "fieldtype": "Int",
+   "label": "Offset"
   },
   {
    "fieldname": "get_predeals",
@@ -384,9 +423,10 @@
   },
   {
    "fieldname": "warehouse",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Warehouse",
+   "options": "Warehouse",
    "reqd": 1
   },
   {
@@ -472,15 +512,42 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_dxkb",
+   "fieldname": "stocks_tab",
+   "fieldtype": "Tab Break",
+   "label": "Stocks"
+  },
+  {
+   "fieldname": "column_break_veun",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_urnx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_zkbh",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "create_items_on_biflorica",
+   "fieldtype": "Button",
+   "label": "Create Items on Biflorica"
+  },
+  {
+   "fieldname": "items_to_create_in_biflorica",
+   "fieldtype": "HTML",
+   "label": "Items to Create In Biflorica"
+  },
+  {
+   "fieldname": "section_break_munm",
+   "fieldtype": "Section Break"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-10 01:57:42.789607",
+ "modified": "2026-06-18 00:13:50.321641",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Biflorica Setting",

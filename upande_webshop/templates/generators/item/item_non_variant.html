@@ -2,11 +2,14 @@
 {% set cart_settings = shopping_cart.cart_settings %}
 
 {# Stem-length picker always shows every globally defined Stem Length.
-   Per-length qty comes from get_stock_by_length() — same storefront warehouse
-   resolution as the listing grid, so a length that shows N in stock on the
-   listing also shows N on the detail page.
-   A length with no Stem Length Bin row, or actual_qty <= 0, renders disabled. #}
-{% set qty_by_sl = get_stock_by_length(doc.item_code) %}
+   With shelf mode on, availability is per-length: each row reports its OWN
+   length's shelf qty (qty_by_length) so the picker matches what the cart will
+   accept — lengths with no stock render disabled. Off shelf mode there is no
+   per-length dimension, so every row falls back to the item's total core Bin qty
+   (get_item_total_qty), same resolution as the listing grid. A length renders
+   disabled when its resolved qty is <= 0. #}
+{% set total_qty = get_item_total_qty(doc.item_code, doc.website_warehouse) %}
+{% set qty_by_length = get_item_qty_by_length(doc.item_code, doc.website_warehouse) %}
 
 {% set stem_master = frappe.get_all(
 	'Stem Length',
@@ -17,8 +20,8 @@
 {% set rows_ns = namespace(list=[]) %}
 {% for row in stem_master %}
 	{% if row.length %}
-		{% set qty = qty_by_sl.get(row.name, 0) %}
-		{% set rows_ns.list = rows_ns.list + [{'stem_length': row.length, 'stock_qty': qty}] %}
+		{% set _row_qty = qty_by_length.get(row.length, 0) if qty_by_length else total_qty %}
+		{% set rows_ns.list = rows_ns.list + [{'stem_length': row.length, 'stock_qty': _row_qty}] %}
 	{% endif %}
 {% endfor %}
 

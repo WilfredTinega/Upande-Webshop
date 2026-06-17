@@ -4,6 +4,8 @@ from datetime import datetime, timedelta
 import json
 import math
 
+_logger = frappe.logger("biflorica", allow_site=True)
+
 @frappe.whitelist()
 def post_all_items_to_biflorica():
     """
@@ -16,7 +18,7 @@ def post_all_items_to_biflorica():
             frappe.throw("Biflorica Setting not found. Please create the document first.")
         
         settings = frappe.get_doc("Biflorica Setting", "Biflorica Setting")
-        frappe.log_error(f"Starting Biflorica sync for warehouse: {settings.warehouse}", "Biflorica Sync")
+        _logger.info(f"[Biflorica Sync] Starting Biflorica sync for warehouse: {settings.warehouse}")
 
         # Validate required settings
         required_fields = {
@@ -39,7 +41,7 @@ def post_all_items_to_biflorica():
         # Get stock items from warehouse
         items_data = get_warehouse_stock_items(settings.warehouse)
         if not items_data:
-            frappe.log_error(f"No stock found in warehouse: {settings.warehouse}", "Biflorica Sync")
+            _logger.info(f"[Biflorica Sync] No stock found in warehouse: {settings.warehouse}")
             return {
                 "success": True,
                 "message": "No stock available to create offers.",
@@ -48,25 +50,25 @@ def post_all_items_to_biflorica():
             }
 
         # LOG ALL AVAILABLE ITEMS TO ERROR LOG
-        frappe.log_error(f"FOUND {len(items_data)} ITEMS IN WAREHOUSE:", "Biflorica Available Items")
+        _logger.info(f"[Biflorica Available Items] FOUND {len(items_data)} ITEMS IN WAREHOUSE:")
         for i, item in enumerate(items_data, 1):
             item_price = get_item_price(item["item_code"])
             stem_length = get_stem_length_from_stock_entry(item["item_code"], settings.warehouse)
-            frappe.log_error(f"Item {i}: {item.get('item_code')} - {item.get('item_name')} - Qty: {item.get('actual_qty')} - Price: {item_price} - Stem Length: {stem_length}", "Biflorica Available Items")
-        
-        frappe.log_error(f"Processing {len(items_data)} items with stock", "Biflorica Sync")
+            _logger.info(f"[Biflorica Available Items] Item {i}: {item.get('item_code')} - {item.get('item_name')} - Qty: {item.get('actual_qty')} - Price: {item_price} - Stem Length: {stem_length}")
+
+        _logger.info(f"[Biflorica Sync] Processing {len(items_data)} items with stock")
 
         # Prepare offers payload with CORRECT FORMAT and get individual offers
         offers_payload, individual_offers = prepare_offers_payload_with_details(items_data, settings)
         
         # LOG THE FINAL PAYLOAD BEING SENT
-        frappe.log_error(f"FINAL PAYLOAD BEING SENT TO BIFLORICA:", "Biflorica Payload")
-        frappe.log_error(json.dumps(offers_payload, indent=2), "Biflorica Payload")
-        
+        _logger.info(f"[Biflorica Payload] FINAL PAYLOAD BEING SENT TO BIFLORICA:")
+        _logger.info(f"[Biflorica Payload] {json.dumps(offers_payload, indent=2)}")
+
         # Log individual offers for debugging
-        frappe.log_error("INDIVIDUAL OFFERS PAYLOAD DETAILS:", "Biflorica Offers Details")
+        _logger.info(f"[Biflorica Offers Details] INDIVIDUAL OFFERS PAYLOAD DETAILS:")
         for i, offer in enumerate(individual_offers, 1):
-            frappe.log_error(f"Offer {i}: {json.dumps(offer, indent=2)}", "Biflorica Offers Details")
+            _logger.info(f"[Biflorica Offers Details] Offer {i}: {json.dumps(offer, indent=2)}")
         
         # Post to Biflorica API
         api_response = post_to_biflorica_api(offers_payload, settings)
@@ -109,7 +111,7 @@ def validate_access_token(settings):
         )
         
         if response.status_code == 200:
-            frappe.log_error("Access token validation successful", "Biflorica Auth")
+            _logger.info(f"[Biflorica Auth] Access token validation successful")
             return True
         else:
             frappe.log_error(f"Token validation failed: {response.status_code} - {response.text}", "Biflorica Auth")
@@ -142,7 +144,7 @@ def get_stem_length_from_stock_entry(item_code, warehouse):
             if stem_length:
                 cleaned_length = validate_and_clean_stem_length(stem_length)
                 if cleaned_length:
-                    frappe.log_error(f"Found stem length for {item_code} in Stock Entry {stock_entries[0].name}: {stem_length} -> {cleaned_length}", "Biflorica Stem Length")
+                    _logger.info(f"[Biflorica Stem Length] Found stem length for {item_code} in Stock Entry {stock_entries[0].name}: {stem_length} -> {cleaned_length}")
                     return cleaned_length
         
         # If no stem length found in Stock Entry, check Stock Entry Detail items
@@ -163,16 +165,16 @@ def get_stem_length_from_stock_entry(item_code, warehouse):
             if stem_length:
                 cleaned_length = validate_and_clean_stem_length(stem_length)
                 if cleaned_length:
-                    frappe.log_error(f"Found stem length for {item_code} in Stock Entry Detail {stock_entry_details[0].parent}: {stem_length} -> {cleaned_length}", "Biflorica Stem Length")
+                    _logger.info(f"[Biflorica Stem Length] Found stem length for {item_code} in Stock Entry Detail {stock_entry_details[0].parent}: {stem_length} -> {cleaned_length}")
                     return cleaned_length
         
         # If still no stem length found, try to get from item master as fallback
         item_stem_length = get_stem_length_from_item_master(item_code)
         if item_stem_length and item_stem_length != "50":
-            frappe.log_error(f"Using stem length from Item master for {item_code}: {item_stem_length}", "Biflorica Stem Length")
+            _logger.info(f"[Biflorica Stem Length] Using stem length from Item master for {item_code}: {item_stem_length}")
             return item_stem_length
-        
-        frappe.log_error(f"No stem length found for {item_code} in Stock Entry or Item master, using default 50", "Biflorica Stem Length Warning")
+
+        _logger.info(f"[Biflorica Stem Length Warning] No stem length found for {item_code} in Stock Entry or Item master, using default 50")
         return "50"
         
     except Exception as e:
@@ -223,10 +225,10 @@ def validate_and_clean_stem_length(stem_length):
         if 20 <= stem_float <= 120:  # Reasonable range for flower stems
             # Round to nearest tens
             rounded_length = round_to_nearest_tens(stem_float)
-            frappe.log_error(f"Rounded stem length {stem_float} to nearest tens: {rounded_length}", "Biflorica Stem Length Rounding")
+            _logger.info(f"[Biflorica Stem Length Rounding] Rounded stem length {stem_float} to nearest tens: {rounded_length}")
             return str(rounded_length)
         else:
-            frappe.log_error(f"Stem length {stem_float} outside reasonable range (20-120cm)", "Biflorica Stem Length Validation")
+            _logger.info(f"[Biflorica Stem Length Validation] Stem length {stem_float} outside reasonable range (20-120cm)")
             return None
     except ValueError:
         # Handle ranges like "60-70"
@@ -239,7 +241,7 @@ def validate_and_clean_stem_length(stem_length):
                     # Return the average rounded to nearest tens
                     average = (num1 + num2) / 2
                     rounded_length = round_to_nearest_tens(average)
-                    frappe.log_error(f"Converted stem length range {stem_str} to average: {average} and rounded to: {rounded_length}", "Biflorica Stem Length Conversion")
+                    _logger.info(f"[Biflorica Stem Length Conversion] Converted stem length range {stem_str} to average: {average} and rounded to: {rounded_length}")
                     return str(rounded_length)
             except:
                 pass
@@ -252,7 +254,7 @@ def validate_and_clean_stem_length(stem_length):
                 first_num = float(numbers[0])
                 if 20 <= first_num <= 120:
                     rounded_length = round_to_nearest_tens(first_num)
-                    frappe.log_error(f"Extracted stem length {first_num} from text: {stem_str} and rounded to: {rounded_length}", "Biflorica Stem Length Extraction")
+                    _logger.info(f"[Biflorica Stem Length Extraction] Extracted stem length {first_num} from text: {stem_str} and rounded to: {rounded_length}")
                     return str(rounded_length)
             except:
                 pass
@@ -271,48 +273,13 @@ def round_to_nearest_tens(number):
     return int(round(number / 10) * 10)
 
 def _biflorica_item_qty_source(warehouse):
-    """Return {item_code: qty} for items with positive stock, honoring the
-    Biflorica Setting stock-source flags.
+    """Return {item_code: qty} for items with positive stock available for sale.
 
-    Precedence mirrors the webshop's plain-item chain:
-      - use_shelf_stock      -> kaitet Shelf (not warehouse-scoped)
-      - use_stem_length_age_bin -> Stem Length Bin (+ Age Bin gap-fill), scoped
-                                   to the configured warehouse
-      - neither              -> core Bin in the configured warehouse
-    Each integration reads ITS OWN flag from Biflorica Setting.
+    "Available for sale" is the core Bin balance of the configured Biflorica
+    warehouse, scoped to `warehouse`. (Stock is no longer staged via a shelf→online
+    Material Transfer — publishing to the storefront flips the Stem Length Price
+    `enabled` flag instead, and the raw warehouse Bin is read directly here.)
     """
-    from upande_webshop.upande_webshop.utils.shelf_stock import (
-        get_shelf_qty_for_items,
-        shelf_stock_enabled,
-    )
-
-    if shelf_stock_enabled("Biflorica Setting"):
-        # Shelf is global; offer every plain item that has stems on a shelf.
-        variety_codes = frappe.get_all(
-            "Shelf Item", filters={"parenttype": "Shelf"}, pluck="variety", distinct=True
-        )
-        variety_codes = [c for c in variety_codes if c]
-        qty_by_code = get_shelf_qty_for_items(variety_codes)
-        return {code: qty for code, qty in qty_by_code.items() if qty > 0}
-
-    from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-        age_bin_enabled,
-        get_age_bin_qty_for_items,
-    )
-
-    if age_bin_enabled("Biflorica Setting"):
-        slb_codes = frappe.get_all(
-            "Stem Length Bin",
-            filters={"warehouse": warehouse, "actual_qty": [">", 0]},
-            pluck="item_code",
-            distinct=True,
-        )
-        if not slb_codes:
-            return {}
-        qty_by_code = get_age_bin_qty_for_items(slb_codes, [warehouse])
-        return {code: qty for code, qty in qty_by_code.items() if qty > 0}
-
-    # Default: core Bin in the configured warehouse.
     bins = frappe.get_all(
         "Bin",
         fields=["item_code", "actual_qty"],
@@ -325,8 +292,8 @@ def get_warehouse_stock_items(warehouse):
     """
     Get all items with stock in the specified warehouse.
 
-    Quantity source follows the Biflorica Setting stock-source flags
-    (use_shelf_stock / use_stem_length_age_bin); see _biflorica_item_qty_source.
+    Quantity source follows the Biflorica Setting stock-source flag
+    (use_shelf_stock); see _biflorica_item_qty_source.
     """
     qty_by_code = _biflorica_item_qty_source(warehouse)
     if not qty_by_code:
@@ -491,7 +458,7 @@ def prepare_offers_payload_with_details(items_data, settings):
         # Prepare picture URL
         picture_url = get_picture_url(item)
         
-        frappe.log_error(f"Processing item: {item['item_code']} - Biflorica Type: {flower_type} - Biflorica Variety: {flower_variety} - Rounded Stem Length: {stem_length} - Price: {price_per_stem} - Packing: 300 - BoxType: HB", "Biflorica Item Mapping")
+        _logger.info(f"[Biflorica Item Mapping] Processing item: {item['item_code']} - Biflorica Type: {flower_type} - Biflorica Variety: {flower_variety} - Rounded Stem Length: {stem_length} - Price: {price_per_stem} - Packing: 300 - BoxType: HB")
         
         # Prepare offer object in EXACT API format - ALL VALUES AS STRINGS
         offer = {
@@ -621,8 +588,8 @@ def post_to_biflorica_api(offers_payload, settings):
         )
         
         # LOG THE API RESPONSE
-        frappe.log_error(f"API RESPONSE STATUS: {response.status_code}", "Biflorica API Response")
-        frappe.log_error(f"API RESPONSE BODY: {response.text}", "Biflorica API Response")
+        _logger.info(f"[Biflorica API Response] API RESPONSE STATUS: {response.status_code}")
+        _logger.info(f"[Biflorica API Response] API RESPONSE BODY: {response.text}")
         
         if response.status_code in [200, 201]:
             # Check if response indicates validation errors
@@ -652,7 +619,7 @@ def post_to_biflorica_api(offers_payload, settings):
                     "status_code": response.status_code
                 }
             else:
-                frappe.log_error(f"Successfully posted {len(offers_payload['data'])} offers to Biflorica", "Biflorica Sync")
+                _logger.info(f"[Biflorica Sync] Successfully posted {len(offers_payload['data'])} offers to Biflorica")
                 return {
                     "success": True,
                     "message": f"Successfully posted {len(offers_payload['data'])} offers to Biflorica",

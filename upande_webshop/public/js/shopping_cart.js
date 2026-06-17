@@ -840,8 +840,17 @@ $.extend(shopping_cart, {
 		});
 	},
 
+	is_guest: function() {
+		// frappe.session is undefined on webshop/portal pages, so a bare
+		// frappe.session.user throws. Prefer the body attribute Frappe sets in
+		// base.html; fall back to the (guarded) session object on desk pages.
+		var status = document.body && document.body.getAttribute('frappe-session-status');
+		if (status) return status === 'logged-out';
+		return !!(frappe.session && frappe.session.user === 'Guest');
+	},
+
 	update_cart: function(opts) {
-		if (frappe.session.user==="Guest") {
+		if (shopping_cart.is_guest()) {
 			if (localStorage) {
 				localStorage.setItem("last_visited", window.location.pathname);
 			}
@@ -885,7 +894,7 @@ $.extend(shopping_cart, {
 		var cart_count = (explicit_count !== undefined)
 			? explicit_count
 			: frappe.get_cookie("cart_count");
-		if(frappe.session.user==="Guest") {
+		if(shopping_cart.is_guest()) {
 			cart_count = 0;
 		}
 
@@ -988,7 +997,7 @@ $.extend(shopping_cart, {
 			const $btn = $(e.currentTarget);
 			$btn.prop('disabled', true);
 
-			if (frappe.session.user==="Guest") {
+			if (shopping_cart.is_guest()) {
 				if (localStorage) {
 					localStorage.setItem("last_visited", window.location.pathname);
 				}

@@ -11,7 +11,7 @@ frappe.ui.form.on("Webshop Settings", {
 
 		frappe.breadcrumbs.add({
 			module: "Upande Webshop",
-			workspace: "Upande Webshop",
+			workspace: "Ecommerce",
 			doctype: "Webshop Settings",
 		});
 	},
@@ -52,8 +52,12 @@ frappe.ui.form.on("Webshop Settings", {
 			frm._upande_prices_progress_listener = true;
 		}
 
-		if (frm.doc.enabled) {
-			frm.get_field('store_page_docs').$wrapper.removeClass('hide-control').html(
+		// `store_page_docs` is a stock-ERPNext help field not carried into this
+		// app's doctype JSON; guard so a missing field doesn't throw and abort
+		// the rest of refresh() (which adds the custom buttons below).
+		const store_page_docs = frm.get_field('store_page_docs');
+		if (frm.doc.enabled && store_page_docs && store_page_docs.$wrapper) {
+			store_page_docs.$wrapper.removeClass('hide-control').html(
 				`<div>${__("Follow these steps to create a landing page for your store")}:
 					<a href="https://docs.erpnext.com/docs/user/manual/en/website/store-landing-page"
 						style="color: var(--gray-600)">
@@ -67,96 +71,17 @@ frappe.ui.form.on("Webshop Settings", {
 			?.removeClass("btn-default")
 			.addClass("btn-primary");
 
-		frm.add_custom_button(__("Repost Bin (all Website Items)"), () => {
-			const d = new frappe.ui.Dialog({
-				title: __("Repost Bin from Stock Ledger"),
-				fields: [
-					{
-						fieldtype: "HTML",
-						options: `
-							<div class="text-muted small">
-								<p>${__("Submits one Repost Item Valuation per Website Item × configured Webshop warehouse. ERPNext's hourly repost cron will then rebuild <b>Bin.actual_qty</b> from the Stock Ledger.")}</p>
-								<p><b>${__("This is expensive")}</b> — ${__("reposting walks every SLE for each item/warehouse pair. Run it during off-hours and only when storefront stock visibly disagrees with the Stock Ledger.")}</p>
-								<p>${__("Pairs already Queued / In Progress will be skipped.")}</p>
-							</div>
-						`,
-					},
-				],
-				primary_action_label: __("Start Repost"),
-				primary_action: () => {
-					d.hide();
-					frappe.show_progress(__("Webshop Prices Sync"), 1, 100, __("Queueing reposts..."));
-					frappe.call({
-						method: "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.enqueue_repost_for_website_items",
-						args: { run_async: 1 },
-						callback: (r) => {
-							const result = (r && r.message) || {};
-							if (!result.enqueued) {
-								frappe.hide_progress();
-								frappe.show_alert({
-									message: __("Could not start repost."),
-									indicator: "red",
-								}, 8);
-								return;
-							}
-							frappe.show_alert({
-								message: __("Repost queue-up started in background. Watch the progress bar."),
-								indicator: "blue",
-							}, 6);
-						},
-						error: () => {
-							frappe.hide_progress();
-						},
-					});
-				},
-			});
-			d.show();
-		}, __("Actions"));
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "",
+			fieldname: "shelf_stock_actions",
+			visible: true,
+			source: frm.doc.use_shelf_stock ? "shelf" : "warehouse",
+		});
 
-		frm.add_custom_button(__("Backfill Per-Length Prices"), () => {
-			const d = new frappe.ui.Dialog({
-				title: __("Backfill Per-Length Item Prices"),
-				fields: [
-					{
-						fieldtype: "HTML",
-						options: `
-							<div class="text-muted small">
-								<p>${__("Seeds one <b>Item Price</b> row per master Stem Length for every enabled <b>non-variant</b> rose / David Austin item. Variants are skipped — they encode length in the item code.")}</p>
-								<p>${__("Run this once after first install/migration. Ongoing items are maintained automatically when saved, so re-running only fills gaps — it is safe (idempotent) and creates no duplicates.")}</p>
-							</div>
-						`,
-					},
-				],
-				primary_action_label: __("Start Backfill"),
-				primary_action: () => {
-					d.hide();
-					frappe.show_progress(__("Webshop Prices Sync"), 1, 100, __("Backfilling per-length prices..."));
-					frappe.call({
-						method: "upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices.enqueue_backfill_per_length_prices",
-						args: { run_async: 1 },
-						callback: (r) => {
-							const result = (r && r.message) || {};
-							if (!result.enqueued) {
-								frappe.hide_progress();
-								frappe.show_alert({
-									message: __("Could not start backfill."),
-									indicator: "red",
-								}, 8);
-								return;
-							}
-							frappe.show_alert({
-								message: __("Backfill started in background. Watch the progress bar."),
-								indicator: "blue",
-							}, 6);
-						},
-						error: () => {
-							frappe.hide_progress();
-						},
-					});
-				},
-			});
-			d.show();
-		}, __("Actions"));
+		// Customer Settings tab: render the enable/disable picker for the warehouse
+		// of the most-recently-selected customer mapping row.
+		render_customer_warehouse_picker(frm);
 
 		frappe.model.with_doctype("Website Item", () => {
 			const web_item_meta = frappe.get_meta('Website Item');
@@ -179,14 +104,23 @@ frappe.ui.form.on("Webshop Settings", {
 		toggle_setup_check(frm);
 	},
 	enabled: function(frm) {
-		if (frm.doc.enabled === 1) {
-			frm.set_value('enable_variants', 1);
-		}
-		else {
+		// Only clear fields that actually exist on this doctype. `enable_variants`
+		// and `quotation_series` are not Webshop Settings fields here (stock-ERPNext
+		// leftovers) — set_value on them was a silent no-op.
+		if (frm.doc.enabled !== 1) {
 			frm.set_value('company', '');
 			frm.set_value('default_customer_group', '');
-			frm.set_value('quotation_series', '');
 		}
+	},
+	use_shelf_stock: function(frm) {
+		// Show/hide the inline Shelf Stock buttons as the toggle changes.
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "",
+			fieldname: "shelf_stock_actions",
+			visible: true,
+			source: frm.doc.use_shelf_stock ? "shelf" : "warehouse",
+		});
 	},
 	sync_floriday_items: function(frm) {
 		const d = new frappe.ui.Dialog({
@@ -255,6 +189,39 @@ frappe.ui.form.on("Webshop Settings", {
 		});
 	}
 });
+
+// When a customer-warehouse mapping row picks a warehouse (or a row is added/
+// removed), re-render the Customer Items picker for that warehouse.
+frappe.ui.form.on("Customer Setting", {
+	warehouse(frm, cdt, cdn) {
+		render_customer_warehouse_picker(frm, locals[cdt][cdn]);
+	},
+	customer_warehouse_add(frm) {
+		render_customer_warehouse_picker(frm);
+	},
+	customer_warehouse_remove(frm) {
+		render_customer_warehouse_picker(frm);
+	},
+});
+
+// Render the enable/disable stock picker into the `customer_items` HTML field,
+// sourced from the warehouse of the given row (or the last mapping row with a
+// warehouse). Enable/disable uses the same global flag as the shelf picker; this
+// only changes which warehouse's items are listed.
+function render_customer_warehouse_picker(frm, row) {
+	const rows = frm.doc.customer_warehouse || [];
+	const active = row && row.warehouse
+		? row
+		: [...rows].reverse().find((r) => r.warehouse);
+	upande_webshop.render_shelf_move_buttons({
+		frm,
+		channel: "",
+		fieldname: "customer_items",
+		visible: true,
+		source: "customer",
+		warehouse: active ? active.warehouse : null,
+	});
+}
 
 function toggle_setup_check(frm) {
 	const field = frm.get_field("setup_check");
@@ -700,3 +667,8 @@ function open_sync_dialog(frm, { source, title, intro, show_price_list }) {
 	});
 	d.show();
 }
+
+// Shelf <-> online-warehouse move dialog. Sources stems from a kaitet Shelf and
+// transfers them into the chosen channel's (Floriday / Biflorica) warehouse via a
+// real Material Transfer Stock Entry, decrementing the Shelf Item rows. The reverse
+// direction returns staged stock to the shelf.

@@ -1,21 +1,28 @@
 import frappe
 import requests
 import uuid
-import random
 from datetime import datetime, timezone
 from typing import Any, Dict
 import json
 
 @frappe.whitelist()
-def create_batches_on_floriday():
+def create_batches_on_floriday(selected_rows=None):
     """
-    Post one batch per (item, stem_length) row from `get_floriday_stock` against
-    the Floriday warehouse (Online Available for Sale). Each batch carries the
-    stem-length-specific tradeItemId and the SLE-aggregated numberOfPieces.
+    Post one batch per (item, stem_length) row against the Floriday warehouse
+    (Online Available for Sale). Each batch carries the stem-length-specific
+    tradeItemId and a numberOfPieces.
 
-    Replaces the old Bin-driven flow which collapsed all stem lengths into one
-    qty against a single tradeItemId — that overstated availability and lost
-    the per-grade dimension.
+    Row source:
+    - Default (selected_rows is None): every (item, stem_length) balance from
+      `get_floriday_stock` — SLE-aggregated, or shelf-sourced when the
+      Use Shelf Stock flag is on. The full qty is used (floored to 200).
+    - Shelf picker (selected_rows given): the explicit rows the user enabled in
+      the "Shelf Stock Items" panel. Each row supplies its own chosen qty.
+      `selected_rows` is a JSON list (or list) of
+      {item_code, stem_length, trade_item_id, qty}.
+
+    Either way the per-batch qty is floored to a 200 multiple; rows below 200
+    are skipped (Floriday requires batches in multiples of 200).
     """
 
     settings = frappe.get_single("Floriday Settings")
@@ -31,15 +38,32 @@ def create_batches_on_floriday():
     if not SOURCE_WAREHOUSE:
         frappe.throw("Warehouse not configured in Floriday Settings")
 
-    from upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings import get_floriday_stock
+    if selected_rows is not None:
+        if isinstance(selected_rows, str):
+            selected_rows = json.loads(selected_rows or "[]")
+        # Normalise to the same row shape get_floriday_stock returns.
+        stock_rows = [
+            {
+                "item_code": r.get("item_code"),
+                "stem_length": r.get("stem_length") or "",
+                "trade_item_id": r.get("trade_item_id"),
+                "qty": int(float(r.get("qty") or 0)),
+            }
+            for r in (selected_rows or [])
+            if r.get("trade_item_id") and int(float(r.get("qty") or 0)) > 0
+        ]
+        if not stock_rows:
+            return {"message": "No enabled shelf rows with a usable quantity."}
+    else:
+        from upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings import get_floriday_stock
 
-    stock_rows = get_floriday_stock(SOURCE_WAREHOUSE)
-    if not stock_rows:
-        frappe.log_error(
-            f"No graded stock with Floriday mappings in {SOURCE_WAREHOUSE}",
-            "Floriday Batch Creation",
-        )
-        return {"message": "No stock to create batches."}
+        stock_rows = get_floriday_stock(SOURCE_WAREHOUSE)
+        if not stock_rows:
+            frappe.log_error(
+                f"No graded stock with Floriday mappings in {SOURCE_WAREHOUSE}",
+                "Floriday Batch Creation",
+            )
+            return {"message": "No stock to create batches."}
 
     results = []
 

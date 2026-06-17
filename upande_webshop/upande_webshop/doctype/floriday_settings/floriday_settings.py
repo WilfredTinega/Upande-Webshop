@@ -78,9 +78,9 @@ class FloridaySettings(Document):
 		return create_sales_orders_from_floriday()
 
 	@frappe.whitelist()
-	def create_batch(self):
+	def create_batch(self, selected_rows=None):
 		from upande_webshop.upande_webshop.doctype.floriday_settings.floriday_batch import create_batches_on_floriday
-		return create_batches_on_floriday()
+		return create_batches_on_floriday(selected_rows=selected_rows)
 
 	@frappe.whitelist()
 	def create_supplyine(self):
@@ -412,49 +412,55 @@ def _available_for_sale_warehouses(company=None):
 
 
 def _floriday_flagged_qty_map(item_codes, warehouses):
-	"""Per-(item_code, normalized stem length) qty from the flagged stock source.
+	"""Per-(item_code, normalized stem length) qty available for sale on Floriday.
 
-	Returns None when neither Floriday-Settings flag is on (caller keeps the SLE
-	qty). Otherwise returns {(item_code, "52cm"): qty, ...}:
-	  - use_shelf_stock      -> kaitet Shelf, summed per length (not warehouse-scoped)
-	  - use_stem_length_age_bin -> Stem Length Bin per length (+ Age Bin gap-fill),
-	                               scoped to the configured warehouses
+	Returns None when the shelf flag is off (caller keeps the SLE qty). Otherwise
+	returns {(item_code, "52cm"): qty, ...}.
 
-	Keys use _normalize_stem_length on both sides so "52cm"/"52"/"52 cm" align with
-	the SLE row's normalized stem length used at the call site.
+	With shelf mode on, the published qty is the RAW shelf total — every stem
+	physically on a `Shelf` (Shelf Item.stem_qty), summed per (variety, stem
+	length), the same source the storefront reads. This offers all shelf stems
+	to Floriday regardless of whether they've been staged into the online
+	warehouse.
+
+	`Shelf Item.variety` is the plain item code and `Shelf Item.stem_length` is
+	the Stem Length name (e.g. "52cm"). On kaitet (custom-field model) the SLE
+	rows at the call site are keyed on the same plain item code, so the keys
+	align. Keys use _normalize_stem_length on both sides so "52cm"/"52"/"52 cm"
+	match the call site's normalized stem length.
 	"""
 	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
 		_normalize_stem_length,
 	)
 	from upande_webshop.upande_webshop.utils.shelf_stock import (
-		get_shelf_qty_by_length,
 		shelf_stock_enabled,
+		get_shelf_qty_by_length,
 	)
 
-	shelf = shelf_stock_enabled("Floriday Settings")
-
-	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-		age_bin_enabled,
-		get_age_bin_qty_by_length,
-	)
-
-	age = age_bin_enabled("Floriday Settings")
-	if not shelf and not age:
+	if not shelf_stock_enabled("Floriday Settings"):
 		return None
+
+	# Shelf rows only ever carry the plain/template item code (Shelf Item.variety);
+	# no variant ever sits on a shelf. On a variant-model site the SLE item_codes
+	# are variant codes, which would never match a shelf row — so substituting
+	# would zero out every row. Refuse to apply shelf qty there (keep SLE qty)
+	# rather than silently publishing 0.
+	if not _site_has_sle_stem_length():
+		return None
+
+	if not item_codes:
+		return {}
 
 	qty_map = {}
 	for code in item_codes:
-		if shelf:
-			by_len = get_shelf_qty_by_length(code)
-		else:
-			by_len = get_age_bin_qty_by_length(code, list(warehouses))
-		for stem_length, qty in by_len.items():
-			key = (code, _normalize_stem_length(stem_length))
+		# {stem_length_name: total_stems} across all shelves for this item.
+		for stem_length_name, qty in get_shelf_qty_by_length(code).items():
+			key = (code, _normalize_stem_length(stem_length_name))
 			qty_map[key] = qty_map.get(key, 0.0) + flt(qty)
 	return qty_map
 
 
-def _aggregate_floriday_stock(warehouses):
+def _aggregate_floriday_stock(warehouses, apply_stock_source=False):
 	"""SLE-aggregated per-(warehouse, item, stem_length) balances joined to
 	Floriday Items. Handles two data models transparently:
 
@@ -463,6 +469,11 @@ def _aggregate_floriday_stock(warehouses):
 	- Variant model (mona): each stem length is its own variant item_code (e.g.
 	  Alicia-50cm). Aggregation groups by item_code only; stem length is read
 	  from the variant attribute and the template's Floriday mapping.
+
+	`apply_stock_source`: when True (the Floriday-warehouse / publish path), the
+	shelf or age-bin qty override is applied — the published qty is taken from
+	that source instead of the SLE sum. The System-stock view passes False so it
+	always reports real per-warehouse SLE balances, never the global shelf total.
 	"""
 	by_code_length, by_code = _get_floriday_item_index()
 	if not by_code_length or not warehouses:
@@ -475,13 +486,6 @@ def _aggregate_floriday_stock(warehouses):
 	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import _normalize_stem_length
 
 	use_sle_stem = _site_has_sle_stem_length()
-
-	# Stock-source override: when Floriday Settings opts into shelf or age-bin
-	# stock, the published qty for each (item, stem length) is taken from that
-	# source instead of the SLE sum. The SLE aggregation still drives WHICH
-	# (item, length, trade_item) rows exist; only the qty is swapped. Keyed by
-	# (item_code, normalized stem length). See _floriday_flagged_qty_map.
-	flagged_qty = _floriday_flagged_qty_map(candidate_items, warehouses)
 
 	# Resolve the set of item codes to query SLE for. Custom-field sites query
 	# the template (or whatever item_code is on Floriday Items). Variant sites
@@ -496,6 +500,14 @@ def _aggregate_floriday_stock(warehouses):
 
 	if not candidate_items:
 		return []
+
+	# Stock-source override: when Floriday Settings opts into shelf or age-bin
+	# stock, the published qty for each (item, stem length) is taken from that
+	# source instead of the SLE sum. The SLE aggregation still drives WHICH
+	# (item, length, trade_item) rows exist; only the qty is swapped. Keyed by
+	# (item_code, normalized stem length). See _floriday_flagged_qty_map.
+	# Only applied on the publish path (Floriday warehouse), never the system view.
+	flagged_qty = _floriday_flagged_qty_map(candidate_items, warehouses) if apply_stock_source else None
 
 	if use_sle_stem:
 		sle_rows = frappe.db.sql(
@@ -566,10 +578,11 @@ def _aggregate_floriday_stock(warehouses):
 		# Swap in shelf/age-bin qty when a stock-source flag is on. The map is
 		# keyed by (item_code, normalized stem length); fall back to the SLE qty
 		# only when no flag is active (flagged_qty is None then).
+		# Keep every SLE row even when its shelf qty is 0 — the row set must match
+		# the normal-warehouse view; only the qty is swapped (the batch-creation
+		# step decides what to actually post, e.g. the 200-multiple minimum).
 		if flagged_qty is not None:
 			qty = flagged_qty.get((row.item_code, norm_target), 0.0)
-			if qty <= 0:
-				continue
 		else:
 			qty = float(row.qty)
 
@@ -600,7 +613,123 @@ def get_floriday_stock(warehouse=None):
 		warehouse = _get_settings_doc().warehouse
 	if not warehouse:
 		return []
-	return _aggregate_floriday_stock([warehouse])
+	return _aggregate_floriday_stock([warehouse], apply_stock_source=True)
+
+
+@frappe.whitelist()
+def get_floriday_batch_rows():
+	"""Batch rows derived from the items ENABLED on the Stock tab.
+
+	The Stock tab's Enable/Disable picker publishes rows by flipping
+	`Stem Length Price.enabled` (see shelf_move.js / set_webshop_enabled_stock).
+	Those enabled rows — not the separate "Shelf Stock Items" picker — are the
+	source for batching: every enabled (item, stem length) that also has a
+	Floriday `trade_item_id` mapping is returned, with its published qty
+	(Stem Length Price.stock_qty) floored to a 200 multiple.
+
+	Returns a list of {item_code, item_name, stem_length, trade_item_id, qty},
+	one per batchable enabled row (qty >= 200, mapping present). Rows without a
+	Floriday mapping or below 200 stems are dropped.
+	"""
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+		_normalize_stem_length,
+	)
+	from upande_webshop.upande_webshop.doctype.webshop_item_prices.webshop_item_prices import (
+		get_webshop_enabled_rows,
+	)
+
+	BATCH_MULTIPLE = 200
+
+	by_code_length, by_code = _get_floriday_item_index()
+	if not by_code:
+		return []
+
+	# Index Floriday mappings by (item_code, normalized length) so a published
+	# "52cm"/"52" length matches the mapping's length regardless of formatting.
+	mapping_by_norm = {}
+	for code, mappings in by_code.items():
+		for m in mappings:
+			mapping_by_norm[(code, _normalize_stem_length(m.stem_length))] = m
+
+	rows = []
+	for r in get_webshop_enabled_rows():
+		match = mapping_by_norm.get(
+			(r.get("item_code"), _normalize_stem_length(r.get("stem_length")))
+		)
+		if not match:
+			continue  # enabled length not offered to Floriday — can't batch it
+		qty = int(flt(r.get("stock_qty")) // BATCH_MULTIPLE * BATCH_MULTIPLE)
+		if qty < BATCH_MULTIPLE:
+			continue
+		rows.append({
+			"item_code": r.get("item_code"),
+			"item_name": r.get("item_name") or match.item_name,
+			"stem_length": r.get("stem_length") or match.stem_length,
+			"trade_item_id": match.trade_item_id,
+			"qty": qty,
+		})
+
+	rows.sort(key=lambda x: (x["item_name"] or "", x["stem_length"] or ""))
+	return rows
+
+
+@frappe.whitelist()
+def get_floriday_shelf_rows():
+	"""Shelf-mode batch picker rows: every (item, stem length) sitting on a Shelf
+	that ALSO has a Floriday trade_item_id mapping.
+
+	Returns a list of
+	  {item_code, item_name, stem_length, trade_item_id, shelf_qty}
+	one row per (variety, stem length) with shelf stock. `shelf_qty` is the raw
+	total stems on shelves (Shelf Item.stem_qty), the same source the storefront
+	reads. Only rows whose (item_code, normalized length) maps to a Floriday trade
+	item are returned — others can't be batched.
+
+	Used by the "Shelf Stock Items" panel on Floriday Settings (shelf mode on).
+	The qty actually batched is chosen per-row in the UI, not here.
+	"""
+	from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+		_normalize_stem_length,
+	)
+	from upande_webshop.upande_webshop.utils.shelf_stock import (
+		shelf_stock_enabled,
+		get_shelf_qty_by_length,
+	)
+
+	if not shelf_stock_enabled("Floriday Settings"):
+		return []
+
+	_by_code_length, by_code = _get_floriday_item_index()
+	if not by_code:
+		return []
+
+	rows = []
+	for item_code, mappings in by_code.items():
+		shelf_by_length = get_shelf_qty_by_length(item_code)
+		if not shelf_by_length:
+			continue
+
+		# Index this item's Floriday mappings by normalized stem length.
+		mapping_by_norm = {}
+		for m in mappings:
+			mapping_by_norm[_normalize_stem_length(m.stem_length)] = m
+
+		for stem_length_name, qty in shelf_by_length.items():
+			norm = _normalize_stem_length(stem_length_name)
+			match = mapping_by_norm.get(norm)
+			if not match:
+				continue  # shelf length not offered to Floriday — can't batch it
+			rows.append({
+				"item_code": item_code,
+				"item_name": match.item_name,
+				# Prefer the shelf's own length label (what the user sees on the shelf).
+				"stem_length": stem_length_name or match.stem_length,
+				"trade_item_id": match.trade_item_id,
+				"shelf_qty": flt(qty),
+			})
+
+	rows.sort(key=lambda r: (r["item_name"] or "", r["stem_length"] or ""))
+	return rows
 
 
 @frappe.whitelist()
@@ -832,152 +961,6 @@ def _available_qty_at(warehouse, item_code, stem_length):
 			as_dict=True,
 		)
 	return float(row[0].qty) if row else 0.0
-
-
-def _build_stock_transfer(items, *, direction):
-	"""Create and submit a single Material Transfer Stock Entry.
-
-	`custom_stem_length` is set per child row (Stock Entry Detail), so one
-	entry can hold rows with different stem lengths. Per-row qty is validated
-	against current SLE-aggregated availability at the source warehouse.
-
-	direction="in":  source picked per row, target = Floriday warehouse (default)
-	direction="out": source = Floriday warehouse (default), target picked per row
-	"""
-	import json
-
-	if isinstance(items, str):
-		items = json.loads(items)
-	if not items:
-		frappe.throw("No items provided")
-
-	settings = _get_settings_doc()
-	floriday_warehouse = settings.warehouse
-	if not floriday_warehouse:
-		frappe.throw("Floriday Settings.warehouse is not set")
-
-	company = _pick_floriday_company()
-
-	floriday_wh_company = frappe.db.get_value("Warehouse", floriday_warehouse, "company")
-	if floriday_wh_company and floriday_wh_company != company:
-		frappe.throw(
-			f"Floriday warehouse {floriday_warehouse} belongs to {floriday_wh_company}, "
-			f"but the configured Floriday company is {company}. Re-assign the warehouse to {company}."
-		)
-
-	se = frappe.new_doc("Stock Entry")
-	se.company = company
-	se.stock_entry_type = "Material Transfer"
-	se.purpose = "Material Transfer"
-	# Stem length is per child row (can be mixed: 52cm, 62cm, …) — never set on
-	# parent. Skip on sites where the parent doesn't have the field at all.
-	if frappe.get_meta("Stock Entry").has_field("custom_stem_length"):
-		se.custom_stem_length = None
-
-	for row in items:
-		item_code = (row.get("item_code") or "").strip()
-		stem_length = (row.get("stem_length") or "").strip()
-		qty = float(row.get("qty") or 0)
-
-		if direction == "in":
-			s_wh = (row.get("source_warehouse") or "").strip()
-			t_wh = (row.get("target_warehouse") or "").strip() or floriday_warehouse
-		else:
-			s_wh = (row.get("source_warehouse") or "").strip() or floriday_warehouse
-			t_wh = (row.get("target_warehouse") or "").strip()
-
-		if not (item_code and s_wh and t_wh and qty > 0):
-			frappe.throw(f"Invalid row: {row}")
-		if s_wh == t_wh:
-			frappe.throw(f"Source and target warehouse must differ for {item_code}")
-
-		for wh in (s_wh, t_wh):
-			wh_company = frappe.db.get_value("Warehouse", wh, "company")
-			if wh_company and wh_company != company:
-				frappe.throw(
-					f"Warehouse {wh} belongs to {wh_company}, not {company}. "
-					f"Pick a warehouse owned by {company}."
-				)
-
-		variant_code = _resolve_variant_item(item_code, stem_length) if stem_length else item_code
-
-		# Validate the requested qty against actual SLE-aggregated availability
-		# at the source warehouse for this (item, stem_length).
-		available = _available_qty_at(s_wh, variant_code, stem_length)
-		if available <= 0:
-			label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
-			frappe.throw(
-				f"No {label} stock at {s_wh} (graded SLE balance is 0). "
-				f"Pick a different source warehouse."
-			)
-		if qty > available:
-			label = f"{item_code}{f' ({stem_length})' if stem_length else ''}"
-			frappe.throw(
-				f"Can't have qty more than {available:g} for {label} at {s_wh}"
-			)
-
-		row_payload = {
-			"item_code": variant_code,
-			"qty": qty,
-			"s_warehouse": s_wh,
-			"t_warehouse": t_wh,
-		}
-		# On variant sites the stem length is already encoded in variant_code; on
-		# custom-field sites we additionally stamp the SED row.
-		if _site_has_se_detail_stem_length():
-			row_payload["custom_stem_length"] = stem_length or None
-		se.append("items", row_payload)
-
-	se.insert(ignore_permissions=True)
-	se.submit()
-
-	# Propagate `custom_stem_length` from Stock Entry Detail rows onto the SLEs
-	# this Stock Entry just generated. ERPNext's stock posting only auto-copies
-	# custom fields when they're registered as an Inventory Dimension; this
-	# bench has none, so we stamp it manually so the Stock View aggregation
-	# (which groups SLE by custom_stem_length) sees the right value.
-	if _site_has_sle_stem_length() and _site_has_se_detail_stem_length():
-		_propagate_stem_length_to_sle(se)
-
-	frappe.db.commit()
-	return {"name": se.name, "items_count": len(se.items)}
-
-
-def _propagate_stem_length_to_sle(stock_entry):
-	"""Copy each SED row's custom_stem_length onto its matching SLE rows."""
-	for sed in stock_entry.items:
-		stem_length = (sed.get("custom_stem_length") or "").strip()
-		if not stem_length:
-			continue
-		# Match SLEs by voucher + voucher_detail_no (the SED row's name).
-		frappe.db.sql(
-			"""
-			UPDATE `tabStock Ledger Entry`
-			SET custom_stem_length = %(sl)s
-			WHERE voucher_type = 'Stock Entry'
-			  AND voucher_no = %(vn)s
-			  AND voucher_detail_no = %(vdn)s
-			""",
-			{"sl": stem_length, "vn": stock_entry.name, "vdn": sed.name},
-		)
-
-
-@frappe.whitelist()
-def create_stock_transfer(items):
-	"""Material Transfer INTO the Floriday warehouse.
-
-	`items`: JSON list of {item_code, stem_length, source_warehouse, qty}.
-	"""
-	return _build_stock_transfer(items, direction="in")
-
-
-@frappe.whitelist()
-def create_stock_move(items):
-	"""Material Transfer OUT OF the Floriday warehouse.
-
-	`items`: JSON list of {item_code, stem_length, target_warehouse, qty}.
-	"""
-	return _build_stock_transfer(items, direction="out")
 
 
 @frappe.whitelist()

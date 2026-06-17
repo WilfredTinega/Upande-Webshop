@@ -1037,3 +1037,147 @@ def sync_stem_length_stock(item_code=None):
 
 	frappe.db.commit()
 	return result
+
+
+# ── Webshop "enabled stock" publish (no stock movement) ──────────────────────
+# The Stock tab on Webshop Settings / Floriday Settings / Biflorica Setting lets
+# an admin tick item+length rows and publish a quantity to the storefront. Unlike
+# the older shelf→online transfer, this moves NO stock: it only flips the
+# `enabled` flag and writes `stock_qty` on the matching Stem Length Price child of
+# the item's Webshop Item Prices doc. Enabled rows stay listed in the panel (with
+# a checkmark) so the published qty can be edited or the row un-published later.
+# The storefront reads `stock_qty` from enabled rows as the available quantity
+# (see product_data_engine/query.get_enabled_qty_by_length and
+# utils/product.get_web_item_qty_in_stock).
+
+
+def _stem_length_price_row(wip_doc, stem_length):
+	"""Find the Stem Length Price child for `stem_length`, creating it if absent.
+
+	Match is on the canonical "<n>cm" form so "52CM"/"52 cm"/"52cm" all collapse
+	to one row, mirroring how rates/stock are stored elsewhere."""
+	canon = _normalize_stem_length(stem_length) or (stem_length or "").strip()
+	for row in wip_doc.stem_length_prices or []:
+		if _normalize_stem_length(row.stem_length) == canon or row.stem_length == canon:
+			return row
+	return wip_doc.append(
+		"stem_length_prices",
+		{"stem_length": canon, "rate": 0, "stock_qty": 0},
+	)
+
+
+@frappe.whitelist()
+def set_webshop_enabled_stock(items, enabled=1, source_warehouse=None):
+	"""Publish (or un-publish) per-length stock to the storefront. No stock move.
+
+	`items`: JSON list of {item_code, stem_length, qty}. For each entry the item's
+	Webshop Item Prices doc is found/created, the Stem Length Price row for that
+	length is found/created, its `enabled` flag is set to `enabled`, and (when
+	enabling) its `stock_qty` is set to `qty` — the quantity shown on the webshop.
+
+	The published qty is CAPPED at the current available stock for that (item,
+	length): you can never enable more than is physically available. By default the
+	cap reads shelf + configured-warehouse stock. `source_warehouse` (the Customer
+	Settings picker) ADDS that warehouse's Bin stock to the cap, so items that live
+	only in a customer's warehouse can still be enabled. This is the server-side
+	guard behind the panel's per-row max, so a stale page or a direct API call can't
+	over-publish. Returns {updated, items, capped}.
+	"""
+	import json
+
+	from upande_webshop.upande_webshop.utils.shelf_transfer import (
+		_canon_length,
+		available_qty_by_key,
+	)
+
+	if isinstance(items, str):
+		items = json.loads(items or "[]")
+	enabled = 1 if str(enabled) not in ("0", "false", "False", "", "no") else 0
+
+	# Current availability, only needed when enabling (capping doesn't apply to a
+	# disable). One pass over shelf + warehouse rows, plus the customer warehouse
+	# when one is supplied (its items aren't in the default shelf/warehouse sets).
+	avail = available_qty_by_key() if enabled else {}
+	if enabled and source_warehouse:
+		from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+			get_customer_warehouse_rows,
+		)
+
+		for r in get_customer_warehouse_rows(source_warehouse):
+			key = (r.get("item_code"), _canon_length(r.get("stem_length")))
+			avail[key] = avail.get(key, 0.0) + flt(r.get("shelf_qty"))
+
+	# Group requested lengths per item so each WIP doc is saved once.
+	by_item = {}
+	for entry in items or []:
+		item_code = (entry.get("item_code") or "").strip()
+		stem_length = (entry.get("stem_length") or "").strip()
+		if not item_code:
+			continue
+		by_item.setdefault(item_code, []).append(
+			{"stem_length": stem_length, "qty": flt(entry.get("qty"))}
+		)
+
+	updated = 0
+	capped = 0
+	touched_items = []
+	for item_code, lengths in by_item.items():
+		item = frappe.db.get_value(
+			"Item", item_code, ["name", "item_name", "item_group"], as_dict=True
+		)
+		if not item:
+			continue
+		item.item_code = item.name
+		wip_doc, _created = _find_or_create_webshop_item_prices(item)
+
+		for L in lengths:
+			row = _stem_length_price_row(wip_doc, L["stem_length"])
+			row.enabled = enabled
+			if enabled:
+				qty = flt(L["qty"])
+				# Cap at available stock for this (item, length).
+				available = flt(avail.get((item_code, _canon_length(L["stem_length"]))))
+				if qty > available:
+					qty = available
+					capped += 1
+				row.stock_qty = qty
+			updated += 1
+
+		wip_doc.save(ignore_permissions=True)
+		touched_items.append(item_code)
+
+	frappe.db.commit()
+	return {"updated": updated, "items": touched_items, "capped": capped}
+
+
+@frappe.whitelist()
+def get_webshop_enabled_rows():
+	"""Currently-enabled (item, length, published qty) rows for the Stock panel.
+
+	Returns a list of {item_code, item_name, stem_length, stock_qty, bunch_size},
+	one per enabled Stem Length Price child. Lets the picker keep showing published
+	rows with a checkmark — and their correct bunch step — even after the physical
+	shelf/warehouse stock is gone. bunch_size is parsed from the item's sales UOM
+	(Bunch(10)→10), matching the live shelf/warehouse rows."""
+	from upande_webshop.upande_webshop.doctype.box_type.box_type import (
+		_stems_per_bunch_from_uom,
+	)
+
+	rows = frappe.db.sql(
+		"""
+		SELECT wip.item_code, wip.item_name, slp.stem_length,
+		       slp.stock_qty, i.sales_uom, i.stock_uom
+		FROM `tabStem Length Price` slp
+		JOIN `tabWebshop Item Prices` wip ON wip.name = slp.parent
+		LEFT JOIN `tabItem` i ON i.name = wip.item_code
+		WHERE slp.parenttype = 'Webshop Item Prices'
+		  AND slp.enabled = 1
+		ORDER BY wip.item_name, slp.stem_length
+		""",
+		as_dict=True,
+	)
+	for r in rows:
+		r["stock_qty"] = flt(r.get("stock_qty"))
+		size = _stems_per_bunch_from_uom(r.get("sales_uom") or r.get("stock_uom"))
+		r["bunch_size"] = size if size and size > 0 else 1
+	return rows

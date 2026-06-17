@@ -5,6 +5,11 @@ from datetime import datetime, timedelta, timezone
 
 _logger = frappe.logger("floriday", allow_site=True)
 
+
+def _floriday_setting(fieldname):
+    """Read a value off the Floriday Settings single. Returns None if unset."""
+    return frappe.db.get_single_value("Floriday Settings", fieldname) or None
+
 def log_short(msg, title="Floriday", is_error=True):
     """Log errors and successful sales order creations"""
     if len(msg) > 135:
@@ -458,8 +463,17 @@ def create_sales_orders_from_floriday():
         if not WAREHOUSE:
             frappe.throw("Warehouse not configured in Floriday Settings")
 
+        # Window goes back `period` hours from now (configurable on Floriday Settings).
+        # Fall back to 24h if the field is unset/zero/invalid.
+        try:
+            period_hours = int(settings.period or 0)
+        except (TypeError, ValueError):
+            period_hours = 0
+        if period_hours <= 0:
+            period_hours = 24
+
         end_date = datetime.now(timezone.utc)
-        start_date = end_date - timedelta(hours=24)
+        start_date = end_date - timedelta(hours=period_hours)
 
         headers = {
             "Authorization": f"Bearer {ACCESS_TOKEN}",
@@ -655,7 +669,7 @@ def create_sales_order_from_floriday(floriday_order, warehouse, settings=None):
     sales_order.po_no = floriday_order_id
     sales_order.po_date = order_datetime.date()
 
-    sales_order.custom_sales_order_type = "Roses"
+    sales_order.custom_sales_order_type = _floriday_setting("sales_order_type")
     sales_order.custom_order_name = generate_custom_order_name(customer)
 
     # Resolve (or auto-create) the Delivery Point from the Floriday GLN.
@@ -708,16 +722,16 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
             calculated = floriday_order.get("calculatedFields", {})
             total_price_per_piece = calculated.get("totalPricePerPiece", {}).get("value", price_info.get("value", 0))
 
-            farm, business_unit, company_from_stock_entry = get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code)
+            farm, business_unit, _company_from_stock_entry = get_farm_business_unit_company_from_stock_entry(trade_item_id, item_code)
 
-            if company_from_stock_entry:
-                sales_order.company = company_from_stock_entry
-            elif settings and settings.company:
-                sales_order.company = settings.company
-            else:
-                companies = frappe.get_all("Company", limit_page_length=1)
-                if companies:
-                    sales_order.company = companies[0].name
+            # The Sales Order company comes from Floriday Settings.company (set to
+            # Karen Roses). We do NOT use the stock-entry resolver's company: it can
+            # return Kaitet Group (group-level transfers), which then fails the
+            # "warehouse does not belong to company" check. If the setting is unset,
+            # throw a clear error rather than guessing a company.
+            sales_order.company = settings.get("company") if settings else None
+            if not sales_order.company:
+                frappe.throw("Company not configured in Floriday Settings")
 
             item_warehouse = warehouse
 
@@ -769,13 +783,21 @@ Delivery Point: {delivery_point_name or 'Not resolved'}"""
             item.custom_ordered_quantity = number_of_pieces
             item.custom_source_warehouse = item_warehouse
 
+            # Prefer the farm resolved from the actual source transfer; the
+            # configured Default Farm is only a fallback (set below).
             if farm:
                 sales_order.custom_farm = farm
-            if business_unit:
-                sales_order.custom_business_unit = business_unit
 
     if not sales_order.items:
         frappe.throw(f"No valid items found")
+
+    # custom_sales_order_type / custom_business_unit / custom_order_name / custom_farm
+    # are mandatory on this site. All come from Floriday Settings (no hardcoded
+    # values): business_unit always from the setting; farm falls back to the
+    # configured Default Farm when the source transfer didn't resolve one.
+    sales_order.custom_business_unit = _floriday_setting("business_unit")
+    if not sales_order.get("custom_farm"):
+        sales_order.custom_farm = _floriday_setting("default_farm")
 
     # Set ordered stems (in stock UOM = stems, not bunches).
     total_ordered_stems = floriday_order.get("numberOfPieces", 0)
@@ -873,7 +895,21 @@ def get_exchange_rate(from_currency, to_currency, date):
 
 def get_or_create_customer(floriday_order, settings=None):
     """
-    Gets or creates a customer based on Floriday order data.
+    Every Floriday Sales Order is booked under the single fixed customer
+    `Royal FloraHolland` (the auction party we sell to). We do NOT create a
+    per-organization customer anymore — Floriday's buyer orgs all settle through
+    Royal FloraHolland, and creating new customers tripped the mandatory
+    `default_currency` field on this site. `Royal FloraHolland` already carries
+    EUR / EUR Price List / Netherlands / 14-day terms, so the SO inherits the
+    correct currency, price list and address.
+    """
+    return get_default_customer()
+
+
+def _get_or_create_customer_legacy(floriday_order, settings=None):
+    """
+    Original per-organization match/create logic, kept for reference. No longer
+    called — see get_or_create_customer above.
 
     Match priority:
     1. custom_floriday_id (UUID from Floriday) — most reliable.
@@ -1009,21 +1045,24 @@ def create_new_customer(floriday_order, customer_org_id, settings=None, resolved
 
 
 def get_default_customer():
-    """Get/create the fallback customer used when no Floriday mapping resolves."""
-    default_customer = "Floriday-Default-Customer"
-    try:
-        customer = frappe.get_doc({
-            "doctype": "Customer",
-            "customer_name": default_customer,
-            "customer_type": "Company",
-            "customer_group": "Commercial",
-            "territory": "Netherlands",
-        })
-        customer.insert(ignore_permissions=True)
-        log_short("Created default Floriday customer", "Floriday Customer Created", False)
-    except frappe.exceptions.DuplicateEntryError:
-        frappe.db.rollback()
-    return default_customer
+    """The single customer every Floriday Sales Order is booked under.
+
+    Reads `Floriday Settings.customer` (e.g. Royal FloraHolland, which carries
+    EUR / EUR Price List / Netherlands / 14-day terms). Does NOT create a
+    customer: if the setting is unset or the customer is missing we throw, because
+    importing an order under a half-built customer would only re-trigger the
+    mandatory-field failures this change exists to fix.
+    """
+    customer = _floriday_setting("customer")
+    if not customer:
+        frappe.throw("Customer not configured in Floriday Settings")
+    if frappe.db.exists("Customer", customer):
+        return customer
+    # Fall back to a customer_name match (in case the PK differs from the label).
+    by_name = frappe.db.get_value("Customer", {"customer_name": customer}, "name")
+    if by_name:
+        return by_name
+    frappe.throw(f"Floriday customer '{customer}' not found — create it before importing Floriday orders")
 
 
 def get_erpnext_item_code(floriday_trade_item_id):

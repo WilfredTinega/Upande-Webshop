@@ -1714,6 +1714,20 @@ body.full-width {
 				display: inline-block;
 				padding: 0 0.4rem;
 			}
+
+			.cart-pack-rate-label {
+				display: inline-flex;
+				align-items: center;
+				gap: 0.35rem;
+			}
+
+			.cart-pack-rate {
+				height: 28px;
+				font-size: 13px;
+				width: 90px;
+				display: inline-block;
+				padding: 0 0.4rem;
+			}
 		}
 
 		.place-order-container {
@@ -2667,7 +2681,8 @@ body.full-width {
 			// with a clearly visible border so users can tell the box label is an
 			// editable field, not static text.
 			.cart-box-label,
-			.cart-box-id {
+			.cart-box-id,
+			.cart-pack-rate {
 				background: var(--gray-900);
 				border: 1px solid var(--gray-600);
 				color: var(--text-color);

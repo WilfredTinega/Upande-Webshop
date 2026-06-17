@@ -110,7 +110,7 @@
 					{% if cart_settings.get('show_consignee') and frappe.get_meta(doc.doctype).has_field('custom_consignee') %}
 					<div class="mt-3">
 						<label for="consignee" class="form-label delivery-field-label">
-							{{ _('Consignee') }}
+							{{ _('Consignee') }} <span class="text-danger">*</span>
 						</label>
 						<div id="consignee-wrapper"
 							data-initial-value="{{ doc.get('custom_consignee') or '' }}"></div>

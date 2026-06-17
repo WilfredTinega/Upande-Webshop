@@ -84,15 +84,17 @@ def get_queried_reviews(web_item, start=0, end=10, data=None):
 	data.average_whole_rating = flt(data.average_rating, 0)
 
 	# get % of reviews per rating
+	# `rating` is stored as a 0-1 fraction (e.g. 4.5 stars -> 0.9), so bucket by
+	# rounding each review to its nearest whole star before counting.
 	reviews_per_rating = []
 	for i in range(1, 6):
 		count = frappe.db.sql(
-			"SELECT COUNT(*) as count FROM `tabItem Review` WHERE website_item = %s AND rating = %s",
-			(web_item, i / 5),
+			"SELECT COUNT(*) as count FROM `tabItem Review` WHERE website_item = %s AND ROUND(rating * 5) = %s",
+			(web_item, i),
 			as_dict=True,
 		)[0].count
 
-		percent = flt((count / rating_data.total or 1) * 100, 0) if count else 0
+		percent = flt(count / (rating_data.total or 1) * 100, 0) if count else 0
 		reviews_per_rating.append(percent)
 
 	data.reviews_per_rating = reviews_per_rating

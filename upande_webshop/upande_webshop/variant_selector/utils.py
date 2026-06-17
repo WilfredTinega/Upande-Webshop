@@ -6,7 +6,7 @@ from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings imp
 )
 from upande_webshop.upande_webshop.shopping_cart.cart import _set_price_list
 from upande_webshop.upande_webshop.variant_selector.item_variants_cache import ItemVariantsCacheManager
-from erpnext.utilities.product import get_price
+from upande_webshop.upande_webshop.utils.item_price_source import get_price
 
 
 @frappe.whitelist(allow_guest=True)

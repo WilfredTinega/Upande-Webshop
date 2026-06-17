@@ -12,7 +12,7 @@
  "idx": 0,
  "indicator_color": "green",
  "is_hidden": 0,
- "label": "Upande Webshop",
+ "label": "Ecommerce",
  "link_type": "DocType",
  "links": [
   {
@@ -183,10 +183,10 @@
    "type": "Link"
   }
  ],
- "modified": "2026-05-28 23:18:56.460642",
+ "modified": "2026-06-17 01:32:12.699010",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
- "name": "Upande Webshop",
+ "name": "Ecommerce",
  "number_cards": [],
  "owner": "Administrator",
  "parent_page": "",
@@ -197,7 +197,7 @@
    "role": "Sales Manager"
   }
  ],
- "sequence_id": 47.0,
+ "sequence_id": 46.0,
  "shortcuts": [
   {
    "color": "Grey",
@@ -207,6 +207,6 @@
    "url": "/webshop"
   }
  ],
- "title": "Upande Webshop",
+ "title": "Ecommerce",
  "type": "Workspace"
 }

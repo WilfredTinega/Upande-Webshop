@@ -1,8 +1,16 @@
 <nav class="navbar navbar-light navbar-expand-lg">
 	<div class="container">
 		<a class="navbar-brand" href="{{ url_prefix }}{{ home_page or "/" }}">
-			<img src="/assets/upande_webshop/images/UpandeLogo.png" alt="Webshop" style="height: 28px; margin-right: 8px;">
-			<span>Webshop</span>
+			{%- if is_webshop_page -%}
+				<img src="/assets/upande_webshop/images/UpandeLogo.png" alt="Webshop" style="height: 28px; margin-right: 8px;">
+				<span>Webshop</span>
+			{%- elif brand_html -%}
+				{{ brand_html }}
+			{%- elif banner_image -%}
+				<img src='{{ banner_image }}'>
+			{%- else -%}
+				<span>{{ (frappe.get_hooks("brand_html") or [_("Home")])[0] }}</span>
+			{%- endif -%}
 		</a>
 		<button class="navbar-toggler" type="button"
 			data-toggle="collapse"

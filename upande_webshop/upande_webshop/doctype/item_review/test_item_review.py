@@ -52,7 +52,7 @@ class TestItemReview(unittest.TestCase):
 
 		# post review on "Test Mobile Phone"
 		try:
-			add_item_review(web_item, "Great Product", 4, "Would recommend this product")
+			add_item_review(web_item, "Great Product", 0.8, "Would recommend this product")
 			review_name = frappe.db.get_value("Item Review", {"website_item": web_item})
 		except Exception:
 			self.fail(f"Error while publishing review for {web_item}")
@@ -61,7 +61,8 @@ class TestItemReview(unittest.TestCase):
 
 		self.assertEqual(len(review_data.reviews), 1)
 		self.assertTrue(review_data.average_rating)
-		self.assertEqual(review_data.reviews_per_rating[0], 100)
+		# 0.8 fraction == 4 stars, so 100% of reviews fall in the 4-star bucket (index 3)
+		self.assertEqual(review_data.reviews_per_rating[3], 100)
 
 		# tear down
 		frappe.set_user("Administrator")

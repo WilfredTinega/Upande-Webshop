@@ -8,6 +8,7 @@
   "stem_length",
   "rate",
   "stock_qty",
+  "enabled",
   "trade_item_id"
  ],
  "fields": [
@@ -38,6 +39,14 @@
    "in_list_view": 1,
    "label": "Stock(Qty)",
    "precision": "0"
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "in_list_view": 1,
+   "label": "On Webshop",
+   "description": "When ticked, this length is published to the webshop and shows its Stock(Qty) as the available quantity."
   }
  ],
  "grid_page_length": 50,

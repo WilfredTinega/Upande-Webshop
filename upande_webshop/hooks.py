@@ -48,6 +48,11 @@ web_include_js = "web.bundle.js"
 doctype_js = {
     "Item": "public/js/override/item.js",
     "Homepage": "public/js/override/homepage.js",
+    # Shared Shelf Stock move dialog + inline-button helper, used by these
+    # settings forms' own client scripts (upande_webshop.open_shelf_move_dialog).
+    "Webshop Settings": "public/js/shelf_move.js",
+    "Biflorica Setting": "public/js/shelf_move.js",
+    "Floriday Settings": "public/js/shelf_move.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -84,7 +89,8 @@ website_generators = ["Website Item", "Item Group"]
 # add methods and filters to jinja environment
 jinja = {
 	"methods": [
-		"upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin.get_stock_by_length",
+		"upande_webshop.upande_webshop.product_data_engine.query.get_item_total_qty",
+		"upande_webshop.upande_webshop.product_data_engine.query.get_item_qty_by_length",
 	],
 }
 
@@ -156,10 +162,6 @@ doc_events = {
         "after_rename": [
             "upande_webshop.upande_webshop.crud_events.item.invalidate_item_variants_cache.execute",
         ],
-        # "onload" hook removed because:
-        # 1. You have an override class for Item that can handle onload functionality
-        # 2. The module path was incorrect (utils/item.py doesn't exist)
-        # 3. If onload functionality is needed, add it to the WebshopItem class in override_doctype/item.py
     },
     "Sales Taxes and Charges Template": {
         "on_update": [
@@ -185,18 +187,11 @@ doc_events = {
         ],
         "on_submit": [
             "upande_webshop.upande_webshop.crud_events.stock.stem_length_carry.stock_entry_on_submit",
-            "upande_webshop.server_scripts.update_stem_length_bin.on_stock_entry_submit",
-        ],
-        "on_cancel": [
-            "upande_webshop.server_scripts.update_stem_length_bin.on_stock_entry_cancel",
         ],
     },
     "Sales Order": {
-        "on_submit": [
-            "upande_webshop.server_scripts.update_stem_length_bin.on_sales_order_submit",
-        ],
-        "on_cancel": [
-            "upande_webshop.server_scripts.update_stem_length_bin.on_sales_order_cancel",
+        "before_submit": [
+            "upande_webshop.upande_webshop.shopping_cart.cart.stamp_source_warehouse_on_submit",
         ],
     },
 }
@@ -251,8 +246,8 @@ before_migrate = [
 #      site. We bypass that with reload_doc(..., force=True).
 #   1b. normalize_webshop_workspace — runs right after the resync so the
 #      reloaded JSON can't leave name/title/label out of sync. Forces them all
-#      to "Upande Webshop" and clears any self-referential parent_page, so the
-#      Desk icon always opens /app/upande-webshop instead of a 404.
+#      to "Ecommerce" and clears any self-referential parent_page, so the
+#      Desk icon always opens /app/ecommerce instead of a 404.
 #   2. add_custom_fields — re-applies custom field definitions (Item Group,
 #      Item Price, Website Item, Quotation Item, …) so additions show up
 #      without reinstall.

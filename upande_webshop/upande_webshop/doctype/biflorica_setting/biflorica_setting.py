@@ -15,6 +15,8 @@ from upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_customer_
 	post_all_items_to_biflorica,
 )
 
+_logger = frappe.logger("biflorica", allow_site=True)
+
 
 SCHEDULER_TASKS = [
 	("at",      "upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.run_update_access_token", "Biflorica: Refresh Access Token"),
@@ -251,6 +253,22 @@ def update_access_token():
 			)
 			return {"success": False, "message": f"Auth failed with status {http_response.status_code}"}
 
+		# Biflorica wraps auth errors in an HTTP 200 with an in-body status code,
+		# e.g. {"code": 401, "status": "error", ...}. Surface that as a clear
+		# credential failure instead of the misleading "Token not found".
+		body_code = (response or {}).get("code")
+		body_status = str((response or {}).get("status") or "").lower()
+		if (body_code is not None and int(body_code) not in (200, 201)) or body_status == "error":
+			frappe.log_error(
+				f"Auth rejected (body code {body_code}): {http_response.text[:500]}",
+				"Biflorica Token Update",
+			)
+			if body_code == 401:
+				message = "Invalid credentials (401): check username/password on Biflorica Setting"
+			else:
+				message = f"Authentication failed (Biflorica returned code {body_code})"
+			return {"success": False, "message": message}
+
 		token = ""
 		if response:
 			if response.get("model") and response["model"].get("token"):
@@ -261,7 +279,7 @@ def update_access_token():
 		if token != "":
 			frappe.db.set_value("Biflorica Setting", settings_name, "access_token", token)
 			frappe.db.commit()
-			frappe.log_error("Access token updated", "Biflorica Token Update")
+			_logger.info(f"[Biflorica Token Update] Access token updated")
 			return {"success": True, "message": "Access token updated successfully"}
 		else:
 			frappe.log_error("Token not found in API response", "Biflorica Token Update")
