@@ -4,6 +4,9 @@
 	{# Cart icon moved to webshop sub-navbar #}
 	{% if frappe.session.user != "Guest" %}
 	<li class="nav-item">
+		<a class="nav-link" href="/customer-portal">{{ _("Customer Portal") }}</a>
+	</li>
+	<li class="nav-item">
 		<a class="nav-link" href="/customer-feedback">{{ _("Feedback & Claims") }}</a>
 	</li>
 	{% endif %}
