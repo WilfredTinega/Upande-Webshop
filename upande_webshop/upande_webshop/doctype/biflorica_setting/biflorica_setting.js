@@ -2,6 +2,8 @@
 // For license information, please see license.txt
 
 const METHOD_BASE = "upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting";
+const CUSTOM_FIELDS_API =
+	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_custom_fields";
 
 const PRIMARY_BUTTONS = [
 	"post_offers",
@@ -10,6 +12,7 @@ const PRIMARY_BUTTONS = [
 	"get_deals",
 	"get_predeals",
 	"approve_deal",
+	"create_custom_fields",
 ];
 const WARNING_BUTTONS = ["update_access_token"];
 
@@ -50,6 +53,35 @@ function style_button(frm, fieldname, cls) {
 
 function toast(message, indicator) {
 	frappe.show_alert({ message: message, indicator: indicator || "blue" }, 7);
+}
+
+function render_custom_fields_status(frm) {
+	const wrapper = frm.fields_dict.custom_fields_status_html;
+	if (!wrapper) return;
+	frappe.call({
+		method: `${CUSTOM_FIELDS_API}.check_biflorica_custom_fields`,
+		callback(r) {
+			const rows = r.message || [];
+			const body = rows
+				.map((f) => {
+					const ok = f.present;
+					const dot = ok ? "🟢" : f.doctype_missing ? "⚪" : "🔴";
+					const tag = f.optional ? " <i>(optional)</i>" : "";
+					return `<tr><td>${dot}</td><td>${f.dt}</td><td><code>${f.fieldname}</code></td><td>${f.fieldtype || ""}${tag}</td></tr>`;
+				})
+				.join("");
+			const missing = rows.filter((f) => !f.present && !f.doctype_missing).length;
+			wrapper.$wrapper.html(`
+				<div style="margin-bottom:8px;color:var(--text-muted)">
+					${missing ? `${missing} field(s) missing — click "Create Missing Custom Fields".` : "All custom fields present."}
+				</div>
+				<table class="table table-bordered" style="font-size:var(--text-sm)">
+					<thead><tr><th></th><th>DocType</th><th>Field</th><th>Type</th></tr></thead>
+					<tbody>${body}</tbody>
+				</table>
+			`);
+		},
+	});
 }
 
 function start_inline_progress(frm, button_field, label) {
@@ -155,6 +187,39 @@ frappe.ui.form.on("Biflorica Setting", {
 		inject_button_styles();
 		PRIMARY_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-primary"));
 		WARNING_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-warning"));
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Biflorica",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
+		render_custom_fields_status(frm);
+	},
+
+	create_custom_fields(frm) {
+		frappe.call({
+			method: `${CUSTOM_FIELDS_API}.create_missing_biflorica_custom_fields`,
+			freeze: true,
+			freeze_message: __("Creating custom fields…"),
+			callback(r) {
+				const s = (r.message || {}).summary || {};
+				toast(
+					__("Created {0}, skipped {1}, errors {2}", [s.created || 0, s.skipped || 0, s.errors || 0]),
+					s.errors ? "orange" : "green"
+				);
+				render_custom_fields_status(frm);
+			},
+		});
+	},
+
+	use_shelf_stock(frm) {
+		// Show/hide the inline Shelf Stock buttons as the toggle changes.
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Biflorica",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
 	},
 
 	update_access_token(frm) {
@@ -166,24 +231,71 @@ frappe.ui.form.on("Biflorica Setting", {
 	},
 
 	post_offers(frm) {
-		call_biflorica(frm, "post_offers", "post_offers", "Posting offers to Biflorica", {}, function (res) {
-			const s = res.summary || {};
-			const ok = s.success_varieties || [];
-			const failed = s.failed_varieties || [];
+		if (frm.is_dirty()) {
+			toast(__("Please save the form before performing this action."), "orange");
+			return;
+		}
 
-			if (ok.length) {
-				toast(__("Posted: {0}", [ok.join(", ")]), "green");
-			}
-			if (failed.length) {
-				const lines = failed.map(function (f) {
-					return f.variety + " (" + (f.reason || "rejected") + ")";
-				});
-				toast(__("Failed: {0}", [lines.join(", ")]), "red");
-			}
-			if (!ok.length && !failed.length) {
-				toast(__("No offers processed"), "orange");
-			}
+		const d = new frappe.ui.Dialog({
+			title: __("Post Offers to Biflorica"),
+			fields: [
+				{
+					fieldname: "box_type",
+					fieldtype: "Select",
+					label: __("Box Type"),
+					options: ["JUM", "ZIM", "STD", "HB"].join("\n"),
+					default: "JUM",
+					reqd: 1,
+				},
+				{
+					fieldname: "packrate",
+					fieldtype: "Int",
+					label: __("Packrate (stems per box)"),
+					reqd: 1,
+				},
+				{
+					fieldname: "minimum",
+					fieldtype: "Int",
+					label: __("Minimum (boxes)"),
+					default: 1,
+					reqd: 1,
+				},
+			],
+			primary_action_label: __("Post Offers"),
+			primary_action(values) {
+				d.hide();
+				call_biflorica(
+					frm,
+					"post_offers",
+					"post_offers",
+					"Posting offers to Biflorica",
+					{
+						box_type: values.box_type,
+						packrate: values.packrate,
+						minimum: values.minimum,
+					},
+					function (res) {
+						const s = res.summary || {};
+						const ok = s.success_varieties || [];
+						const failed = s.failed_varieties || [];
+
+						if (ok.length) {
+							toast(__("Posted: {0}", [ok.join(", ")]), "green");
+						}
+						if (failed.length) {
+							const lines = failed.map(function (f) {
+								return f.variety + " (" + (f.reason || "rejected") + ")";
+							});
+							toast(__("Failed: {0}", [lines.join(", ")]), "red");
+						}
+						if (!ok.length && !failed.length) {
+							toast(__("No offers processed"), "orange");
+						}
+					}
+				);
+			},
 		});
+		d.show();
 	},
 
 	get_offers(frm) {
@@ -191,31 +303,77 @@ frappe.ui.form.on("Biflorica Setting", {
 	},
 
 	get_deals(frm) {
-		call_biflorica(frm, "get_deals", "get_deals", "Fetching deals");
+		call_biflorica(frm, "get_deals", "get_deals", "Fetching deals", {}, function (res) {
+			const s = res.summary || {};
+			const created = s.created || [];
+			const existing = s.existing || [];
+			const failed = s.failed || [];
+
+			if (created.length) {
+				toast(__("Created: {0}", [created.map((c) => c.sales_order).join(", ")]), "green");
+			}
+			if (existing.length) {
+				const lines = existing.map((e) => `${e.box_label} → ${e.sales_order}`);
+				toast(__("Already exists: {0}", [lines.join(", ")]), "orange");
+			}
+			if (failed.length) {
+				const lines = failed.map((f) => `${f.box_label} (${f.reason || "rejected"})`);
+				toast(__("Failed: {0}", [lines.join(", ")]), "red");
+			}
+		});
 	},
 
 	get_predeals(frm) {
-		call_biflorica(frm, "get_predeals", "get_predeals", "Fetching predeals");
+		call_biflorica(frm, "get_predeals", "get_predeals", "Fetching predeals", {}, function (res) {
+			const s = res.summary || {};
+			const created = s.created || [];
+			const existing = s.existing || [];
+			const failed = s.failed || [];
+
+			if (created.length) {
+				toast(
+					__("Draft Sales Orders created: {0}", [created.map((c) => c.sales_order).join(", ")]),
+					"green"
+				);
+			}
+			if (existing.length) {
+				const lines = existing.map((e) => `${e.box_label} → ${e.sales_order}`);
+				toast(__("Already exists: {0}", [lines.join(", ")]), "orange");
+			}
+			if (failed.length) {
+				const lines = failed.map((f) => `${f.box_label} (${f.reason || "rejected"})`);
+				toast(__("Failed: {0}", [lines.join(", ")]), "red");
+			}
+		});
 	},
 
 	approve_deal(frm) {
-		const d = new frappe.ui.Dialog({
-			title: __("Approve Deal"),
-			fields: [
-				{ fieldname: "deal_id", fieldtype: "Data", label: __("Deal ID"), reqd: 1 }
-			],
-			primary_action_label: __("Approve"),
-			primary_action(values) {
-				d.hide();
+		// "Approve PreDeals" runs the full predeal workflow: draft -> approve on
+		// Biflorica -> refetch deals -> update drafts -> submit.
+		frappe.confirm(
+			__("Get predeals, approve them on Biflorica, then submit the Sales Orders?"),
+			function () {
 				call_biflorica(
 					frm,
 					"approve_deal",
-					"approve_deal",
-					"Approving deal",
-					{ deal_id: values.deal_id }
+					"process_predeals",
+					"Processing predeals",
+					{},
+					function (res) {
+						const s = res.summary || {};
+						const submitted = s.submitted || [];
+						const submitFailed = s.submit_failed || [];
+
+						if (submitted.length) {
+							toast(__("Submitted + approved: {0}", [submitted.join(", ")]), "green");
+						}
+						if (submitFailed.length) {
+							const lines = submitFailed.map((f) => `${f.sales_order} (${f.reason || "failed"})`);
+							toast(__("Submit failed: {0}", [lines.join(", ")]), "red");
+						}
+					}
 				);
 			}
-		});
-		d.show();
+		);
 	}
 });

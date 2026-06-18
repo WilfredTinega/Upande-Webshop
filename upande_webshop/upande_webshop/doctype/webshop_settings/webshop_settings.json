@@ -1,6 +1,6 @@
 {
  "actions": [],
- "creation": "2026-05-18 18:07:06.336264",
+ "creation": "2026-06-17 16:00:13.044708",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -8,6 +8,7 @@
   "display_setting_tab",
   "products_per_page",
   "column_break_wkjy",
+  "packrate",
   "filter_categories_section",
   "enable_field_filters",
   "filter_fields",
@@ -15,7 +16,6 @@
   "filter_attributes",
   "display_settings_section",
   "show_stem_length",
-  "show_box_type",
   "show_price",
   "show_bunch",
   "column_break_9",
@@ -32,6 +32,7 @@
   "column_break_21",
   "enabled",
   "show_cart_line_code",
+  "show_box_type",
   "show_consignee",
   "checkout_settings_section",
   "enable_checkout",
@@ -53,12 +54,13 @@
   "redirect_on_action",
   "stock_balances_tab",
   "sync_prices",
-  "reserve_stock",
   "column_break_evtt",
   "use_shelf_stock",
-  "use_stem_length_age_bin",
+  "publish_enabled_stock_only",
   "section_break_spad",
   "warehouses",
+  "section_break_hkyu",
+  "shelf_stock_actions",
   "bouquets_tab",
   "show_bouquets_page",
   "bouquets_item_group",
@@ -70,7 +72,10 @@
   "column_break_jeie",
   "section_break_kwyj",
   "open_setup_check",
-  "setup_check"
+  "setup_check",
+  "customer_settings_tab",
+  "customer_warehouse",
+  "customer_items"
  ],
  "fields": [
   {
@@ -149,7 +154,6 @@
   },
   {
    "default": "0",
-   "description": "Show the Box Type selector on the cart.",
    "fieldname": "show_box_type",
    "fieldtype": "Check",
    "label": "Show Box Type"
@@ -233,7 +237,6 @@
   {
    "default": "Orders",
    "depends_on": "enable_checkout",
-   "description": "After payment completion redirect user to selected page.",
    "fieldname": "payment_success_url",
    "fieldtype": "Select",
    "label": "Payment Success Url",
@@ -308,7 +311,6 @@
    "label": "Guest Display Settings"
   },
   {
-   "description": "Link to redirect Guest on actions that need login such as add to cart, wishlist, etc. <b>E.g.: /login</b>",
    "fieldname": "redirect_on_action",
    "fieldtype": "Data",
    "label": "Redirect on Action"
@@ -443,35 +445,58 @@
   },
   {
    "default": "0",
-   "fieldname": "reserve_stock",
-   "fieldtype": "Check",
-   "label": "Reserve Stock?"
-  },
-  {
-   "default": "0",
    "fieldname": "use_shelf_stock",
    "fieldtype": "Check",
    "label": "Use Shelf Stock?"
   },
   {
-   "default": "0",
-   "depends_on": "eval:doc.use_shelf_stock === 0",
-   "fieldname": "use_stem_length_age_bin",
+   "default": "1",
+   "fieldname": "publish_enabled_stock_only",
    "fieldtype": "Check",
-   "label": "Use Stem Length Age Bin?"
+   "label": "Show Only Enabled Stock?"
+  },
+  {
+   "fieldname": "shelf_stock_actions",
+   "fieldtype": "HTML",
+   "label": "Stock Actions"
   },
   {
    "default": "0",
-   "description": "Show the Consignee selector on the cart (requires a custom_consignee field on the cart document).",
    "fieldname": "show_consignee",
    "fieldtype": "Check",
    "label": "Show Consignee?"
+  },
+  {
+   "fieldname": "packrate",
+   "fieldtype": "Select",
+   "label": "Packrate",
+   "options": "\n240\n204\n192\n180\n144\n126\n120\n96"
+  },
+  {
+   "fieldname": "section_break_hkyu",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "customer_settings_tab",
+   "fieldtype": "Tab Break",
+   "label": "Customer Settings"
+  },
+  {
+   "fieldname": "customer_warehouse",
+   "fieldtype": "Table",
+   "label": "Customer Warehouse",
+   "options": "Customer Setting"
+  },
+  {
+   "fieldname": "customer_items",
+   "fieldtype": "HTML",
+   "label": "Customer Items"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-09 23:38:32.050470",
+ "modified": "2026-06-17 21:21:54.830628",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Webshop Settings",

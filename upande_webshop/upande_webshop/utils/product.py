@@ -9,7 +9,7 @@ def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
 	Source-of-truth choice mirrors shopping_cart.cart._stock_uom_qty_available:
 	  - Variant or template items resolve length at the item level (each
 	    variant = one length), so core Bin is correct.
-	  - Plain items use Stem Length Bin summed across all lengths.
+	  - Plain items read core Bin too, summed across the warehouse set.
 
 	Warehouse resolution prefers the storefront list (Webshop Settings →
 	Warehouses) so the qty matches what the listing card displays. Falls back
@@ -35,8 +35,24 @@ def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
 			"Website Item", {"item_code": template_item_code}, item_warehouse_field
 		)
 
+	# Gated: once the publish feature is active, plain items show ONLY their
+	# published total (0 / out of stock if this item was never enabled).
+	from upande_webshop.upande_webshop.utils.enabled_stock import (
+		enabled_feature_active,
+		enabled_total_qty,
+	)
+	if not is_variant_or_template and enabled_feature_active():
+		published_total = enabled_total_qty(item_code)
+		return frappe._dict(
+			{
+				"in_stock": 1 if published_total > 0 else 0,
+				"stock_qty": published_total,
+				"is_stock_item": is_stock_item,
+			}
+		)
+
 	# Plain items read from the shelf when shelf mode is on. Shelf qty is in stems
-	# (the stock UOM), matching Stem Length Bin; no warehouse scoping applies.
+	# (the stock UOM); no warehouse scoping applies.
 	from upande_webshop.upande_webshop.utils.shelf_stock import (
 		get_shelf_qty,
 		use_shelf_stock,
@@ -58,51 +74,25 @@ def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
 	)
 	warehouses = _all_storefront_warehouses(warehouse)
 
-	# Plain-item stock source (variants always read core Bin):
-	#   - age-bin on : Stem Length Bin with Age Bin fallback, summed across lengths
-	#   - age-bin off: core Bin, same as variants
-	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-		get_age_bin_qty_by_length,
-		use_stem_length_age_bin,
-	)
-
-	age_mode = not is_variant_or_template and use_stem_length_age_bin()
-
 	total_stock = 0.0
 	in_stock = 0
 	if warehouses:
 		placeholders = ",".join(["%s"] * len(warehouses))
-		if age_mode:
-			# Raw stem qty from Stem Length Bin (+Age Bin fallback), then apply the
-			# item's sales-UOM conversion the same way the Bin queries below do.
-			raw_qty = sum(get_age_bin_qty_by_length(item_code, warehouses).values())
-			conversion = frappe.db.sql(
-				"""
-				SELECT IFNULL(C.conversion_factor, 1)
-				FROM `tabItem` I
-				LEFT JOIN `tabUOM Conversion Detail` C
-				  ON I.sales_uom = C.uom AND C.parent = I.Item_code
-				WHERE I.Item_code = %s LIMIT 1
-				""",
-				(item_code,),
-			)
-			factor = (conversion[0][0] if conversion else 1) or 1
-			total_stock = raw_qty / factor
-		else:
-			# Variants, and plain items with the flag off, read core Bin.
-			rows = frappe.db.sql(
-				"""
-				SELECT S.actual_qty / IFNULL(C.conversion_factor, 1)
-				FROM `tabBin` S
-				INNER JOIN `tabItem` I ON S.item_code = I.Item_code
-				LEFT JOIN `tabUOM Conversion Detail` C
-				  ON I.sales_uom = C.uom AND C.parent = I.Item_code
-				WHERE S.item_code = %s AND S.warehouse IN ({})
-				""".format(placeholders),
-				(item_code, *warehouses),
-			)
-			for row in rows:
-				total_stock += row[0] or 0
+		# Both variants and plain items read core Bin, applying the item's
+		# sales-UOM conversion factor.
+		rows = frappe.db.sql(
+			"""
+			SELECT S.actual_qty / IFNULL(C.conversion_factor, 1)
+			FROM `tabBin` S
+			INNER JOIN `tabItem` I ON S.item_code = I.Item_code
+			LEFT JOIN `tabUOM Conversion Detail` C
+			  ON I.sales_uom = C.uom AND C.parent = I.Item_code
+			WHERE S.item_code = %s AND S.warehouse IN ({})
+			""".format(placeholders),
+			(item_code, *warehouses),
+		)
+		for row in rows:
+			total_stock += row[0] or 0
 
 		in_stock = total_stock > 0 and 1 or 0
 

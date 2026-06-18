@@ -4,7 +4,7 @@
 import frappe
 from frappe.utils import flt
 
-from erpnext.utilities.product import get_price
+from upande_webshop.upande_webshop.utils.item_price_source import get_price
 
 from upande_webshop.upande_webshop.doctype.item_review.item_review import get_customer
 from upande_webshop.upande_webshop.utils.product import get_non_stock_item_status
@@ -13,6 +13,12 @@ from upande_webshop.upande_webshop.utils.shelf_stock import (
 	get_shelf_qty_by_length,
 	get_shelf_qty_for_items,
 	use_shelf_stock,
+)
+from upande_webshop.upande_webshop.utils.enabled_stock import (
+	enabled_feature_active,
+	enabled_qty_by_length,
+	enabled_total_qty,
+	enabled_total_qty_for_items,
 )
 
 
@@ -155,16 +161,27 @@ class ProductQuery:
 			plain_codes = [i.item_code for i in items if not i.get("has_variants")]
 			shelf_qty_by_code = get_shelf_qty_for_items(plain_codes)
 
-		# Plain-item stock source (shelf mode aside):
-		#   - age-bin on : Stem Length Bin with Age Bin fallback (per-item merge)
-		#   - age-bin off: core Bin, same source as variants
-		from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-			get_age_bin_qty_for_items,
-			use_stem_length_age_bin,
+		# Admin-published totals (per plain item) override whatever live source the
+		# listing would otherwise show. Batched: one query for all plain items.
+		# When the publish feature is active, it GATES plain items: a plain item with
+		# no published rows shows 0 (not its live stock).
+		feature_active = enabled_feature_active()
+		published_by_code = enabled_total_qty_for_items(
+			[i.item_code for i in items if not i.get("has_variants")]
 		)
 
-		age_mode = use_stem_length_age_bin()
+		# Per-customer warehouse gate: when the logged-in customer is pinned to a
+		# warehouse (Customer Settings), their portal user sees ONLY the published
+		# items that ALSO physically sit in that warehouse — i.e. exactly the items
+		# enabled on that customer's warehouse tab. Items published from elsewhere
+		# (shelf / other warehouses) are hidden for this customer.
+		from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
+			get_session_customer_warehouse,
+		)
 
+		customer_wh_gate = bool(get_session_customer_warehouse())
+
+		# Plain items (shelf mode aside) read core Bin, same source as variants.
 		for leaves, bucket in items_by_warehouse_key.items():
 			# Variants are length-resolved at the item level (one variant = one
 			# length), so their qty stays in core Bin. Plain items follow the source
@@ -176,7 +193,10 @@ class ProductQuery:
 					variant_lookup_codes.update(
 						code for code, parent in variant_parent_of.items() if parent == item.item_code
 					)
-				elif not shelf_mode:
+				elif not shelf_mode or customer_wh_gate:
+					# Plain items: read Bin when not in shelf mode, OR always under the
+					# customer-warehouse gate (we need warehouse membership to decide
+					# whether a published item is visible to this customer).
 					plain_lookup_codes.add(item.item_code)
 
 			qty_by_code = {}
@@ -184,10 +204,9 @@ class ProductQuery:
 			# Without warehouses we can only resolve shelf-mode plain items (handled
 			# below via shelf_qty_by_code); Bin-backed lookups need a warehouse set.
 			if leaves:
-				# Age-bin off: plain items read core Bin alongside variants.
+				# Plain items read core Bin alongside variants.
 				bin_codes = set(variant_lookup_codes)
-				if not age_mode:
-					bin_codes |= plain_lookup_codes
+				bin_codes |= plain_lookup_codes
 
 				if bin_codes:
 					rows = frappe.db.get_all(
@@ -201,12 +220,6 @@ class ProductQuery:
 					for row in rows:
 						qty_by_code[row.item_code] = qty_by_code.get(row.item_code, 0.0) + flt(row.actual_qty)
 
-				# Age-bin on: plain items read Stem Length Bin with Age Bin fallback.
-				if age_mode and plain_lookup_codes:
-					age_totals = get_age_bin_qty_for_items(plain_lookup_codes, list(leaves))
-					for code, qty in age_totals.items():
-						qty_by_code[code] = qty_by_code.get(code, 0.0) + flt(qty)
-
 			for item in bucket:
 				if item.get("has_variants"):
 					total = sum(
@@ -214,6 +227,14 @@ class ProductQuery:
 						for code, parent in variant_parent_of.items()
 						if parent == item.item_code
 					)
+				elif feature_active:
+					# Gated: plain items show ONLY their published qty (0 if none).
+					total = published_by_code.get(item.item_code, 0.0)
+					# Customer-warehouse gate: hide published items that aren't in
+					# THIS customer's warehouse (qty_by_code holds the warehouse's Bin
+					# membership since leaves == the customer warehouse).
+					if customer_wh_gate and qty_by_code.get(item.item_code, 0.0) <= 0:
+						total = 0.0
 				elif shelf_mode:
 					total = shelf_qty_by_code.get(item.item_code, 0.0)
 				else:
@@ -343,13 +364,24 @@ class ProductQuery:
 
 		for item in result:
 			if price_ctx:
-				price = get_price(
-					item.item_code,
-					price_ctx["price_list"],
-					price_ctx["customer_group"],
-					price_ctx["company"],
-					party=price_ctx["party"],
-				)
+				# A single item's pricing must never blank the whole grid. If
+				# get_price throws (e.g. a missing Currency Exchange rate during
+				# conversion), log it and show the item without a price rather than
+				# silently dropping every product.
+				try:
+					price = get_price(
+						item.item_code,
+						price_ctx["price_list"],
+						price_ctx["customer_group"],
+						price_ctx["company"],
+						party=price_ctx["party"],
+					)
+				except Exception:
+					frappe.log_error(
+						title="Webshop listing: get_price failed",
+						message="Item {0}: {1}".format(item.item_code, frappe.get_traceback()),
+					)
+					price = None
 				if price:
 					# update/mutate item and discount_list objects
 					self.get_price_discount_info(item, price, discount_list)
@@ -381,11 +413,25 @@ class ProductQuery:
 		if frappe.session.user == "Guest" and settings.hide_price_for_guest:
 			return None
 
+		# get_party() can raise for a portal user (get_doc("Customer") fails the
+		# permission check) or redirect a brand-new web user. Pricing only uses
+		# `party` for the Price-List fallback, so degrade to party=None rather than
+		# let one call blank the whole listing. The session display currency is
+		# still resolved from the customer link inside get_price.
+		try:
+			party = get_party()
+		except Exception:
+			frappe.log_error(
+				title="Webshop listing: get_party failed",
+				message=frappe.get_traceback(),
+			)
+			party = None
+
 		return {
 			"price_list": _set_price_list(settings, None),
 			"customer_group": settings.default_customer_group,
 			"company": settings.company,
-			"party": get_party(),
+			"party": party,
 		}
 
 	def _get_wished_item_codes(self, item_codes):
@@ -514,13 +560,21 @@ def _all_storefront_warehouses(fallback_warehouse=None):
 	"""
 	Leaf warehouses to query for storefront stock.
 
-	Aggregates Webshop Settings → Warehouses (with group expansion). Falls back
-	to the per-item `website_warehouse` so we still render something if the
-	settings table is empty.
+	When the logged-in customer has a warehouse assigned (Webshop Settings →
+	Customer Settings), that warehouse OVERRIDES the default set — the customer
+	sees only their warehouse's stock. Otherwise aggregates Webshop Settings →
+	Warehouses (with group expansion), falling back to the per-item
+	`website_warehouse` so we still render something if the settings table is empty.
 	"""
 	from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
 		get_configured_warehouses,
+		get_session_customer_warehouse,
 	)
+
+	# Per-customer override: pin stock to the customer's assigned warehouse.
+	customer_wh = get_session_customer_warehouse()
+	if customer_wh:
+		return list(_resolve_warehouses(customer_wh))
 
 	leaves = set()
 	for wh in get_configured_warehouses():
@@ -533,14 +587,18 @@ def _all_storefront_warehouses(fallback_warehouse=None):
 def get_item_total_qty(item_code, warehouse):
 	"""Total qty for a single item across the storefront warehouse set.
 
-	Variant items (variant_of set) use core Bin — each variant_of = a distinct
-	length, already tracked there. Plain items: when the age-bin source is on,
-	read Stem Length Bin with Age Bin fallback (summed across lengths); otherwise
-	read core Bin. Listing has no length context."""
+	Both variant and plain items read core Bin (each variant_of = a distinct
+	length, already tracked there; plain items have no length context in the
+	listing). Plain items read from the shelf instead when shelf mode is on."""
 	item_meta = frappe.db.get_value(
 		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
 	) or frappe._dict()
 	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	# Gated: once the publish feature is active, plain items show ONLY their
+	# published total (0 if this item was never enabled).
+	if not is_variant_or_template and enabled_feature_active():
+		return enabled_total_qty(item_code)
 
 	# Plain items read from the shelf when shelf mode is on (not warehouse-scoped).
 	if not is_variant_or_template and use_shelf_stock():
@@ -550,24 +608,47 @@ def get_item_total_qty(item_code, warehouse):
 	if not warehouses:
 		return 0.0
 
-	# Plain items read Stem Length Bin (Age Bin fallback) when the age-bin source
-	# is enabled; variants stay on core Bin (one variant = one length).
-	from upande_webshop.upande_webshop.doctype.stem_length_age_bin.stem_length_age_bin import (
-		get_age_bin_qty_for_items,
-		use_stem_length_age_bin,
-	)
-
-	if not is_variant_or_template and use_stem_length_age_bin():
-		return get_age_bin_qty_for_items([item_code], warehouses).get(item_code, 0.0)
-
-	# Flag off: plain items read core Bin, same source as variants.
-	source = "Bin"
+	# Both plain items and variants read core Bin.
 	rows = frappe.db.get_all(
-		source,
+		"Bin",
 		filters={"item_code": item_code, "warehouse": ("in", warehouses)},
 		fields=["actual_qty"],
 	)
 	return sum(flt(r.actual_qty) for r in rows)
+
+
+def get_item_qty_by_length(item_code, warehouse):
+	"""Per-stem-length availability for a plain item, as {length: qty}.
+
+	The non-variant stem-length picker renders one row per globally defined Stem
+	Length. With shelf mode on, availability is per-length (the shelf carries a
+	distinct row per length), so each row must report its OWN length's qty — not
+	the item's grand total, which would let a user pick a length the cart then
+	rejects with "Only 0 ... available in stock".
+
+	Returns a dict keyed by the Stem Length `length` string (e.g. "52cm"); lengths
+	with no shelf row are simply absent (caller treats missing as 0 / out of stock).
+
+	Off shelf mode there is no per-length dimension in core Bin, so this returns an
+	empty dict and the template falls back to the item's total Bin qty per row
+	(the prior behaviour).
+	"""
+	item_meta = frappe.db.get_value(
+		"Item", item_code, ["has_variants", "variant_of"], as_dict=True
+	) or frappe._dict()
+	is_variant_or_template = bool(item_meta.has_variants) or bool(item_meta.variant_of)
+
+	# Gated: when the publish feature is active, plain items expose ONLY their
+	# enabled lengths' published qty (every other length reads as 0 / out of stock).
+	if not is_variant_or_template and enabled_feature_active():
+		return enabled_qty_by_length(item_code)
+
+	# Live per-length availability (shelf mode only; warehouse mode has no length
+	# dimension in core Bin and returns {} so the template falls back to total).
+	if not is_variant_or_template and use_shelf_stock():
+		return get_shelf_qty_by_length(item_code)
+
+	return {}
 
 
 def get_variants_total_qty(template_item_code, warehouse):

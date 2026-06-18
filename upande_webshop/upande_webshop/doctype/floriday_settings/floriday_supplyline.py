@@ -32,36 +32,6 @@ def safe_log(message, title="Floriday Log"):
     except:
         pass
 
-def get_item_mapping():
-    """Return {item_code: trade_item_id} from Floriday Items / Stem Length Price."""
-    try:
-        from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
-            get_item_mapping as _get_item_mapping,
-        )
-        mapping = _get_item_mapping()
-        safe_log(f"Loaded {len(mapping)} item mappings", "Floriday Item Mapping")
-        return mapping
-    except Exception:
-        safe_log("Error fetching item mappings", "Floriday Item Mapping Error")
-        return {}
-
-def get_source_warehouse():
-    """Return the configured Floriday warehouse, throwing if unset."""
-    try:
-        settings = frappe.get_single("Floriday Settings")
-        source_warehouse = settings.warehouse
-
-        if not source_warehouse:
-            frappe.throw("Warehouse not configured in Floriday Settings")
-
-        safe_log(f"Using source warehouse: {source_warehouse}", "Floriday Warehouse")
-        return source_warehouse
-
-    except Exception as e:
-        error_msg = f"Error fetching source warehouse"
-        safe_log(error_msg, "Floriday Warehouse Error")
-        frappe.throw(error_msg)
-
 @frappe.whitelist()
 def create_supply_lines_only_from_batches():
     """Create supply lines (no customer offers) from today's available batches,
@@ -189,37 +159,6 @@ def filter_batches_by_date_eat(batches, target_date):
     except Exception:
         return []
 
-def filter_batches_by_date_utc(batches, target_date):
-    """Keep batches whose batchDate falls within target_date in UTC."""
-    try:
-        todays_batches = []
-
-        target_dt = datetime.strptime(target_date, '%Y-%m-%d')
-        utc_start = datetime(target_dt.year, target_dt.month, target_dt.day, 0, 0, 0, tzinfo=timezone.utc)
-        utc_end = datetime(target_dt.year, target_dt.month, target_dt.day, 23, 59, 59, tzinfo=timezone.utc)
-
-        for batch in batches:
-            batch_date_str = batch.get("batchDate")
-            if batch_date_str:
-                try:
-                    if batch_date_str.endswith('Z'):
-                        batch_dt = datetime.fromisoformat(batch_date_str.replace('Z', '+00:00'))
-                    else:
-                        batch_dt = datetime.fromisoformat(batch_date_str)
-                    if batch_dt.tzinfo is None:
-                        batch_dt = batch_dt.replace(tzinfo=timezone.utc)
-
-                    if utc_start <= batch_dt <= utc_end:
-                        todays_batches.append(batch)
-                except Exception:
-                    # Unparseable date — fall back to a substring match on the raw string.
-                    if target_date in batch_date_str:
-                        todays_batches.append(batch)
-
-        return todays_batches
-    except Exception:
-        return []
-
 def filter_available_batches_fixed(batches):
     """
     Keep only batches with live stock to offer.
@@ -266,14 +205,6 @@ def sort_batches_newest_first(batches):
         return sorted(batches, key=sort_key, reverse=True)
     except Exception:
         return batches
-
-def filter_batches_by_date(batches, target_date):
-    """Alias for filter_batches_by_date_eat."""
-    return filter_batches_by_date_eat(batches, target_date)
-
-def filter_available_batches(batches):
-    """Alias for filter_available_batches_fixed."""
-    return filter_available_batches_fixed(batches)
 
 def create_supply_lines_only(BASE_URL, API_KEY, ACCESS_TOKEN, batches):
     """POST a supply line per batch (capped at 10), without customer offers."""

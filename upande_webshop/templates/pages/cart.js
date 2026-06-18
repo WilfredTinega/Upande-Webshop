@@ -171,11 +171,51 @@ $.extend(shopping_cart, {
 	},
 
 	bind_request_quotation: function() {
+		// Two-step flow. Step 1: "Save Order" saves the cart as a draft Sales Order
+		// (no confirm — a draft is reversible). On success request_quotation()
+		// relabels this same button to "Submit Order" and rebinds it to step 2.
 		$('.btn-request-for-quotation').off('click.wsRfq').on('click.wsRfq', function() {
 			if (!shopping_cart._validate_required_cart_fields()) return;
 			frappe.ui && frappe.ui.form && frappe.ui.form.dirty_dialog && frappe.ui.form.dirty_dialog.hide();
 			window.onbeforeunload = null;
 			shopping_cart.request_quotation(this);
+		});
+	},
+
+	// Step 2: confirm + submit the saved draft (docstatus 0→1).
+	_bind_submit_order: function(btn) {
+		$(btn).off('click.wsSubmit').on('click.wsSubmit', function() {
+			var b = this;
+			frappe.confirm(
+				__("Are you sure you want to submit this sales order?"),
+				function() { shopping_cart.submit_order(b); }
+			);
+		});
+	},
+
+	submit_order: function(btn) {
+		return frappe.call({
+			type: "POST",
+			method: "upande_webshop.upande_webshop.shopping_cart.cart.submit_cart_order",
+			btn: btn,
+			callback: function(r) {
+				if (r.exc) {
+					var msg = shopping_cart._extract_server_message(r) || __("Something went wrong!");
+					r._server_messages = null;
+					frappe.show_alert({ message: msg, indicator: "red" }, 7);
+					return;
+				}
+				if (r.message && typeof r.message === "object" && r.message.error) {
+					frappe.show_alert({ message: r.message.error, indicator: "red" }, 7);
+					return;
+				}
+				var so = r.message;
+				frappe.show_alert(
+					{ message: __("Order {0} submitted.", [so]), indicator: "green" },
+					8
+				);
+				setTimeout(function () { window.location.href = "/webshop"; }, 1200);
+			}
 		});
 	},
 
@@ -444,26 +484,98 @@ $.extend(shopping_cart, {
 	},
 
 	_render_consignee_select: function($wrapper, options, initial_value) {
-		var $select = $('<select class="form-control font-md"></select>');
-		$select.append('<option value="">' + __("Select consignee") + '</option>');
+		// A native <select> with 1200+ options renders an OS popup that escapes the
+		// cart panel and can't be CSS-constrained. Use a searchable input + an
+		// absolutely-positioned results panel bounded to the field's width and a
+		// fixed max-height (scrolls), so the list never leaves the field area.
+		shopping_cart._inject_consignee_styles();
 
-		options.forEach(function(opt) {
-			$select.append('<option value="' + opt.value + '">' + (opt.label || opt.value) + '</option>');
-		});
-
-		if (initial_value) {
-			$select.val(initial_value);
+		var initial_label = "";
+		for (var i = 0; i < options.length; i++) {
+			if (options[i].value === initial_value) {
+				initial_label = options[i].label || options[i].value;
+				break;
+			}
 		}
 
-		$wrapper.empty().append($select);
+		var $root = $('<div class="uw-consignee"></div>');
+		var $input = $(
+			'<input type="text" class="form-control font-md uw-consignee-input" autocomplete="off" ' +
+			'placeholder="' + __("Select consignee") + '">'
+		);
+		var $menu = $('<div class="uw-consignee-menu" style="display:none;"></div>');
+		$input.val(initial_label);
+		$root.append($input).append($menu);
+		$wrapper.empty().append($root);
 
-		$select.on("change", function() {
-			var value = $(this).val() || "";
+		// Track the committed value so blur can restore the label if the user typed
+		// without picking.
+		$root.data("value", initial_value || "");
+		$root.data("label", initial_label || "");
+
+		function commit(value, label) {
+			$root.data("value", value).data("label", label);
+			$input.val(label);
+			$menu.hide();
 			frappe.call({
 				method: "upande_webshop.upande_webshop.shopping_cart.cart.update_cart_consignee",
 				args: { consignee: value },
 			});
+		}
+
+		function render_list(filter) {
+			var f = (filter || "").toLowerCase();
+			$menu.empty();
+			var shown = 0;
+			for (var i = 0; i < options.length && shown < 200; i++) {
+				var label = options[i].label || options[i].value;
+				if (f && label.toLowerCase().indexOf(f) === -1) continue;
+				var $item = $('<div class="uw-consignee-item"></div>')
+					.text(label)
+					.attr("data-value", options[i].value);
+				if (options[i].value === $root.data("value")) $item.addClass("is-selected");
+				$menu.append($item);
+				shown++;
+			}
+			if (!shown) {
+				$menu.append('<div class="uw-consignee-empty text-muted">' + __("No matches") + '</div>');
+			}
+			$menu.show();
+		}
+
+		$input.on("focus", function() { render_list($input.val() === $root.data("label") ? "" : $input.val()); });
+		$input.on("input", function() { render_list($input.val()); });
+
+		$menu.on("mousedown", ".uw-consignee-item", function(e) {
+			e.preventDefault();
+			commit($(this).attr("data-value"), $(this).text());
 		});
+
+		// Clicking away (and not on a result) restores the committed label.
+		$input.on("blur", function() {
+			setTimeout(function() {
+				$menu.hide();
+				$input.val($root.data("label"));
+			}, 150);
+		});
+	},
+
+	_inject_consignee_styles: function() {
+		if (document.getElementById("uw-consignee-styles")) return;
+		var css =
+			".uw-consignee{position:relative;}" +
+			".uw-consignee-menu{position:absolute;z-index:1050;top:100%;left:0;right:0;" +
+			"width:100%;max-height:240px;overflow-y:auto;margin-top:2px;" +
+			"border:1px solid var(--border-color,#3a3a3a);border-radius:6px;" +
+			"background:var(--card-bg,var(--bg-color,#1f1f1f));box-shadow:0 4px 12px rgba(0,0,0,.3);}" +
+			".uw-consignee-item{padding:6px 12px;cursor:pointer;white-space:nowrap;" +
+			"overflow:hidden;text-overflow:ellipsis;}" +
+			".uw-consignee-item:hover,.uw-consignee-item.is-selected{background:var(--bg-light-gray,#2c4a7c);}" +
+			".uw-consignee-empty{padding:6px 12px;}";
+		var style = document.createElement("style");
+		style.id = "uw-consignee-styles";
+		style.textContent = css;
+		document.head.appendChild(style);
 	},
 	// ---- End Consignee ----
 
@@ -706,22 +818,18 @@ $.extend(shopping_cart, {
 					frappe.show_alert({ message: r.message.error, indicator: "red" }, 7);
 					return;
 				}
-				$(btn).hide();
-				// Staff save orders on behalf of customers; the customer-facing
-				// /orders/<SO> portal page is permission-gated against them
-				// ("Not Permitted" / 403). Confirm and return to the storefront
-				// so they can place another order immediately. (Mirrors place_order.)
+				// Step 1 done: the order is saved as a draft. Stay on the cart and
+				// turn this same button into "Submit Order" (step 2).
 				var so = r.message;
 				frappe.show_alert(
-					{
-						message: __("Order {0} saved.", [so]),
-						indicator: "green",
-					},
-					8
+					{ message: __("Order {0} saved as draft.", [so]), indicator: "green" },
+					6
 				);
-				setTimeout(function () {
-					window.location.href = "/webshop";
-				}, 1200);
+				$(btn)
+					.text(__("Submit Order"))
+					.removeClass("btn-request-for-quotation")
+					.addClass("btn-submit-order");
+				shopping_cart._bind_submit_order(btn);
 			}
 		});
 	},

@@ -6,7 +6,7 @@ from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings imp
     get_shopping_cart_settings,
 )
 from upande_webshop.upande_webshop.shopping_cart.cart import _set_price_list
-from erpnext.utilities.product import get_price
+from upande_webshop.upande_webshop.utils.item_price_source import get_price
 from upande_webshop.upande_webshop.shopping_cart.cart import get_party
 
 
@@ -40,11 +40,11 @@ def get_stock_availability(item_code, warehouse):
 	"""Whether `item_code` has any stock for the storefront.
 
 	Mirrors the product listing/detail logic in
-	`upande_webshop.product_data_engine.query`: plain items read summed
-	`Stem Length Bin` qty, templates aggregate their variants' `Bin` qty, and
-	variants read `Bin` directly — all across the configured storefront
-	warehouse set rather than a single `website_warehouse`. Reading only the
-	per-item Bin here previously flagged in-stock plain items as out of stock.
+	`upande_webshop.product_data_engine.query`: plain items read summed core
+	`Bin` qty, templates aggregate their variants' `Bin` qty, and variants read
+	`Bin` directly — all across the configured storefront warehouse set rather
+	than a single `website_warehouse`. Reading only the per-item Bin here
+	previously flagged in-stock plain items as out of stock.
 	"""
 	from upande_webshop.upande_webshop.product_data_engine.query import (
 		get_item_total_qty,
@@ -125,13 +125,15 @@ def set_stem_rows(items):
 	"""Attach per-length {stem_length, stock_qty} rows for non-variant items.
 
 	Mirrors the product detail page (item_non_variant.html): show every globally
-	defined Stem Length, with per-length storefront stock so the wishlist's
-	compact non-variant selector strikes out out-of-stock lengths exactly like
-	the detail page. Variant templates use the variant selector and don't need
-	this.
+	defined Stem Length. With shelf mode on, availability is per-length, so each
+	row reports its OWN length's shelf qty (qty_by_length) — matching what the
+	cart will accept. Off shelf mode there is no per-length dimension, so each row
+	falls back to the item's total core Bin qty across the storefront warehouse
+	set. Variant templates use the variant selector and don't need this.
 	"""
-	from upande_webshop.upande_webshop.doctype.stem_length_bin.stem_length_bin import (
-		get_stock_by_length,
+	from upande_webshop.upande_webshop.product_data_engine.query import (
+		get_item_qty_by_length,
+		get_item_total_qty,
 	)
 
 	stem_master = frappe.get_all(
@@ -144,9 +146,13 @@ def set_stem_rows(items):
 		if item.get("has_variants"):
 			item.stem_rows = []
 			continue
-		qty_by_sl = get_stock_by_length(item.item_code)
+		total_qty = get_item_total_qty(item.item_code, item.get("warehouse"))
+		qty_by_length = get_item_qty_by_length(item.item_code, item.get("warehouse"))
 		item.stem_rows = [
-			{"stem_length": row.length, "stock_qty": qty_by_sl.get(row.name, 0)}
+			{
+				"stem_length": row.length,
+				"stock_qty": qty_by_length.get(row.length, 0) if qty_by_length else total_qty,
+			}
 			for row in stem_master
 			if row.length
 		]

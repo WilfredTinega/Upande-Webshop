@@ -26,7 +26,7 @@ from upande_webshop.upande_webshop.doctype.override_doctype.item_group import (
     invalidate_cache_for,
 )
 from erpnext.stock.doctype.item.item import Item
-from erpnext.utilities.product import get_price
+from upande_webshop.upande_webshop.utils.item_price_source import get_price
 from upande_webshop.upande_webshop.shopping_cart.cart import get_party
 from upande_webshop.upande_webshop.variant_selector.item_variants_cache import (
     ItemVariantsCacheManager,

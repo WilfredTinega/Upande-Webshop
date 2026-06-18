@@ -75,18 +75,38 @@ def resync_app_resources():
 # Workspace identity field we standardise on. Frappe requires a Workspace's
 # name == title == label, and derives the Desk route from slug(name)
 # (frappe/public/js/frappe/views/workspace/workspace.js). We want the admin
-# workspace to live at /app/upande-webshop (slug of "Upande Webshop"), distinct
-# from the /webshop storefront URL shortcut inside it. A stale install/UI edit
-# can leave title or label out of sync (showing the wrong text) or set
-# parent_page to the workspace itself (nesting it under a missing parent, which
-# 404s the icon). Normalise all of that here so every install/migrate lands the
-# same working state. Safe to run repeatedly.
-_WORKSPACE_NAME = "Upande Webshop"
+# workspace to live at /app/ecommerce (slug of "Ecommerce"), distinct from the
+# /webshop storefront URL shortcut inside it. A stale install/UI edit can leave
+# title or label out of sync (showing the wrong text) or set parent_page to the
+# workspace itself (nesting it under a missing parent, which 404s the icon).
+# Normalise all of that here so every install/migrate lands the same working
+# state. Safe to run repeatedly.
+_WORKSPACE_NAME = "Ecommerce"
+# The workspace was originally shipped as "Upande Webshop". Already-installed
+# sites still hold a Workspace record under that name; rename it once so the
+# route, title, and sidebar all flip to "Ecommerce" without orphaning the row.
+_LEGACY_WORKSPACE_NAME = "Upande Webshop"
 
 
 def normalize_webshop_workspace():
 	"""Force the webshop Workspace's name/title/label consistent and clear any
-	self-referential parent_page so the Desk icon opens /app/upande-webshop."""
+	self-referential parent_page so the Desk icon opens /app/ecommerce."""
+	# Migrate the legacy "Upande Webshop" record to "Ecommerce" on existing sites.
+	if (
+		frappe.db.exists("Workspace", _LEGACY_WORKSPACE_NAME)
+		and not frappe.db.exists("Workspace", _WORKSPACE_NAME)
+	):
+		try:
+			frappe.rename_doc(
+				"Workspace", _LEGACY_WORKSPACE_NAME, _WORKSPACE_NAME,
+				force=True, ignore_permissions=True,
+			)
+		except Exception:
+			frappe.log_error(
+				title="upande_webshop rename workspace to Ecommerce",
+				message=frappe.get_traceback(),
+			)
+
 	if not frappe.db.exists("Workspace", _WORKSPACE_NAME):
 		return
 
@@ -130,23 +150,36 @@ def normalize_webshop_workspace():
 # The launcher tile on /desk and /apps is a Desktop Icon. We ship one as a
 # standard fixture (desktop_icon/upande_webshop.json), but Frappe also
 # auto-generates a Desktop Icon from the public Workspace (labelled with the
-# workspace name "Upande Webshop", linking to the bare "/upande-webshop" route
-# that 404s). That auto-row shadows our fixture. Mirror upande_ta's approach:
-# upsert our External-link icon every install/migrate and drop the stale
-# auto-generated one, so the tile always reads "Webshop" and opens
-# /app/upande-webshop. (See upande_ta/install.py::ensure_desktop_icon.)
-_DESKTOP_ICON_NAME = "Webshop"
-_STALE_DESKTOP_ICON_NAME = "Upande Webshop"
+# workspace name "Ecommerce", linking to the bare "/ecommerce" route that 404s).
+# That auto-row shadows our fixture. Mirror upande_ta's approach: upsert our
+# External-link icon every install/migrate and drop the stale auto-generated one,
+# so the tile opens /app/ecommerce.
+#
+# IMPORTANT: the icon's label MUST equal the Workspace title ("Ecommerce"). The
+# Desk sidebar header and the workspace breadcrumb both resolve their icon (and
+# the clickable "back to workspace" crumb) via
+# frappe.utils.get_desktop_icon_by_label(sidebar_title), where sidebar_title is
+# the active workspace title. A mismatch (e.g. label "Webshop" vs title
+# "Ecommerce") means get_desktop_icon_by_label() returns nothing and the
+# workspace breadcrumb is silently dropped -- doctypes opened from the workspace
+# then show no clickable crumb back to it. Keeping label == "Ecommerce" restores
+# the breadcrumb. (frappe/public/js/frappe/views/breadcrumbs.js
+# set_workspace_breadcrumb; ui/sidebar/sidebar_header.js.)
+_DESKTOP_ICON_NAME = "Ecommerce"
+# Drop the pre-rename ("Upande Webshop") and the old brand-labelled ("Webshop")
+# icons so only the title-matched "Ecommerce" icon remains.
+_STALE_DESKTOP_ICON_NAMES = ("Upande Webshop", "Webshop")
 
 
 def ensure_desktop_icon():
 	"""Create / refresh the launcher Desktop Icon for the webshop workspace."""
-	# Drop the auto-generated workspace icon that links to the broken route.
-	if frappe.db.exists("Desktop Icon", _STALE_DESKTOP_ICON_NAME):
-		frappe.delete_doc(
-			"Desktop Icon", _STALE_DESKTOP_ICON_NAME,
-			ignore_permissions=True, force=True,
-		)
+	# Drop the auto-generated workspace icon(s) that link to the broken route.
+	for stale in _STALE_DESKTOP_ICON_NAMES:
+		if frappe.db.exists("Desktop Icon", stale):
+			frappe.delete_doc(
+				"Desktop Icon", stale,
+				ignore_permissions=True, force=True,
+			)
 
 	payload = {
 		"doctype": "Desktop Icon",
@@ -155,7 +188,7 @@ def ensure_desktop_icon():
 		"app": "upande_webshop",
 		"icon_type": "App",
 		"link_type": "External",
-		"link": "/app/upande-webshop",
+		"link": "/app/ecommerce",
 		"logo_url": "/assets/upande_webshop/images/UpandeLogo.png",
 		"force_show": 1,
 		"hidden": 0,

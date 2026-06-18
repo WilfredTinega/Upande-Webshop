@@ -146,6 +146,8 @@ def update_website_context(context):
 	cart_enabled = is_cart_enabled()
 	context["shopping_cart_enabled"] = cart_enabled
 
+	context["is_webshop_page"] = _is_webshop_page(context)
+
 	_set_webshop_breadcrumbs(context)
 
 	# Webshop Settings → Full Width: drop the .container wrapper on every
@@ -238,6 +240,46 @@ def update_website_context(context):
 # shopping_cart.js so the trail matches the nav. /webshop is the webshop "home"
 # and is the "Home" root crumb on every other page (and gets no breadcrumb
 # itself).
+# Top-level routes that belong to the webshop "world". Their sub-routes
+# (detail/list/new) count too — see _is_webshop_page.
+_WEBSHOP_ROUTES = {
+	"webshop",
+	"cart",
+	"wishlist",
+	"bouquet",
+	"orders",
+	"invoices",
+	"shipments",
+	"issues",
+	"contact",
+	"webshop-setting",
+	"webshop-setup",
+}
+
+
+def _is_webshop_page(context):
+	"""True when the page being rendered belongs to the webshop.
+
+	update_website_context runs for EVERY website page, so the navbar override
+	must know whether to show the Webshop brand or defer to the site's normal
+	brand. Webshop pages are: the known top-level routes (and their sub-routes),
+	and product detail pages rendered from the Website Item generator.
+	"""
+	if (context or {}).get("doctype") == "Website Item":
+		return True
+
+	request = getattr(frappe.local, "request", None)
+	if not request:
+		return False
+
+	route = (request.path or "").strip("/")
+	if not route:
+		return False
+
+	top = route.split("/", 1)[0]
+	return top in _WEBSHOP_ROUTES
+
+
 _WEBSHOP_BREADCRUMB_PAGES = {
 	"orders": "Orders",
 	"invoices": "Invoices",

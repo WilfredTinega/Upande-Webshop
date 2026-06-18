@@ -1,23 +1,27 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2025-11-18 21:09:26.329106",
+ "creation": "2026-06-17 16:24:31.121623",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "stocks_tab",
+  "offer_stock_section",
+  "refresh_stock",
+  "column_break_veun",
+  "publish_enabled_stock_only",
+  "column_break_kyhj",
+  "use_shelf_stock",
+  "section_break_zkbh",
+  "stock_items",
+  "stock_source_section",
+  "shelf_stock_actions",
   "offers_tab",
+  "offer_enabled",
   "offer_event_frequency",
   "offer_cron_format",
   "column_break_offer",
-  "offer_enabled",
-  "stock_source_section",
-  "use_shelf_stock",
-  "column_break_dxkb",
-  "use_stem_length_age_bin",
-  "offer_stock_section",
-  "refresh_stock",
   "post_offers",
-  "stock_items",
   "live_offers_section",
   "get_offers",
   "live_offers",
@@ -26,18 +30,26 @@
   "offer_column_break_runtime",
   "offer_next_run",
   "deals_tab",
+  "deals_enabled",
   "deals_event_frequency",
   "deals_cron_format",
   "column_break_deals",
-  "deals_enabled",
+  "get_deals",
+  "get_predeals",
+  "approve_deal",
   "deals_filter_section",
   "deals_from_date",
   "deals_to_date",
-  "column_break_deals_filter",
+  "deals_mutation_date",
+  "deals_offset",
   "deals_limit",
-  "get_deals",
-  "deals_action_section",
-  "approve_deal",
+  "column_break_dcjx",
+  "deals_company",
+  "deals_customer",
+  "deals_business_unit",
+  "deals_farm",
+  "deals_source_warehouse",
+  "deals_consignee",
   "deals_scheduler_section",
   "deals_last_run",
   "deals_column_break_runtime",
@@ -50,9 +62,10 @@
   "predeal_filter_section",
   "predeal_from_date",
   "predeal_to_date",
+  "predeal_mutation_date",
   "column_break_predeal_filter",
   "predeal_limit",
-  "get_predeals",
+  "predeal_offset",
   "predeal_scheduler_section",
   "predeal_last_run",
   "predeal_column_break_runtime",
@@ -78,7 +91,11 @@
   "at_scheduler_section",
   "at_last_run",
   "at_column_break_runtime",
-  "at_next_run"
+  "at_next_run",
+  "actions_tab",
+  "custom_fields_section",
+  "custom_fields_status_html",
+  "create_custom_fields"
  ],
  "fields": [
   {
@@ -124,24 +141,27 @@
    "label": "Refresh Stock"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock",
    "fieldname": "stock_source_section",
    "fieldtype": "Section Break",
-   "label": "Stock Source"
+   "label": "Shelf Stock "
   },
   {
    "default": "0",
-   "description": "Read offer quantities from shelf stock ",
    "fieldname": "use_shelf_stock",
    "fieldtype": "Check",
    "label": "Use Shelf Stock?"
   },
   {
    "default": "0",
-   "depends_on": "eval:doc.use_shelf_stock === 0",
-   "description": "Read offer quantities from the Stem Length Bin ",
-   "fieldname": "use_stem_length_age_bin",
+   "fieldname": "publish_enabled_stock_only",
    "fieldtype": "Check",
-   "label": "Use Stem Length Age Bin?"
+   "label": "Show Only Enabled Stock?"
+  },
+  {
+   "fieldname": "shelf_stock_actions",
+   "fieldtype": "HTML",
+   "label": "Shelf Stock Actions"
   },
   {
    "fieldname": "offer_stock_section",
@@ -149,6 +169,7 @@
    "label": "Stock Available for Offers"
   },
   {
+   "depends_on": "eval:doc.use_shelf_stock===0",
    "fieldname": "stock_items",
    "fieldtype": "Table",
    "label": "Stock Items",
@@ -215,6 +236,7 @@
    "label": "Enabled"
   },
   {
+   "collapsible": 1,
    "fieldname": "deals_filter_section",
    "fieldtype": "Section Break",
    "label": "Filters"
@@ -230,28 +252,65 @@
    "label": "To Date"
   },
   {
-   "fieldname": "column_break_deals_filter",
-   "fieldtype": "Column Break"
+   "fieldname": "deals_mutation_date",
+   "fieldtype": "Datetime",
+   "label": "Mutation Date"
   },
   {
-   "description": "How much to transfer at one time",
    "fieldname": "deals_limit",
    "fieldtype": "Int",
    "label": "Limit"
   },
   {
-   "fieldname": "deals_action_section",
-   "fieldtype": "Section Break"
+   "fieldname": "deals_offset",
+   "fieldtype": "Int",
+   "label": "Offset"
+  },
+  {
+   "fieldname": "deals_customer",
+   "fieldtype": "Link",
+   "label": "Deals Customer",
+   "options": "Customer"
+  },
+  {
+   "fieldname": "deals_company",
+   "fieldtype": "Link",
+   "label": "Deals Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "deals_business_unit",
+   "fieldtype": "Link",
+   "label": "Deals Business Unit",
+   "options": "Business Unit"
+  },
+  {
+   "fieldname": "deals_farm",
+   "fieldtype": "Link",
+   "label": "Deals Farm",
+   "options": "Farm"
+  },
+  {
+   "fieldname": "deals_source_warehouse",
+   "fieldtype": "Link",
+   "label": "Deals Source Warehouse",
+   "options": "Warehouse"
+  },
+  {
+   "fieldname": "deals_consignee",
+   "fieldtype": "Link",
+   "label": "Deals Consignee",
+   "options": "Consignee"
   },
   {
    "fieldname": "get_deals",
    "fieldtype": "Button",
-   "label": "Get Deals"
+   "label": "Deals"
   },
   {
    "fieldname": "approve_deal",
    "fieldtype": "Button",
-   "label": "Approve Deal"
+   "label": "Approve PreDeals"
   },
   {
    "fieldname": "deals_scheduler_section",
@@ -275,82 +334,9 @@
    "read_only": 1
   },
   {
-   "fieldname": "predeals_tab",
-   "fieldtype": "Tab Break",
-   "label": "Predeals"
-  },
-  {
-   "fieldname": "predeal_event_frequency",
-   "fieldtype": "Select",
-   "label": "Event Frequency",
-   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
-  },
-  {
-   "depends_on": "eval:doc.predeal_event_frequency == \"Cron\"",
-   "fieldname": "predeal_cron_format",
-   "fieldtype": "Data",
-   "label": "Cron Format"
-  },
-  {
-   "fieldname": "column_break_predeal",
-   "fieldtype": "Column Break"
-  },
-  {
-   "default": "0",
-   "fieldname": "predeal_enabled",
-   "fieldtype": "Check",
-   "label": "Enabled"
-  },
-  {
-   "fieldname": "predeal_filter_section",
-   "fieldtype": "Section Break",
-   "label": "Filters"
-  },
-  {
-   "fieldname": "predeal_from_date",
-   "fieldtype": "Datetime",
-   "label": "From Date"
-  },
-  {
-   "fieldname": "predeal_to_date",
-   "fieldtype": "Datetime",
-   "label": "To Date"
-  },
-  {
-   "fieldname": "column_break_predeal_filter",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "How much to transfer at one time",
-   "fieldname": "predeal_limit",
-   "fieldtype": "Int",
-   "label": "Limit"
-  },
-  {
    "fieldname": "get_predeals",
    "fieldtype": "Button",
-   "label": "Get Predeals"
-  },
-  {
-   "fieldname": "predeal_scheduler_section",
-   "fieldtype": "Section Break",
-   "label": "Scheduler Run Time"
-  },
-  {
-   "fieldname": "predeal_last_run",
-   "fieldtype": "Datetime",
-   "label": "Last Run",
-   "read_only": 1
-  },
-  {
-   "fieldname": "predeal_column_break_runtime",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "predeal_next_run",
-   "fieldtype": "Datetime",
-   "label": "Next Run",
-   "read_only": 1
+   "label": "Predeals"
   },
   {
    "fieldname": "biflorica_settings_tab",
@@ -358,8 +344,10 @@
    "label": "Biflorica Settings"
   },
   {
+   "collapsible": 1,
    "fieldname": "section_break_setting",
-   "fieldtype": "Section Break"
+   "fieldtype": "Section Break",
+   "label": "Api Credentials"
   },
   {
    "fieldname": "username",
@@ -384,9 +372,10 @@
   },
   {
    "fieldname": "warehouse",
-   "fieldtype": "Data",
+   "fieldtype": "Link",
    "in_list_view": 1,
    "label": "Warehouse",
+   "options": "Warehouse",
    "reqd": 1
   },
   {
@@ -472,15 +461,137 @@
    "read_only": 1
   },
   {
-   "fieldname": "column_break_dxkb",
+   "fieldname": "stocks_tab",
+   "fieldtype": "Tab Break",
+   "label": "Stocks"
+  },
+  {
+   "fieldname": "column_break_veun",
    "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "section_break_zkbh",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "column_break_dcjx",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "column_break_kyhj",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "actions_tab",
+   "fieldtype": "Tab Break",
+   "label": "Actions"
+  },
+  {
+   "fieldname": "custom_fields_section",
+   "fieldtype": "Section Break",
+   "label": "Custom Fields"
+  },
+  {
+   "fieldname": "custom_fields_status_html",
+   "fieldtype": "HTML",
+   "label": "Custom Fields Status"
+  },
+  {
+   "fieldname": "create_custom_fields",
+   "fieldtype": "Button",
+   "label": "Create Missing Custom Fields"
+  },
+  {
+   "fieldname": "predeals_tab",
+   "fieldtype": "Tab Break",
+   "label": "Predeals"
+  },
+  {
+   "fieldname": "predeal_event_frequency",
+   "fieldtype": "Select",
+   "label": "Event Frequency",
+   "options": "All\nHourly\nDaily\nWeekly\nMonthly\nYearly\nHourly Long\nDaily Long\nWeekly Long\nMonthly Long\nCron"
+  },
+  {
+   "depends_on": "eval:doc.predeal_event_frequency == \"Cron\"",
+   "fieldname": "predeal_cron_format",
+   "fieldtype": "Data",
+   "label": "Cron Format"
+  },
+  {
+   "fieldname": "column_break_predeal",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "fieldname": "predeal_enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "predeal_filter_section",
+   "fieldtype": "Section Break",
+   "label": "Filters"
+  },
+  {
+   "fieldname": "predeal_from_date",
+   "fieldtype": "Datetime",
+   "label": "From Date"
+  },
+  {
+   "fieldname": "predeal_to_date",
+   "fieldtype": "Datetime",
+   "label": "To Date"
+  },
+  {
+   "description": "Only fetch predeals changed on/after this time (incremental sync)",
+   "fieldname": "predeal_mutation_date",
+   "fieldtype": "Datetime",
+   "label": "Mutation Date"
+  },
+  {
+   "fieldname": "column_break_predeal_filter",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "How much to transfer at one time",
+   "fieldname": "predeal_limit",
+   "fieldtype": "Int",
+   "label": "Limit"
+  },
+  {
+   "description": "Pagination offset for the predeals fetch",
+   "fieldname": "predeal_offset",
+   "fieldtype": "Int",
+   "label": "Offset"
+  },
+  {
+   "fieldname": "predeal_scheduler_section",
+   "fieldtype": "Section Break",
+   "label": "Scheduler Run Time"
+  },
+  {
+   "fieldname": "predeal_last_run",
+   "fieldtype": "Datetime",
+   "label": "Last Run",
+   "read_only": 1
+  },
+  {
+   "fieldname": "predeal_column_break_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "predeal_next_run",
+   "fieldtype": "Datetime",
+   "label": "Next Run",
+   "read_only": 1
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-06-10 01:57:42.789607",
+ "modified": "2026-06-18 16:19:34.961006",
  "modified_by": "Administrator",
  "module": "Upande Webshop",
  "name": "Biflorica Setting",

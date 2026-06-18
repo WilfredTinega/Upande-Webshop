@@ -2,9 +2,11 @@
 # Fold the legacy show_cart_box_type flag into show_box_type before the old
 # column is dropped, so cart box-type visibility is preserved across the merge.
 upande_webshop.patches.merge_show_cart_box_type
+# Rename the admin Workspace "Upande Webshop" -> "Ecommerce" before the migrate
+# orphan-Workspace sweep can delete the legacy-named record. Route -> /app/ecommerce.
+upande_webshop.patches.rename_workspace_to_ecommerce
 
 [post_model_sync]
-upande_webshop.patches.backfill_stem_length_age_bin
-# Re-squares Stem Length Bin + Stem Length Age Bin to core Bin. Runs once per
-# deploy that bumps the date suffix below — bump it to force a re-sync on a release.
-upande_webshop.patches.reconcile_stem_length_trackers  #2026-06-09
+# Blank the helper description under the Webshop Settings "Enable Variant
+# Selector" (enable_variants) Custom Field.
+upande_webshop.patches.clear_enable_variants_description

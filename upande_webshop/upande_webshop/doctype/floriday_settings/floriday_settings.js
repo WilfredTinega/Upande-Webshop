@@ -228,297 +228,37 @@ function load_stock_table(frm, { silent } = {}) {
 	});
 }
 
-function open_bulk_stock_dialog(frm, direction, prefill_row) {
-	if (!frm.doc.warehouse) {
-		frappe.show_alert({
-			message: __("Set the Warehouse on the Floriday Setting tab first"),
-			indicator: "orange",
-		});
-		return;
-	}
-
-	const is_add = direction === "in";
-	const title = is_add
-		? __("Add Stock to {0}", [frm.doc.warehouse])
-		: __("Move Stock from {0}", [frm.doc.warehouse]);
-	const method = is_add
-		? "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.create_stock_transfer"
-		: "upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.create_stock_move";
-
-	// For Move dialog: only allow Items currently in any Available-for-Sale warehouse.
-	const setup_dialog = (allowed_codes_for_move, floriday_company) => {
-		// Dynamic Item filter: query Bin live for items with stock in this row's
-		// chosen Source Warehouse. Falls back to the bulk-loaded allowed list
-		// if the row hasn't picked a source yet.
-		const item_get_query = (doc, cdt, cdn) => {
-			const row = cdt && cdn ? locals[cdt][cdn] : null;
-			const s_wh = row && row.source_warehouse;
-			if (s_wh) {
-				return {
-					query:
-						"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.item_query_with_stock",
-					filters: { warehouse: s_wh },
-				};
-			}
-			if (!is_add) {
-				return {
-					filters: [
-						["Item", "name", "in", allowed_codes_for_move || []],
-					],
-				};
-			}
-			return {};
-		};
-
-		const warehouse_get_query = () => {
-			const filters = [
-				["Warehouse", "warehouse_name", "like", "%Available for Sale%"],
-			];
-			if (floriday_company) {
-				filters.push(["Warehouse", "company", "=", floriday_company]);
-			}
-			return { filters };
-		};
-
-		const grid_fields = [
-			{
-				fieldname: "item_code",
-				fieldtype: "Link",
-				label: __("Item"),
-				options: "Item",
-				in_list_view: 1,
-				columns: 3,
-				reqd: 1,
-				get_query: item_get_query,
-			},
-			{
-				fieldname: "stem_length",
-				fieldtype: "Link",
-				label: __("Stem Length"),
-				options: "Stem Length",
-				in_list_view: 1,
-				columns: 2,
-				reqd: 1,
-			},
-			{
-				fieldname: "source_warehouse",
-				fieldtype: "Link",
-				label: __("Source"),
-				in_list_view: 1,
-				columns: 2,
-				options: "Warehouse",
-				reqd: 1,
-				get_query: warehouse_get_query,
-				default: is_add ? "" : frm.doc.warehouse,
-			},
-			{
-				fieldname: "target_warehouse",
-				fieldtype: "Link",
-				label: __("Target"),
-				in_list_view: 1,
-				columns: 2,
-				options: "Warehouse",
-				reqd: 1,
-				get_query: warehouse_get_query,
-				default: is_add ? frm.doc.warehouse : "",
-			},
-			{
-				fieldname: "qty",
-				fieldtype: "Float",
-				label: __("Qty"),
-				in_list_view: 1,
-				columns: 2,
-				reqd: 1,
-			},
-		];
-
-		const initial_data = prefill_row
-			? [{
-				item_code: prefill_row.item_code,
-				stem_length: prefill_row.stem_length,
-				trade_item_id: prefill_row.trade_item_id,
-				uom: prefill_row.uom,
-				qty: prefill_row.qty || 0,
-				// For Add (in): the row's warehouse is where the existing stock sits → source.
-				// For Move (out): the row's warehouse is where stock currently is → source.
-				source_warehouse: is_add ? prefill_row.warehouse : prefill_row.warehouse,
-				target_warehouse: is_add ? frm.doc.warehouse : "",
-			}]
-			: [];
-
-		const dialog = new frappe.ui.Dialog({
-			title,
-			size: "extra-large",
-			fields: [
-				{
-					fieldname: "items",
-					fieldtype: "Table",
-					label: __("Items"),
-					cannot_add_rows: false,
-					in_place_edit: false,
-					data: initial_data,
-					fields: grid_fields,
-				},
-			],
-			primary_action_label: is_add ? __("Submit Transfer") : __("Submit Move"),
-			primary_action(values) {
-				const rows = values.items || [];
-				const incomplete = rows.find(
-					(it) =>
-						it.item_code &&
-						(!it.stem_length || !it.qty || it.qty <= 0 || !it.source_warehouse || !it.target_warehouse)
-				);
-				if (incomplete) {
-					frappe.show_alert({
-						message: __("Each row needs Item, Stem Length, Source, Target and Qty"),
-						indicator: "orange",
-					});
-					return;
-				}
-				const items = rows
-					.filter((it) => it.item_code && it.stem_length && it.qty > 0 && it.source_warehouse && it.target_warehouse)
-					.map((it) => ({
-						item_code: it.item_code,
-						stem_length: it.stem_length,
-						qty: it.qty,
-						source_warehouse: it.source_warehouse,
-						target_warehouse: it.target_warehouse,
-					}));
-				if (!items.length) {
-					frappe.show_alert({ message: __("Add at least one row"), indicator: "orange" });
-					return;
-				}
-				dialog.disable_primary_action();
-				frappe.call({
-					method,
-					args: { items: JSON.stringify(items) },
-					callback(r) {
-						dialog.enable_primary_action();
-						if (r.message && r.message.name) {
-							frappe.show_alert(
-								{
-									message: __("Stock Entry {0} created", [r.message.name]),
-									indicator: "green",
-								},
-								7
-							);
-							dialog.hide();
-							load_stock_table(frm, { silent: true });
-							load_system_stock_table(frm);
-						}
-					},
-					error() {
-						dialog.enable_primary_action();
-					},
-				});
-			},
-		});
-
-		const items_grid = dialog.fields_dict.items.grid;
-
-		// When the user picks an Item, auto-fill stem_length if there's a single
-		// Floriday mapping for it. The Link field's typeahead handles the rest.
-		dialog.fields_dict.items.df.events = {
-			item_code(frm_inner, cdt, cdn) {
-				const row = locals[cdt][cdn];
-				if (!row.item_code) {
-					row.stem_length = "";
-					items_grid.refresh();
-					return;
-				}
-				frappe.call({
-					method:
-						"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.get_item_floriday_meta",
-					args: { item_code: row.item_code },
-					callback(r) {
-						const meta = r.message || {};
-						if (meta.stem_length) {
-							row.stem_length = meta.stem_length;
-							items_grid.refresh();
-						}
-					},
-				});
-			},
-		};
-
-		dialog.show();
-	};
-
-	frappe.call({
-		method:
-			"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.get_floriday_company",
-		callback(rc) {
-			const floriday_company = rc.message || null;
-			if (is_add) {
-				setup_dialog(null, floriday_company);
-			} else {
-				// Move: load items currently in the Floriday warehouse first
-				frappe.call({
-					method:
-						"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.get_warehouse_stock_items",
-					args: { warehouse: frm.doc.warehouse },
-					callback(r) {
-						const rows = r.message || [];
-						if (!rows.length) {
-							frappe.show_alert({
-								message: __("No stock to move from {0}", [frm.doc.warehouse]),
-								indicator: "orange",
-							});
-							return;
-						}
-						const allowed = rows.map((x) => x.item_code);
-						setup_dialog(allowed, floriday_company);
-					},
-				});
-			}
-		},
-	});
-}
-
-function open_single_row_dialog(frm, direction, row) {
-	if (!row || !row.item_code) {
-		frappe.show_alert({ message: __("Pick a row first"), indicator: "orange" });
-		return;
-	}
-	open_bulk_stock_dialog(frm, direction, row);
-}
-
-function setup_stock_items_grid_buttons(frm) {
-	const grid = frm.fields_dict.stock_items && frm.fields_dict.stock_items.grid;
-	if (!grid || grid._floriday_buttons_added) return;
-	grid._floriday_buttons_added = true;
-
-	grid.add_custom_button(__("Add"), () => {
-		const selected = grid.get_selected_children();
-		const row = selected.length ? selected[0] : null;
-		if (!row) {
-			frappe.show_alert({ message: __("Tick a row to add stock for that item"), indicator: "orange" });
-			return;
-		}
-		open_single_row_dialog(frm, "in", row);
-	});
-
-	grid.add_custom_button(__("Move"), () => {
-		const selected = grid.get_selected_children();
-		const row = selected.length ? selected[0] : null;
-		if (!row) {
-			frappe.show_alert({ message: __("Tick a row to move stock for that item"), indicator: "orange" });
-			return;
-		}
-		open_single_row_dialog(frm, "out", row);
-	});
-}
-
 frappe.ui.form.on("Floriday Settings", {
 	refresh(frm) {
 		PRIMARY_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-primary"));
 		WARNING_BUTTONS.forEach((fn) => style_button(frm, fn, "btn-warning"));
-		setup_stock_items_grid_buttons(frm);
 		// Always reload from SLE on open — saved rows can go stale.
 		load_stock_table(frm, { silent: true });
 		load_system_stock_table(frm);
 		// Auto-render the custom-field status panel so the tab is never blank.
 		check_custom_fields(frm, { silent: true });
+		// Shelf-mode batch picker.
+		load_shelf_stock_panel(frm);
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Floriday",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
+		// Recent Changes panel on the Actions tab.
+		render_changelog(frm);
+	},
+
+	use_shelf_stock(frm) {
+		if (frm.doc.use_shelf_stock) {
+			load_shelf_stock_panel(frm);
+		}
+		upande_webshop.render_shelf_move_buttons({
+			frm,
+			channel: "Floriday",
+			fieldname: "shelf_stock_actions",
+			visible: !!frm.doc.use_shelf_stock,
+		});
 	},
 
 	check_custom_fields(frm) {
@@ -527,14 +267,6 @@ frappe.ui.form.on("Floriday Settings", {
 
 	create_missing_custom_fields(frm) {
 		create_missing_custom_fields(frm);
-	},
-
-	add_stock(frm) {
-		open_bulk_stock_dialog(frm, "in");
-	},
-
-	move_stock(frm) {
-		open_bulk_stock_dialog(frm, "out");
 	},
 
 	refresh_stock(frm) {
@@ -547,7 +279,15 @@ frappe.ui.form.on("Floriday Settings", {
 			load_stock_table(frm, { silent: true });
 			load_system_stock_table(frm);
 		}
+		render_changelog(frm);
 	},
+
+	// Re-render the config-health reminder live as the user fills required fields.
+	customer(frm) { render_changelog(frm); },
+	company(frm) { render_changelog(frm); },
+	business_unit(frm) { render_changelog(frm); },
+	sales_order_type(frm) { render_changelog(frm); },
+	default_farm(frm) { render_changelog(frm); },
 
 	fetch_warehouses(frm) {
 		const stop_progress = start_inline_progress(frm, "fetch_warehouses", "Fetching warehouses");
@@ -597,7 +337,43 @@ frappe.ui.form.on("Floriday Settings", {
 	},
 
 	create_batch(frm) {
-		run_doc_method(frm, "create_batch", "create_batch", "Create Batches", format_create_batch_result);
+		// Batch the items ENABLED on the Stock tab (Stem Length Price.enabled = 1),
+		// each at its published qty floored to 200. The server resolves the Floriday
+		// trade_item_id per (item, length) and drops rows without a mapping or < 200.
+		const stop_progress = start_inline_progress(frm, "create_batch", "Create Batches");
+		frappe.call({
+			method: `${SHELF_API}.get_floriday_batch_rows`,
+			callback(r) {
+				const rows = r.message || [];
+				if (!rows.length) {
+					stop_progress();
+					frappe.show_alert({
+						message: __(
+							"No enabled item has ≥{0} stems with a Floriday mapping. Enable items on the Stock tab first.",
+							[BATCH_MULTIPLE]
+						),
+						indicator: "orange",
+					}, 7);
+					return;
+				}
+				frm.call({
+					method: "create_batch",
+					doc: frm.doc,
+					args: { selected_rows: JSON.stringify(rows) },
+					callback(res) {
+						stop_progress();
+						const { message, indicator } = format_create_batch_result(res.message ?? {});
+						frappe.show_alert({ message, indicator }, 7);
+					},
+					error() {
+						stop_progress();
+					},
+				});
+			},
+			error() {
+				stop_progress();
+			},
+		});
 	},
 
 	create_supplyine(frm) {
@@ -767,6 +543,161 @@ function check_custom_fields(frm, { silent } = {}) {
 			}
 		},
 	});
+}
+
+// ── Shelf Stock Items picker (shelf mode) ────────────────────────────────
+const SHELF_API =
+	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings";
+
+const BATCH_MULTIPLE = 200;
+
+// Read-only preview of what "Create Batch" will post: the items enabled on the
+// Stock tab, each at its published qty floored to 200 (rows below 200 or without
+// a Floriday mapping are already dropped server-side). Not interactive — the
+// batch source is the Stock-tab enabled set, not a per-row tick here.
+function render_shelf_stock_panel(frm, rows) {
+	const wrapper = frm.get_field("shelf_stock_items");
+	if (!wrapper || !wrapper.$wrapper) return;
+
+	if (!rows || !rows.length) {
+		wrapper.$wrapper.html(
+			`<p class="text-muted">${__(
+				"No enabled item has ≥{0} stems with a Floriday mapping. Enable items on the Stock tab first.",
+				[BATCH_MULTIPLE]
+			)}</p>`
+		);
+		return;
+	}
+
+	const head = `<div style="margin-bottom:8px;color:var(--text-muted);font-size:var(--text-sm);">
+		${__("These enabled items will be batched at the qty shown (floored to {0}).", [BATCH_MULTIPLE])}
+	</div>`;
+
+	const body = rows
+		.map((r) => {
+			const qty = Math.floor(Number(r.qty) || 0);
+			return `<tr>
+				<td>${frappe.utils.escape_html(r.item_name || r.item_code)}</td>
+				<td>${frappe.utils.escape_html(r.stem_length || "")}</td>
+				<td style="text-align:right;">${qty}</td>
+			</tr>`;
+		})
+		.join("");
+
+	wrapper.$wrapper.html(`${head}
+		<table class="table table-bordered" style="font-size:12px;">
+			<thead><tr>
+				<th>${__("Variety")}</th><th>${__("Stem Length")}</th>
+				<th style="text-align:right;">${__("Qty to Batch")}</th>
+			</tr></thead>
+			<tbody>${body}</tbody>
+		</table>`);
+}
+
+function load_shelf_stock_panel(frm) {
+	frappe.call({
+		method: `${SHELF_API}.get_floriday_batch_rows`,
+		callback(r) {
+			render_shelf_stock_panel(frm, r.message || []);
+		},
+	});
+}
+
+// Recent Changes panel (Actions tab). Newest entry first. Append a new entry at
+// the top of CHANGELOG when behaviour changes, so the form documents itself.
+const CHANGELOG = [
+	{
+		date: "2026-06-17",
+		title: "Order Fulfillment driven by Floriday delivery orders",
+		points: [
+			"Fulfillment now reads <code>GET /delivery-orders/sync</code> and matches each Sales Order to its Floriday delivery order. It sends that delivery order's own <b>GLN</b> and <b>package count</b> — fixes the 400 <i>“different country”</i> rejection (we were sending the JKIA GLN instead of the delivery order's).",
+			"Orders with no delivery order on Floriday yet are skipped with a clear status instead of a guaranteed-fail POST (that's what the <i>“No delivery orders found”</i> error was).",
+			"Also: selects orders by the configured Floriday <b>Customer</b> (not the legacy per-customer <code>custom_floriday_id</code>), and omits empty <code>deliveryRemarks</code> / <code>commercialInvoiceReference</code> / <code>loadCarrierReference</code> so they don't trip Floriday's min-length validation.",
+		],
+	},
+	{
+		date: "2026-06-17",
+		title: "Floriday Sales Order import is fully config-driven",
+		points: [
+			"Every imported Floriday order books under the <b>Customer</b> set on the Floriday Setting tab (no more per-organization or <i>Floriday-Default-Customer</i> creation). Fixes the <i>“[Customer …]: default_currency”</i> error that blocked all imports.",
+			"The Sales Order <b>Company</b> now comes from the configured Company field (e.g. Karen Roses) — never the stock-entry resolver, which could return Kaitet Group and fail the warehouse-company check.",
+			"Mandatory header fields are filled from settings: <b>Business Unit</b>, <b>Sales Order Type</b>, and a <b>Default Farm</b> fallback when the source transfer doesn't resolve one. Nothing is hardcoded — set these on the Floriday Setting tab.",
+		],
+	},
+	{
+		date: "2026-06-17",
+		title: "Create Batch uses the enabled Stock-tab items",
+		points: [
+			"“Create Batch” now batches the items enabled on the <b>Stock</b> tab (at their published qty, floored to 200) instead of a separate shelf picker.",
+			"The Batch tab shows a read-only preview of exactly what will be posted.",
+		],
+	},
+];
+
+// Required Floriday config fields the Sales Order import + fulfillment depend on.
+// `tab` is the tab the field lives on, so the reminder tells the user where to go.
+const REQUIRED_CONFIG = [
+	{ field: "customer", label: "Customer", tab: "Floriday Setting", why: "every imported Sales Order books under this customer" },
+	{ field: "company", label: "Company", tab: "Floriday Setting", why: "Sales Order company; must own the Floriday warehouse" },
+	{ field: "business_unit", label: "Business Unit", tab: "Floriday Setting", why: "mandatory on the Sales Order" },
+	{ field: "sales_order_type", label: "Sales Order Type", tab: "Floriday Setting", why: "mandatory on the Sales Order" },
+	{ field: "default_farm", label: "Default Farm", tab: "Floriday Setting", why: "farm fallback when the source transfer doesn't resolve one" },
+	{ field: "warehouse", label: "Warehouse", tab: "Floriday Setting", why: "source warehouse for stock, batches and fulfillment" },
+];
+
+function render_config_health(frm) {
+	const missing = REQUIRED_CONFIG.filter((c) => {
+		const v = frm.doc[c.field];
+		return v === undefined || v === null || String(v).trim() === "";
+	});
+
+	if (!missing.length) {
+		return `<div style="margin-bottom:16px;padding:10px 12px;border:1px solid var(--green-300, #4caf50);
+				border-radius:6px;background:var(--green-50, rgba(76,175,80,0.08));">
+			<span style="color:var(--green-600, #2e7d32);font-weight:600;">✓ ${__("Floriday configuration complete")}</span>
+			<span style="color:var(--text-muted);font-size:var(--text-sm);"> — ${__("all required fields are set.")}</span>
+		</div>`;
+	}
+
+	const rows = missing.map((c) => `<li style="margin-bottom:6px;">
+			<b>${frappe.utils.escape_html(c.label)}</b>
+			<span style="color:var(--text-muted);"> — ${frappe.utils.escape_html(c.why)}.</span><br>
+			<span style="font-size:var(--text-sm);color:var(--text-muted);">
+				${__("Set it on the")} <b>${frappe.utils.escape_html(c.tab)}</b> ${__("tab.")}
+			</span>
+		</li>`).join("");
+
+	return `<div style="margin-bottom:16px;padding:12px 14px;border:1px solid var(--orange-300, #ffb74d);
+			border-radius:6px;background:var(--orange-50, rgba(255,152,0,0.08));max-width:760px;">
+		<div style="font-weight:600;color:var(--orange-600, #e65100);margin-bottom:8px;">
+			⚠ ${__("Missing Floriday configuration")} (${missing.length})
+		</div>
+		<div style="font-size:var(--text-sm);color:var(--text-muted);margin-bottom:8px;">
+			${__("Sales Order import and fulfillment will fail until these are set:")}
+		</div>
+		<ul style="margin:0;padding-left:18px;">${rows}</ul>
+	</div>`;
+}
+
+function render_changelog(frm) {
+	const field = frm.get_field("changelog_html");
+	if (!field || !field.$wrapper) return;
+
+	const health = render_config_health(frm);
+
+	const body = CHANGELOG.map((e) => {
+		const points = (e.points || [])
+			.map((p) => `<li style="margin-bottom:4px;">${p}</li>`)
+			.join("");
+		return `<div style="margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border-color);">
+			<div style="font-weight:600;">${frappe.utils.escape_html(e.title)}
+				<span style="color:var(--text-muted);font-weight:400;font-size:var(--text-sm);">— ${frappe.utils.escape_html(e.date)}</span>
+			</div>
+			<ul style="margin:6px 0 0 0;padding-left:18px;font-size:var(--text-sm);color:var(--text-muted);">${points}</ul>
+		</div>`;
+	}).join("");
+
+	field.$wrapper.html(`${health}<div style="max-width:760px;">${body}</div>`);
 }
 
 function create_missing_custom_fields(frm) {

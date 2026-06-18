@@ -119,6 +119,63 @@ def get_fulfillment_request_id(base_url, headers, sales_order_id):
     return None
 
 
+def build_delivery_order_index(base_url, headers):
+    """Page GET /delivery-orders/sync and index every fulfillment request by its
+    salesOrderId.
+
+    In Floriday 2025v2 a committed sales order produces a *delivery order*
+    containing one or more *fulfillment requests*. A fulfillment order (what we
+    POST) must reference an existing fulfillment request AND carry that delivery
+    order's own delivery-location GLN — sending a different GLN fails with
+    "different country" (and an order with no delivery order fails with "No
+    delivery orders found"). So we read the delivery orders first and key them by
+    salesOrderId (which equals the SO's po_no).
+
+    Returns { salesOrderId: {
+        "delivery_order_id", "gln", "fulfillment_request_id",
+        "number_of_packages", "fulfilled"
+    } }.
+    """
+    index = {}
+    seq = 0
+    pages = 0
+    while pages < 200:
+        try:
+            r = requests.get(f"{base_url}/delivery-orders/sync/{seq}", headers=headers, timeout=40)
+        except Exception as e:
+            safe_log(f"delivery-orders/sync error at seq {seq}: {str(e)[:120]}", "Floriday Delivery Order Sync", "error")
+            break
+        if r.status_code != 200:
+            safe_log(f"delivery-orders/sync HTTP {r.status_code} at seq {seq}: {r.text[:150]}",
+                     "Floriday Delivery Order Sync", "error")
+            break
+        data = r.json() or {}
+        results = data.get("results", [])
+        if not results:
+            break
+        for do in results:
+            if do.get("isDeleted"):
+                continue
+            gln = ((do.get("destination") or {}).get("location") or {}).get("gln")
+            for fr in do.get("fulfillmentRequests", []):
+                sales_order_id = fr.get("salesOrderId")
+                if not sales_order_id:
+                    continue
+                index[sales_order_id] = {
+                    "delivery_order_id": do.get("deliveryOrderId"),
+                    "gln": gln,
+                    "fulfillment_request_id": fr.get("fulfillmentRequestId"),
+                    "number_of_packages": fr.get("numberOfPackages"),
+                    "fulfilled": do.get("fulfilled"),
+                }
+        max_seq = data.get("maximumSequenceNumber", seq)
+        if max_seq <= seq:
+            break
+        seq = max_seq
+        pages += 1
+    return index
+
+
 def update_delivery_note_with_fulfillment(sales_order_name, fulfillment_id):
     """Update Delivery Note with fulfillment information"""
     try:
@@ -144,19 +201,30 @@ def update_delivery_note_with_fulfillment(sales_order_name, fulfillment_id):
 @frappe.whitelist()
 def order_fullment():
     """Create Floriday fulfillment orders (POST /fulfillment-orders) for Sales
-    Orders submitted in the last 24 hours."""
+    Orders submitted within the last `of_period` hours (Floriday Settings;
+    defaults to 24h when unset)."""
     logger = frappe.logger()
 
     def step(msg):
         logger.info(f"[Floriday Fulfillment] {msg}")
 
     try:
-        now = now_datetime()
-        start_time = add_to_date(now, hours=-24)
-        step(f"STEP 1: Started. now={now}, looking back to {start_time}")
-
         # ── Settings ────────────────────────────────────────────────────────
         settings = frappe.get_single("Floriday Settings")
+
+        # Look back `of_period` hours from now (configurable on Floriday Settings).
+        # Fall back to 24h if the field is unset/zero/invalid.
+        try:
+            period_hours = int(settings.of_period or 0)
+        except (TypeError, ValueError):
+            period_hours = 0
+        if period_hours <= 0:
+            period_hours = 24
+
+        now = now_datetime()
+        start_time = add_to_date(now, hours=-period_hours)
+        step(f"STEP 1: Started. now={now}, looking back {period_hours}h to {start_time}")
+
         API_KEY = settings.api_key
         BASE_URL = settings.base_url.rstrip('/')
         ACCESS_TOKEN = settings.access_token
@@ -178,10 +246,17 @@ def order_fullment():
         }
 
         # ── Query Sales Orders (Last 24 hours) ──────────────────────────────
-        # Identify Floriday-sourced orders by the customer having a custom_floriday_id.
-        # Every customer created or matched by create_sales_order_from_floriday has this set.
-        # Pull the Sales Order's own custom_floriday_delivery_id if the column exists,
-        # so fulfillment can use the buyer GLN without relying on the Delivery Point.
+        # Floriday Sales Orders all book under the customer configured on Floriday
+        # Settings (e.g. Royal FloraHolland) and carry the Floriday salesOrderId in
+        # po_no — that pair identifies them. (The legacy filter on the customer's
+        # custom_floriday_id no longer works now that every order shares one
+        # customer.) Pull the SO's own custom_floriday_delivery_id when present so
+        # fulfillment can use the buyer GLN without relying on the Delivery Point.
+        floriday_customer = settings.get("customer")
+        if not floriday_customer:
+            step("STEP 3 FAILED: Customer not configured in Floriday Settings")
+            return {"status": "error", "message": "Customer not configured in Floriday Settings"}
+
         has_so_gln = frappe.db.has_column("Sales Order", "custom_floriday_delivery_id")
         gln_select = "so.custom_floriday_delivery_id" if has_so_gln else "NULL"
         sales_orders = frappe.db.sql(f"""
@@ -189,23 +264,21 @@ def order_fullment():
                    so.creation, so.custom_delivery_point,
                    {gln_select} AS custom_floriday_delivery_id
             FROM `tabSales Order` so
-            INNER JOIN `tabCustomer` c ON c.name = so.customer
             WHERE so.docstatus = 1
               AND so.po_no != ''
               AND so.creation >= %(start_time)s
-              AND c.custom_floriday_id IS NOT NULL
-              AND c.custom_floriday_id != ''
+              AND so.customer = %(customer)s
             ORDER BY so.creation DESC
-        """, {"start_time": start_time}, as_dict=True)
-        step(f"STEP 3: Orders in last 24 hours: {len(sales_orders)}")
+        """, {"start_time": start_time, "customer": floriday_customer}, as_dict=True)
+        step(f"STEP 3: Orders in last {period_hours}h: {len(sales_orders)}")
 
         if not sales_orders:
-            step("STEP 3: No orders in last 24 hours — nothing to fulfill")
+            step(f"STEP 3: No orders in last {period_hours}h — nothing to fulfill")
             return {
                 "status": "success",
                 "message": (
-                    "No Floriday Sales Orders found in the last 24 hours. "
-                    "Tip: only orders submitted within the past 24 hours, with a customer "
+                    f"No Floriday Sales Orders found in the last {period_hours} hours. "
+                    f"Tip: only orders submitted within the past {period_hours} hours, with a customer "
                     "tagged with custom_floriday_id, are eligible."
                 ),
                 "results": [],
@@ -223,6 +296,12 @@ def order_fullment():
         results = []
         success_count = 0
         error_count = 0
+
+        # Build the delivery-order index once: maps salesOrderId → its delivery
+        # order GLN + fulfillment request. An order absent from this index has no
+        # delivery order on Floriday yet and cannot be fulfilled.
+        delivery_order_index = build_delivery_order_index(BASE_URL, headers)
+        step(f"STEP 3b: Indexed {len(delivery_order_index)} delivery-order fulfillment requests")
 
         for so in sales_orders:
             sales_order_name = so.name
@@ -261,17 +340,36 @@ def order_fullment():
                     })
                     continue
 
-                number_of_packages = math.ceil(total_stems / 200)
-                step(f"  STEP 4b: Total stems = {total_stems}, Packages = {number_of_packages}")
+                # Look the order up in the delivery-order index. No entry → Floriday
+                # has no delivery order for it yet, so it can't be fulfilled; skip
+                # with a clear status instead of a guaranteed-to-fail POST.
+                do_entry = delivery_order_index.get(floriday_order_id)
+                if not do_entry:
+                    step(f"  STEP 4b SKIP: no delivery order for {sales_order_name} ({floriday_order_id})")
+                    error_count += 1
+                    results.append({
+                        "sales_order": sales_order_name,
+                        "floriday_order_id": floriday_order_id,
+                        "status": "error",
+                        "message": "No delivery order on Floriday yet (not committed / not ready to fulfill)",
+                    })
+                    continue
 
-                delivery_gln = get_delivery_gln_from_sales_order(sales_order)
+                # Package count and delivery GLN come from the delivery order itself.
+                # Floriday rejects a mismatched GLN ("different country") and a wrong
+                # package count, so prefer the delivery order's own values; fall back
+                # to the stem-derived count / JKIA default only if absent.
+                number_of_packages = do_entry.get("number_of_packages") or math.ceil(total_stems / 200)
+                delivery_gln = do_entry.get("gln")
                 if not delivery_gln:
-                    delivery_gln = get_default_gln()
-                    safe_log(f"Using default GLN {delivery_gln}", "Default GLN Used", "warning")
+                    delivery_gln = get_delivery_gln_from_sales_order(sales_order) or get_default_gln()
+                    safe_log(f"Delivery order {do_entry.get('delivery_order_id')} had no GLN; using fallback {delivery_gln}",
+                             "Default GLN Used", "warning")
+                step(f"  STEP 4b: Packages = {number_of_packages}, GLN = {delivery_gln} (DO {do_entry.get('delivery_order_id')})")
 
-                # In Floriday's DIRECT_SALES flow the fulfillmentRequestId is the
-                # salesOrderId (po_no) — no separate lookup endpoint is needed.
-                fulfillment_request_id = floriday_order_id
+                # Fulfillment request id from the delivery order (equals salesOrderId
+                # in DIRECT_SALES, but use the value Floriday gave us to be safe).
+                fulfillment_request_id = do_entry.get("fulfillment_request_id") or floriday_order_id
 
                 load_carrier_reference = get_load_carrier_reference(sales_order_name)
                 commercial_invoice_ref = get_commercial_invoice_reference(floriday_order_id, sales_order_name)
@@ -282,30 +380,36 @@ def order_fullment():
                 new_fulfillment_order_id = str(uuid.uuid4())
                 step(f"  STEP 4c: fulfillmentRequestId={fulfillment_request_id}, new fulfillmentOrderId={new_fulfillment_order_id}")
 
+                # Floriday rejects empty strings for these optional fields with a
+                # 400 validation error ("must be a string ... with a minimum length
+                # of '1'"). Only include them when they actually carry a value.
+                load_carrier_item = {
+                    "fulfillmentRequestId": fulfillment_request_id,
+                    "numberOfPackages": number_of_packages,
+                    "serviceCode": 1,  # Standard service code; 9999 was the spec's max-value example, not a valid code
+                    "packingAgentOrganizationId": SUPPLIER_ORG_ID,
+                    "sortIndex": 0,
+                }
+                if delivery_remarks:
+                    load_carrier_item["deliveryRemarks"] = delivery_remarks
+                if commercial_invoice_ref:
+                    load_carrier_item["commercialInvoiceReference"] = commercial_invoice_ref
+
+                load_carrier = {
+                    "loadCarrierItems": [load_carrier_item],
+                    "loadCarrierType": "NONE",
+                    "numberOfAdditionalLayers": 0,
+                    "sortIndex": 0,
+                }
+                if load_carrier_reference:
+                    load_carrier["loadCarrierReference"] = load_carrier_reference
+
                 fulfillment_payload = {
                     "fulfillmentOrderId": new_fulfillment_order_id,
                     "carrierOrganizationId": SUPPLIER_ORG_ID,
                     "logisticHub": "NONE",
                     "oneLabelOnly": False,
-                    "loadCarriers": [
-                        {
-                            "loadCarrierItems": [
-                                {
-                                    "fulfillmentRequestId": fulfillment_request_id,
-                                    "numberOfPackages": number_of_packages,
-                                    "serviceCode": 1,  # Standard service code; 9999 was the spec's max-value example, not a valid code
-                                    "packingAgentOrganizationId": SUPPLIER_ORG_ID,
-                                    "sortIndex": 0,
-                                    "deliveryRemarks": delivery_remarks,
-                                    "commercialInvoiceReference": commercial_invoice_ref
-                                }
-                            ],
-                            "loadCarrierType": "NONE",
-                            "numberOfAdditionalLayers": 0,
-                            "sortIndex": 0,
-                            "loadCarrierReference": load_carrier_reference
-                        }
-                    ],
+                    "loadCarriers": [load_carrier],
                     "deliveryLocationGln": delivery_gln
                 }
 
