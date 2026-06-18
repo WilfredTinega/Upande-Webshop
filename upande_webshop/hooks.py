@@ -193,6 +193,9 @@ doc_events = {
         "before_submit": [
             "upande_webshop.upande_webshop.shopping_cart.cart.stamp_source_warehouse_on_submit",
         ],
+        "on_submit": [
+            "upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.confirm_biflorica_predeal_on_submit",
+        ],
     },
 }
 
@@ -275,6 +278,7 @@ after_migrate = [
 	"upande_webshop.setup.install.cleanup_blocking_property_setters",
 	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs",
 	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.resync_scheduled_jobs",
+	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_custom_fields.ensure_biflorica_custom_fields",
 ]
 
 scheduler_events = {
