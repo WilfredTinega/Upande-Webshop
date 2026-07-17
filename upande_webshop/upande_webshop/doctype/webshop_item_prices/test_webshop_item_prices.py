@@ -2,7 +2,12 @@
 # See license.txt
 
 # import frappe
-from frappe.tests import IntegrationTestCase
+try:
+	# Frappe develop (v17+) test framework
+	from frappe.tests import IntegrationTestCase
+except ImportError:
+	# Frappe v15/v16 predecessor, API-compatible for these tests
+	from frappe.tests.utils import FrappeTestCase as IntegrationTestCase
 
 
 # On IntegrationTestCase, the doctype test records and all
