@@ -1,4 +1,3 @@
-import frappe
 from frappe import _
 
 from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (

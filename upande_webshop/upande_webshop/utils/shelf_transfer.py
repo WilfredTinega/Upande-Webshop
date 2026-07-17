@@ -195,18 +195,3 @@ def shelf_item_query(doctype, txt, searchfield, start, page_len, filters):
 			"page_len": int(page_len or 20),
 		},
 	)
-
-
-def online_warehouse_qty_for_items(warehouse, item_codes):
-	"""{item_code: actual_qty} in `warehouse` for many items (one Bin query)."""
-	if not warehouse or not item_codes:
-		return {}
-	rows = frappe.db.get_all(
-		"Bin",
-		filters={"item_code": ("in", list(item_codes)), "warehouse": warehouse},
-		fields=["item_code", "actual_qty"],
-	)
-	out = {}
-	for r in rows:
-		out[r.item_code] = out.get(r.item_code, 0.0) + flt(r.actual_qty)
-	return out

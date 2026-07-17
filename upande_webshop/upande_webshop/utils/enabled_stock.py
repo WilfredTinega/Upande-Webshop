@@ -138,25 +138,6 @@ def enabled_total_qty(item_code):
 	return flt(total[0][0]) if total and total[0] else 0.0
 
 
-def has_enabled_lengths(item_code):
-	"""True when the item has at least one enabled length published."""
-	if not item_code:
-		return False
-	return bool(
-		frappe.db.exists(
-			"Stem Length Price",
-			{
-				"parenttype": "Webshop Item Prices",
-				"enabled": 1,
-				"parent": frappe.db.get_value(
-					"Webshop Item Prices", {"item_code": item_code}, "name"
-				)
-				or "__none__",
-			},
-		)
-	)
-
-
 def enabled_total_qty_for_items(item_codes):
 	"""Batched {item_code: total_published_qty} for a list of items.
 

@@ -3,10 +3,6 @@
 # For license information, please see license.txt
 
 import json
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from erpnext.stock.doctype.item.item import Item
 
 import frappe
 from frappe import _
@@ -25,7 +21,6 @@ from upande_webshop.upande_webshop.doctype.override_doctype.item_group import (
     get_parent_item_groups,
     invalidate_cache_for,
 )
-from erpnext.stock.doctype.item.item import Item
 from upande_webshop.upande_webshop.utils.item_price_source import get_price
 from upande_webshop.upande_webshop.shopping_cart.cart import get_party
 from upande_webshop.upande_webshop.variant_selector.item_variants_cache import (

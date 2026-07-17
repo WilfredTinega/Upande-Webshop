@@ -1,6 +1,5 @@
 import frappe
 
-from erpnext.stock.doctype.warehouse.warehouse import get_child_warehouses
 
 
 def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
@@ -15,7 +14,7 @@ def get_web_item_qty_in_stock(item_code, item_warehouse_field, warehouse=None):
 	Warehouses) so the qty matches what the listing card displays. Falls back
 	to the per-item website_warehouse if that list is empty, matching the
 	prior behavior."""
-	in_stock, stock_qty = 0, ""
+	in_stock = 0
 	item_meta = frappe.db.get_value(
 		"Item", item_code, ["variant_of", "has_variants", "is_stock_item"], as_dict=True
 	)

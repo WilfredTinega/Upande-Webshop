@@ -17,7 +17,6 @@ from upande_webshop.upande_webshop.shopping_cart.cart import (
 	request_for_quotation,
 	update_cart,
 )
-from erpnext.tests.utils import create_test_contact_and_address
 
 
 class TestShoppingCart(unittest.TestCase):

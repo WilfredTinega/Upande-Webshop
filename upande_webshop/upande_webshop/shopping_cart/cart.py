@@ -17,10 +17,6 @@ from upande_webshop.upande_webshop.utils.product import get_web_item_qty_in_stoc
 from erpnext.selling.doctype.quotation.mapper import _make_sales_order
 
 
-class WebsitePriceListMissingError(frappe.ValidationError):
-    pass
-
-
 def _cart_doctype():
 	"""Return the doctype currently configured as the cart container.
 
@@ -37,10 +33,6 @@ def _cart_doctype():
 	if cint(getattr(cart_settings, "use_sales_order_as_cart", 0)):
 		return "Sales Order"
 	return "Quotation"
-
-
-def _cart_item_doctype():
-	return "Sales Order Item" if _cart_doctype() == "Sales Order" else "Quotation Item"
 
 
 def _delivery_point_doctype():
@@ -1476,18 +1468,6 @@ def update_cart_address(address_type, address_name):
 	}
 
 
-def guess_territory():
-	territory = None
-	geoip_country = frappe.session.get("session_country")
-	if geoip_country:
-		territory = frappe.db.get_value("Territory", geoip_country)
-
-	return (
-		territory
-		or get_root_of("Territory")
-	)
-
-
 def _box_pack_rate(box_type):
 	"""Stems-per-box for a Box Type, parsed from its `packrate` field.
 
@@ -1996,34 +1976,6 @@ def _finalize_kaitet_order_name(doc):
 	doc.db_set("custom_order_name", new_name, update_modified=False)
 
 
-def update_party(fullname, company_name=None, mobile_no=None, phone=None):
-	party = get_party()
-
-	party.customer_name = company_name or fullname
-	party.customer_type = "Company" if company_name else "Individual"
-
-	contact_name = frappe.db.get_value("Contact", {"email_id": frappe.session.user})
-	contact = frappe.get_doc("Contact", contact_name)
-	contact.first_name = fullname
-	contact.last_name = None
-	contact.customer_name = party.customer_name
-	contact.mobile_no = mobile_no
-	contact.phone = phone
-	contact.flags.ignore_permissions = True
-	contact.save()
-
-	party_doc = frappe.get_doc(party.as_dict())
-	party_doc.flags.ignore_permissions = True
-	party_doc.save()
-
-	qdoc = _get_cart_quotation(party)
-	if not qdoc.get("__islocal"):
-		qdoc.customer_name = company_name or fullname
-		qdoc.run_method("set_missing_lead_customer_details")
-		qdoc.flags.ignore_permissions = True
-		qdoc.save()
-
-
 def apply_cart_settings(party=None, quotation=None):
 	if not party:
 		party = get_party()
@@ -2393,8 +2345,7 @@ def get_applicable_shipping_rules(party=None, quotation=None):
 	shipping_rules = get_shipping_rules(quotation)
 
 	if shipping_rules:
-		rule_label_map = frappe.db.get_values("Shipping Rule", shipping_rules, "label")
-		# we need this in sorted order as per the position of the rule in the settings page
+		# sorted order as per the position of the rule in the settings page
 		return [[rule, rule] for rule in shipping_rules]
 
 
@@ -2422,22 +2373,6 @@ def get_shipping_rules(quotation=None, cart_settings=None):
 			shipping_rules = [x[0] for x in result]
 
 	return shipping_rules
-
-
-def get_address_territory(address_name):
-	"""Tries to match city, state and country of address to existing territory"""
-	territory = None
-
-	if address_name:
-		address_fields = frappe.db.get_value(
-			"Address", address_name, ["city", "state", "country"]
-		)
-		for value in address_fields:
-			territory = frappe.db.get_value("Territory", value)
-			if territory:
-				break
-
-	return territory
 
 
 def show_terms(doc):

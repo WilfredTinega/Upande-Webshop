@@ -69,7 +69,7 @@ class ProductQuery:
 		"""
 		# track if discounts included in field filters
 		self.filter_with_discount = bool(fields.get("discount"))
-		result, discount_list, website_item_groups, count = [], [], [], 0
+		result, discount_list, count = [], [], 0
 		cart_items = {}
 
 		if fields:

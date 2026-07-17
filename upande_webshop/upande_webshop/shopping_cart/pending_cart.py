@@ -110,13 +110,3 @@ def _replay_token(token):
 
 	# Tell redirect_customer_after_login to land us on /cart instead of /webshop.
 	frappe.local.flags.pending_cart_replayed = True
-
-
-def debug_replay(token, user):
-	"""Test helper — run replay as a specific user with a known token."""
-	frappe.set_user(user)
-	_replay_token(token)
-	frappe.db.commit()
-	return {
-		"flagged": bool(getattr(frappe.local.flags, "pending_cart_replayed", False)),
-	}

@@ -224,11 +224,6 @@ def show_quantity_in_website():
 	return get_shopping_cart_settings().show_quantity_in_website
 
 
-def check_shopping_cart_enabled():
-	if not get_shopping_cart_settings().enabled:
-		frappe.throw(_("You need to enable Shopping Cart"), ShoppingCartSetupError)
-
-
 def show_attachments():
 	return get_shopping_cart_settings().show_attachments
 

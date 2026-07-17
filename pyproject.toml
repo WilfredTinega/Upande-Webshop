@@ -19,6 +19,11 @@ build-backend = "flit_core.buildapi"
 [tool.bench.dev-dependencies]
 # package_name = "~=1.1.0"
 
+# Frappe Cloud requires a bounded, comma-separated (no space) semver range,
+# declared the same way ERPNext declares it. Webshop supports v15+.
+[tool.bench.frappe-dependencies]
+frappe = ">=15.0.0,<20.0.0"
+
 [tool.ruff]
 line-length = 110
 target-version = "py310"

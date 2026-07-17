@@ -1,7 +1,7 @@
 import frappe
 from frappe import _
 from urllib.parse import quote
-from frappe.utils import get_url, cint
+from frappe.utils import cint
 from frappe.website.website_generator import WebsiteGenerator
 from erpnext.setup.doctype.item_group.item_group import ItemGroup
 from frappe.website.utils import clear_cache
