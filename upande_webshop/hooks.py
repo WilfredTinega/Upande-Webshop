@@ -13,6 +13,14 @@ app_version = _version
 
 required_apps = ["erpnext","payments"]
 
+# Testing
+# ------------------
+# `bench run-tests --app upande_webshop` only runs THIS app's before_tests hook,
+# so we must reuse ERPNext's setup routine ourselves. It completes the setup
+# wizard (creating a test Company and default fixtures like the "Transit"
+# Warehouse Type) that ERPNext test records depend on. Mirrors payments' hooks.
+before_tests = "erpnext.setup.utils.before_tests"
+
 # Each item in the list will be shown as an app in the apps page
 add_to_apps_screen = [
 	{
