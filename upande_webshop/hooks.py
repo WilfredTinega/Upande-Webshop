@@ -15,10 +15,12 @@ required_apps = ["erpnext","payments"]
 
 # Testing
 # ------------------
-# `bench run-tests --app upande_webshop` only runs THIS app's before_tests hook,
-# so we must reuse ERPNext's setup routine ourselves. It completes the setup
-# wizard (creating a test Company and default fixtures like the "Transit"
-# Warehouse Type) that ERPNext test records depend on. Mirrors payments' hooks.
+# `bench run-tests --app upande_webshop` only runs THIS app's before_tests hook
+# (frappe.get_hooks("before_tests", app_name=app)), so we must reuse ERPNext's
+# setup routine ourselves. It completes the setup wizard, creating a test Company
+# and the default fixtures (e.g. the "Transit" Warehouse Type) that ERPNext test
+# records depend on. Mirrors payments' hooks.py. The CI install.sh also seeds
+# these explicitly, so tests are covered even if this hook is not picked up.
 before_tests = "erpnext.setup.utils.before_tests"
 
 # Each item in the list will be shown as an app in the apps page

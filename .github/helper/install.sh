@@ -62,3 +62,11 @@ CI=Yes bench build --app frappe &
 bench --site test_site reinstall --yes
 
 bench --verbose --site test_site install-app upande_webshop
+
+# ERPNext test records (Company, etc.) depend on setup-wizard fixtures such as
+# the "Transit" Warehouse Type, which a plain install-app does NOT create.
+# setup_test_site runs ERPNext's own test bootstrap AND guarantees the standard
+# Warehouse Types exist, so `bench run-tests` has a Company + fixtures ready.
+# Run via `bench execute` (real exit code) so any failure fails THIS step
+# loudly, instead of surfacing later as a confusing test-record error.
+bench --site test_site execute upande_webshop.setup.ci.setup_test_site
