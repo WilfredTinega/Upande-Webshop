@@ -28,7 +28,10 @@ class StemLengthPrice(Document):
 		return True
 
 	def refresh_trade_item_id(self, article_lookup, item_name=None):
-		from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+		# Floriday-only enrichment: only ever called from the Floriday Items sync
+		# (in the ecommerce_integration app), so this import is lazy and webshop
+		# stays importable without that app installed.
+		from ecommerce_integration.ecommerce_integration.doctype.floriday_items.floriday_items import (
 			_normalize_name,
 			_floriday_length_for,
 		)

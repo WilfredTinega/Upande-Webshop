@@ -143,7 +143,7 @@ frappe.ui.form.on("Webshop Settings", {
 			primary_action: ({ price_list }) => {
 				d.hide();
 				frappe.call({
-					method: "upande_webshop.upande_webshop.doctype.floriday_items.floriday_items.sync_floriday_items",
+					method: "ecommerce_integration.ecommerce_integration.doctype.floriday_items.floriday_items.sync_floriday_items",
 					args: { force: 1, price_list },
 					freeze: true,
 					freeze_message: __("Syncing Floriday items..."),

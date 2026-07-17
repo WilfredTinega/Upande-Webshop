@@ -4,7 +4,7 @@ import frappe
 from frappe.model.document import Document
 from frappe.utils import flt
 
-from upande_webshop.upande_webshop.doctype.floriday_items.floriday_items import (
+from upande_webshop.upande_webshop.utils.stem_length import (
 	_normalize_stem_length,
 	_stem_length_rates_from_item_prices,
 	_stem_length_rates_from_variants,

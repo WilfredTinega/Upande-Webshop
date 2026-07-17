@@ -48,11 +48,11 @@ web_include_js = "web.bundle.js"
 doctype_js = {
     "Item": "public/js/override/item.js",
     "Homepage": "public/js/override/homepage.js",
-    # Shared Shelf Stock move dialog + inline-button helper, used by these
-    # settings forms' own client scripts (upande_webshop.open_shelf_move_dialog).
+    # Shared Shelf Stock move dialog + inline-button helper, used by the Webshop
+    # Settings form's own client script (upande_webshop.open_shelf_move_dialog).
+    # The Floriday/Biflorica settings forms ship their own copy in the
+    # ecommerce_integration app.
     "Webshop Settings": "public/js/shelf_move.js",
-    "Biflorica Setting": "public/js/shelf_move.js",
-    "Floriday Settings": "public/js/shelf_move.js",
 }
 # doctype_list_js = {"doctype" : "public/js/doctype_list.js"}
 # doctree_js = {"doctype" : "public/js/doctype_tree.js"}
@@ -193,9 +193,6 @@ doc_events = {
         "before_submit": [
             "upande_webshop.upande_webshop.shopping_cart.cart.stamp_source_warehouse_on_submit",
         ],
-        "on_submit": [
-            "upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.confirm_biflorica_predeal_on_submit",
-        ],
     },
 }
 
@@ -243,14 +240,10 @@ before_migrate = [
 #   0. remove_legacy_pages — drop DB records for Pages we no longer ship
 #      (e.g. the old bulk-publish-items Desk page).
 #   1. resync_app_resources — force-reloads every JSON resource we ship
-#      (workspace, doctypes, …). Frappe's normal sync
-#      skips files whose `modified` is older than the DB record, so once the
-#      workspace is edited in the UI new shortcuts in the JSON never reach the
+#      (doctypes, pages, …). Frappe's normal sync
+#      skips files whose `modified` is older than the DB record, so once a
+#      resource is edited in the UI new changes in the JSON never reach the
 #      site. We bypass that with reload_doc(..., force=True).
-#   1b. normalize_webshop_workspace — runs right after the resync so the
-#      reloaded JSON can't leave name/title/label out of sync. Forces them all
-#      to "Ecommerce" and clears any self-referential parent_page, so the
-#      Desk icon always opens /app/ecommerce instead of a 404.
 #   2. add_custom_fields — re-applies custom field definitions (Item Group,
 #      Item Price, Website Item, Quotation Item, …) so additions show up
 #      without reinstall.
@@ -264,21 +257,16 @@ before_migrate = [
 #      break checkout (e.g. Sales Order.shipping_address_name reqd=1, which
 #      blocks add-to-cart for guests before they reach the cart-page address
 #      step).
-#   6. Floriday + Biflorica resync_scheduled_jobs — restore Scheduled Job Type
-#      rows that Frappe's scheduler sync prunes (user-configured per Settings
-#      doc, not declared in scheduler_events).
+# (The "Ecommerce" Desk workspace + its launcher Desktop Icon, and the Floriday
+#  + Biflorica Scheduled Job Type resync / Biflorica custom fields, now all run
+#  from the ecommerce_integration app's own after_migrate.)
 after_migrate = [
 	"upande_webshop.setup.install.remove_legacy_pages",
 	"upande_webshop.setup.install.resync_app_resources",
-	"upande_webshop.setup.install.normalize_webshop_workspace",
-	"upande_webshop.setup.install.ensure_desktop_icon",
 	"upande_webshop.setup.install.add_custom_fields",
 	"upande_webshop.setup.install.ensure_variant_attributes",
 	"upande_webshop.setup.install.apply_webshop_settings_defaults",
 	"upande_webshop.setup.install.cleanup_blocking_property_setters",
-	"upande_webshop.upande_webshop.doctype.floriday_settings.floriday_settings.resync_scheduled_jobs",
-	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_setting.resync_scheduled_jobs",
-	"upande_webshop.upande_webshop.doctype.biflorica_setting.biflorica_custom_fields.ensure_biflorica_custom_fields",
 ]
 
 scheduler_events = {

@@ -12,8 +12,9 @@ from erpnext.accounts.utils import get_account_name
 from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings import (
     get_shopping_cart_settings,
 )
+from upande_webshop.upande_webshop.utils import create_orders_as_quotation
 from upande_webshop.upande_webshop.utils.product import get_web_item_qty_in_stock
-from erpnext.selling.doctype.quotation.quotation import _make_sales_order
+from erpnext.selling.doctype.quotation.mapper import _make_sales_order
 
 
 class WebsitePriceListMissingError(frappe.ValidationError):
@@ -28,6 +29,10 @@ def _cart_doctype():
 	"""
 	cart_settings = frappe.get_cached_doc("Webshop Settings")
 	if cint(cart_settings.enable_checkout):
+		return "Quotation"
+	# "Create Orders as Quotation" keeps the whole flow on Quotation — the cart is
+	# a draft Quotation and checkout leaves it as one (no Sales Order conversion).
+	if cint(cart_settings.get("create_orders_as_quotation")):
 		return "Quotation"
 	if cint(getattr(cart_settings, "use_sales_order_as_cart", 0)):
 		return "Sales Order"
@@ -669,6 +674,11 @@ def place_order():
 	if quotation.doctype == "Sales Order":
 		return _place_sales_order_cart(quotation, cart_settings)
 
+	# "Create Orders as Quotation" mode: leave the cart as a draft Quotation for
+	# staff to review and convert to a Sales Order manually. No SO is created here.
+	if create_orders_as_quotation():
+		return _place_quotation_only(quotation, cart_settings)
+
 	quotation.company = cart_settings.company
 
 	quotation.flags.ignore_permissions = True
@@ -737,6 +747,38 @@ def place_order():
 		frappe.local.cookie_manager.delete_cookie("cart_count")
 
 	return sales_order.name
+
+
+def _place_quotation_only(quotation, cart_settings):
+	"""Finalize checkout as a draft Quotation — no Sales Order is created.
+
+	Used when Webshop Settings > "Create Orders as Quotation" is on. The cart
+	already IS a draft Quotation; we validate stock, detach it from the cart (so
+	the next visit starts a fresh cart) and leave it as a draft (docstatus 0) for
+	staff to review and convert to a Sales Order via "Create > Sales Order".
+	"""
+	quotation.company = cart_settings.company
+
+	if not cint(cart_settings.get("allow_items_not_in_stock")):
+		_validate_cart_stock(quotation)
+
+	# No-op when the box-id field isn't on Quotation (kept for parity with the SO
+	# paths on sites that do carry it).
+	_assign_sequential_box_ids(quotation)
+
+	# Detach from the cart: the active-cart lookup filters on
+	# order_type == "Shopping Cart", so switching it to "Sales" retires this
+	# Quotation from the cart while keeping it a draft for review.
+	quotation.order_type = "Sales"
+	quotation.flags.ignore_permissions = True
+	quotation.save()
+
+	# Clear the active-cart selection / badge so the next view opens a new cart.
+	frappe.cache.delete_value(_active_cart_customer_key())
+	if hasattr(frappe.local, "cookie_manager"):
+		frappe.local.cookie_manager.delete_cookie("cart_count")
+
+	return quotation.name
 
 
 def _place_sales_order_cart(so, cart_settings):

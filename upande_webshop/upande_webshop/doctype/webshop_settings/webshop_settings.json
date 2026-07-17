@@ -37,6 +37,7 @@
   "checkout_settings_section",
   "enable_checkout",
   "use_sales_order_as_cart",
+  "create_orders_as_quotation",
   "show_price_in_quotation",
   "column_break_27",
   "save_quotations_as_draft",
@@ -260,6 +261,13 @@
    "fieldname": "use_sales_order_as_cart",
    "fieldtype": "Check",
    "label": "Use Sales Order as Cart"
+  },
+  {
+   "default": "0",
+   "description": "When enabled, webshop checkout and the Floriday / Biflorica imports create a draft Quotation instead of a Sales Order. Staff review the Quotation and convert it to a Sales Order manually (Create > Sales Order).",
+   "fieldname": "create_orders_as_quotation",
+   "fieldtype": "Check",
+   "label": "Create Orders as Quotation (skip Sales Order)"
   },
   {
    "depends_on": "enable_checkout",

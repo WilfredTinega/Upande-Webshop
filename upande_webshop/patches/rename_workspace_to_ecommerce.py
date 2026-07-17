@@ -40,7 +40,8 @@ def execute():
 
 	# Drop the auto-generated launcher Desktop Icon that mirrored the old workspace
 	# name and linked to the now-dead /app/upande-webshop route. The canonical
-	# "Webshop" icon (-> /app/ecommerce) is upserted by ensure_desktop_icon() in
-	# after_migrate.
+	# "Ecommerce" icon (-> /app/ecommerce) is now upserted by ensure_desktop_icon()
+	# in the ecommerce_integration app's after_migrate; this patch just migrates the
+	# legacy record so that app can adopt the "Ecommerce" workspace in place.
 	if frappe.db.exists("Desktop Icon", legacy):
 		frappe.delete_doc("Desktop Icon", legacy, force=True, ignore_permissions=True)
