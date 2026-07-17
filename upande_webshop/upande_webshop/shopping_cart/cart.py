@@ -14,7 +14,12 @@ from upande_webshop.upande_webshop.doctype.webshop_settings.webshop_settings imp
 )
 from upande_webshop.upande_webshop.utils import create_orders_as_quotation
 from upande_webshop.upande_webshop.utils.product import get_web_item_qty_in_stock
-from erpnext.selling.doctype.quotation.mapper import _make_sales_order
+try:
+    # ERPNext develop (v17+) moved the mapper out of quotation.py
+    from erpnext.selling.doctype.quotation.mapper import _make_sales_order
+except ImportError:
+    # ERPNext v15/v16 keep it in quotation.py
+    from erpnext.selling.doctype.quotation.quotation import _make_sales_order
 
 
 def _cart_doctype():
