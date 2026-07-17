@@ -283,7 +283,68 @@ def add_custom_fields():
 		is_system_generated=True,
 	)
 
+	custom_fields = _drop_unavailable_links(custom_fields)
+
 	return create_custom_fields(custom_fields)
+
+
+def _drop_unavailable_links(custom_fields):
+	"""Skip Link/Table custom fields whose target DocType is not on this site.
+
+	Fields like custom_delivery_point (Delivery Point), custom_box_type (Box
+	Type) and custom_length (Stem Length) point at DocTypes owned by other
+	Upande apps (upande_kaitet/tambuzi, customer_portal, upande_harvest). On a
+	site where those apps are not installed — e.g. a webshop-only site or CI —
+	the Link would fail validation (WrongOptionsDoctypeLinkError) and abort
+	install/migrate.
+
+	Instead of breaking, we quietly drop such a field for this run and surface a
+	clear "DocType does not exist" notice (msgprint alert + Error Log). A later
+	migrate re-adds the field automatically once the owning app is installed, so
+	nothing is lost on production sites that DO have the DocType — there the
+	field is created exactly as before. The whole filter is wrapped so that any
+	unexpected error here can never itself break a migrate.
+	"""
+	link_types = {"Link", "Table", "Table MultiSelect"}
+	filtered = {}
+	skipped = []
+	for doctype, fields in custom_fields.items():
+		kept = []
+		for field in fields:
+			try:
+				options = field.get("options")
+				missing = (
+					field.get("fieldtype") in link_types
+					and options
+					and not frappe.db.exists("DocType", options)
+				)
+			except Exception:
+				# A failed existence check must never abort migrate; keep the field.
+				missing = False
+			if missing:
+				skipped.append(f"{doctype}.{field['fieldname']} → DocType '{field.get('options')}' does not exist")
+				continue
+			kept.append(field)
+		if kept:
+			filtered[doctype] = kept
+
+	if skipped:
+		notice = (
+			"upande_webshop: skipped custom fields whose linked DocType is not "
+			"installed on this site (they will be added automatically once the "
+			"owning app is installed):\n- " + "\n- ".join(skipped)
+		)
+		# "show" it without raising, and keep a durable record.
+		try:
+			frappe.msgprint(notice, title="Webshop setup", alert=True)
+		except Exception:
+			pass
+		try:
+			frappe.log_error(title="upande_webshop: skipped custom fields", message=notice)
+		except Exception:
+			pass
+
+	return filtered
 
 
 def navbar_add_products_link():
