@@ -77,24 +77,27 @@ def setup_test_site():
 	   Type: Transit"), and it must not depend on the setup wizard succeeding.
 	2. Stub external link-target DocTypes (e.g. "Stem Length") so the test
 	   runner can build the link-dependency test records for webshop DocTypes.
-	3. Best-effort run ERPNext's own test bootstrap (completes the setup wizard:
-	   Company, fiscal year, accounts). If it fails we roll back and continue —
-	   the Warehouse Types from step 1 already unblock the test records, so a
-	   setup-wizard hiccup should not fail the whole CI run. Any traceback is
-	   logged and printed for visibility.
+	3. Run ERPNext's own test bootstrap (completes the setup wizard: Company,
+	   fiscal year, accounts, selling defaults, roles, Item Attributes). This is
+	   MANDATORY — if it fails we let it raise so this CI step fails loudly with
+	   the traceback, rather than swallowing it and letting a dozen confusing
+	   downstream test errors surface instead.
 	"""
 	ensure_warehouse_types()
 	ensure_stub_doctypes()
 
-	try:
-		from erpnext.setup.utils import before_tests
+	# MANDATORY: ERPNext's test bootstrap creates the selling defaults, enables
+	# roles, and seeds fixtures (customer groups, price lists, Item Attributes)
+	# that the inherited webshop tests rely on. If it fails, fail THIS step
+	# loudly with the traceback — a swallowed failure here just resurfaces as a
+	# dozen confusing downstream test errors (wrong customer group, permission
+	# errors, "not a template item").
+	from erpnext.setup.utils import before_tests
 
-		before_tests()
-	except Exception:
-		frappe.db.rollback()
-		print("setup_test_site: before_tests failed (continuing with warehouse types only):")
-		print(frappe.get_traceback())
-		frappe.log_error(title="upande_webshop setup_test_site", message=frappe.get_traceback())
+	print("setup_test_site: running erpnext before_tests ...")
+	before_tests()
+	print("setup_test_site: before_tests done")
 
-	# Re-ensure in case a rollback above dropped anything.
+	# before_tests can reset state; re-ensure our CI fixtures survive.
 	ensure_warehouse_types()
+	ensure_stub_doctypes()
